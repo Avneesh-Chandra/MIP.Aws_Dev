@@ -1,0 +1,41 @@
+name: AWS Build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore MIP.Aws.slnx
+
+      - name: Build
+        run: dotnet build MIP.Aws.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test MIP.Aws.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Publish API
+        run: dotnet publish src/MIP.Aws.Api/MIP.Aws.Api.csproj -c Release -o ./artifacts/api
+
+      - name: Publish Worker
+        run: dotnet publish src/MIP.Aws.Worker/MIP.Aws.Worker.csproj -c Release -o ./artifacts/worker
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mip-aws-publish
+          path: artifacts/
+          retention-days: 7

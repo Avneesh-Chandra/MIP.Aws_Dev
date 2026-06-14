@@ -1,0 +1,44 @@
+@using MIP.Aws.Application.Features.Operator
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_note" Label="Operator note" Lines="4" Variant="Variant.Outlined"
+                      Required="true" RequiredError="Note is required." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy || string.IsNullOrWhiteSpace(_note)">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid DownloadJobId { get; set; }
+
+    private string _note = string.Empty;
+    private bool _busy;
+
+    private void Cancel() => Dialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Mediator.Send(new AddDownloadOperatorNoteCommand(DownloadJobId, _note));
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

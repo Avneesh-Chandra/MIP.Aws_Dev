@@ -1,0 +1,260 @@
+@inherits LayoutComponentBase
+@using System.Security.Claims
+@using Microsoft.JSInterop
+@using MIP.Aws.Domain.Security
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IJSRuntime JS
+@implements IDisposable
+
+<MudLayout Class="mi-layout">
+    <AuthorizeView>
+        <Authorized>
+            <MudAppBar Dense="true" Elevation="2" Class="mi-appbar" Color="Color.Primary">
+                <div class="mi-appbar-row">
+                    <MudLink Href="@_homeRoute" Underline="Underline.None" Class="mi-appbar-brand">
+                        GFH MIP AWS
+                    </MudLink>
+
+                    <div class="mi-appbar-nav-scroller">
+                        <MudIconButton id="mi-nav-scroll-left" Icon="@Icons.Material.Filled.ChevronLeft"
+                                       Color="Color.Inherit" Size="Size.Small" Class="mi-nav-scroll-btn"
+                                       aria-label="Scroll navigation left"
+                                       OnClick="@(() => ScrollNavAsync(-1))" />
+                        <nav id="mi-appbar-nav" class="mi-appbar-nav-track" aria-label="Main navigation">
+                            @foreach (var item in _navItems)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Inherit" Size="Size.Small"
+                                           StartIcon="@item.Icon" Href="@item.Href"
+                                           Class="mi-appbar-nav-btn">@item.Label</MudButton>
+                            }
+                        </nav>
+                        <MudIconButton id="mi-nav-scroll-right" Icon="@Icons.Material.Filled.ChevronRight"
+                                       Color="Color.Inherit" Size="Size.Small" Class="mi-nav-scroll-btn"
+                                       aria-label="Scroll navigation right"
+                                       OnClick="@(() => ScrollNavAsync(1))" />
+                    </div>
+
+                    <div class="mi-appbar-actions">
+                        <span class="mi-appbar-time-inline" aria-live="polite">Time: @_clockDisplay</span>
+                        <MudTooltip Text="@(IsDarkMode ? "Light mode" : "Dark mode")">
+                            <MudIconButton Icon="@(IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                                           Color="Color.Inherit" Size="Size.Small" OnClick="OnToggleThemeClick" />
+                        </MudTooltip>
+                        <MudTooltip Text="Sign out">
+                            <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" Size="Size.Small"
+                                           Href="/Account/Logout" />
+                        </MudTooltip>
+                    </div>
+                </div>
+            </MudAppBar>
+            <MudMainContent Class="mi-layout-main">
+                <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mi-page-container">
+                    <div class="mi-chrome-stack">
+                        @if (!string.IsNullOrWhiteSpace(_displayName))
+                        {
+                            <div class="mi-welcome-strip" title="@_welcomeTitle">
+                                Welcome, <strong>@_displayName</strong>
+                                @if (!string.IsNullOrWhiteSpace(_primaryRoleLabel))
+                                {
+                                    <span class="mi-welcome-role">(@_primaryRoleLabel)</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @Body
+                </MudContainer>
+            </MudMainContent>
+        </Authorized>
+        <NotAuthorized>
+            <MudMainContent Class="mi-layout-main">
+                <MudContainer MaxWidth="MaxWidth.Small" Class="mt-8">
+                    @Body
+                </MudContainer>
+            </MudMainContent>
+        </NotAuthorized>
+    </AuthorizeView>
+</MudLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">??</span>
+</div>
+
+@code {
+    [CascadingParameter(Name = "IsDarkMode")] public bool IsDarkMode { get; set; }
+    [CascadingParameter] public Action? ToggleThemeAction { get; set; }
+    private string _clockDisplay = "--:--:--";
+    private string _homeRoute = "/";
+    private string _displayName = "";
+    private string _primaryRoleLabel = "";
+    private string _welcomeTitle = "";
+    private readonly List<NavItem> _navItems = [];
+    private CancellationTokenSource? _clockCts;
+    private bool _authLoaded;
+    private bool _navScrollNeedsInit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _clockCts = new CancellationTokenSource();
+        _ = RunClockAsync(_clockCts.Token);
+        await LoadAuthContextAsync().ConfigureAwait(false);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!_authLoaded)
+        {
+            await LoadAuthContextAsync().ConfigureAwait(false);
+        }
+
+        _navScrollNeedsInit = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_navScrollNeedsInit || _navItems.Count == 0)
+        {
+            return;
+        }
+
+        if (await TryInitNavScrollAsync())
+        {
+            _navScrollNeedsInit = false;
+        }
+    }
+
+    private async Task<bool> TryInitNavScrollAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("mipInitAppBarNavScroll", "mi-appbar-nav", "mi-nav-scroll-left", "mi-nav-scroll-right");
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            // Static prerender ? retry after the circuit becomes interactive.
+            return false;
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+        catch (JSDisconnectedException)
+        {
+            return false;
+        }
+    }
+
+    private async Task ScrollNavAsync(int direction)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("mipScrollAppBarNav", "mi-appbar-nav", direction * 220);
+            await JS.InvokeVoidAsync("mipInitAppBarNavScroll", "mi-appbar-nav", "mi-nav-scroll-left", "mi-nav-scroll-right");
+        }
+        catch (InvalidOperationException)
+        {
+            // Not interactive yet.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit disconnected.
+        }
+    }
+
+    private async Task LoadAuthContextAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var user = state.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            _authLoaded = true;
+            return;
+        }
+
+        var roles = user.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+        _homeRoute = RoleDashboardRoutes.GetHomeRoute(roles);
+        _displayName = user.Identity?.Name
+            ?? user.FindFirst(ClaimTypes.Email)?.Value
+            ?? user.FindFirst(ClaimTypes.Name)?.Value
+            ?? "User";
+        _primaryRoleLabel = ResolvePrimaryRoleLabel(roles);
+        _welcomeTitle = string.IsNullOrWhiteSpace(_primaryRoleLabel)
+            ? _displayName
+            : $"{_displayName} ? {_primaryRoleLabel}";
+        _navItems.Clear();
+        _navItems.AddRange(BuildNavItems(user, roles));
+        _authLoaded = true;
+        _navScrollNeedsInit = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string ResolvePrimaryRoleLabel(IReadOnlyList<string> roles)
+    {
+        foreach (var role in new[]
+                 {
+                     ApplicationRoles.SuperAdmin,
+                     ApplicationRoles.ContentAdmin,
+                     ApplicationRoles.MIPOperator,
+                     ApplicationRoles.Approver,
+                     ApplicationRoles.Analyst,
+                     ApplicationRoles.ComplianceAuditor,
+                     ApplicationRoles.ExecutiveViewer
+                 })
+        {
+            if (roles.Contains(role))
+            {
+                return role;
+            }
+        }
+
+        return roles.FirstOrDefault() ?? "";
+    }
+
+    private static IEnumerable<NavItem> BuildNavItems(ClaimsPrincipal user, IReadOnlyList<string> roles)
+    {
+        _ = roles;
+        var items = new List<NavItem>();
+        void Add(string label, string href, string icon) => items.Add(new NavItem(label, href, icon));
+
+        if (user.IsInRole(ApplicationRoles.MIPOperator)
+            || user.IsInRole(ApplicationRoles.SuperAdmin)
+            || user.IsInRole(ApplicationRoles.ContentAdmin))
+        {
+            Add("Download Monitor", "/operator/download-monitor", Icons.Material.Filled.MonitorHeart);
+        }
+
+        if (user.IsInRole(ApplicationRoles.SuperAdmin) || user.IsInRole(ApplicationRoles.ContentAdmin))
+        {
+            Add("PDF management", "/admin/pdf-management", Icons.Material.Filled.PictureAsPdf);
+            Add("Hangfire", "/hangfire", Icons.Material.Filled.Work);
+        }
+
+        return items;
+    }
+
+    private async Task RunClockAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        {
+            _clockDisplay = UserTz.Format(DateTimeOffset.UtcNow, "HH:mm:ss");
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void OnToggleThemeClick() => ToggleThemeAction?.Invoke();
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        _clockCts?.Cancel();
+        _clockCts?.Dispose();
+    }
+
+    private sealed record NavItem(string Label, string Href, string Icon);
+}

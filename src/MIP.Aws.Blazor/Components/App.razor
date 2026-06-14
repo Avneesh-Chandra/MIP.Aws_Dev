@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+    @* Asset keys MUST match the static-web-asset manifest exactly. With Blazor components hosted in
+       an RCL, the keys are:
+         - RCL assets:        _content/<RCL>/<path>
+         - Host scoped CSS:   <HostProject>.styles.css   (named after the consuming web project,
+                                                          NOT the RCL — see staticwebassets.build.endpoints.json)
+       Using the wrong key makes @Assets[...] fall back to the literal key, which then 404s and
+       leaves the page completely unstyled (login form, MudBlazor sizing rules, etc). *@
+    <link rel="stylesheet" href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/MIP.Aws.Blazor/app.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/MIP.Aws.Blazor/css/app-shell.css"]" />
+    <link rel="stylesheet" href="@Assets["MIP.Aws.API.styles.css"]" />
+    <ImportMap />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
+    <script src="_framework/blazor.web.js"></script>
+    <script type="module" src="@Assets["_content/MIP.Aws.Blazor/Components/Layout/ReconnectModal.razor.js"]"></script>
+    <script src="@Assets["_content/MIP.Aws.Blazor/app.js"]"></script>
+</body>
+
+</html>

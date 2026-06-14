@@ -1,0 +1,26 @@
+@inject IUserTimeZone UserTz
+@inject IJSRuntime Js
+
+@* Resolves IANA zone from the browser once per interactive circuit. *@
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || UserTz.IsResolved)
+            return;
+
+        try
+        {
+            var id = await Js.InvokeAsync<string?>("mipGetBrowserTimeZone").ConfigureAwait(false);
+            UserTz.SetFromBrowserIana(string.IsNullOrWhiteSpace(id) ? null : id.Trim());
+        }
+        catch (JSException)
+        {
+            UserTz.SetFromBrowserIana(null);
+        }
+        catch (InvalidOperationException)
+        {
+            UserTz.SetFromBrowserIana(null);
+        }
+    }
+}

@@ -1,0 +1,69 @@
+######################################################################
+# MIP.Aws API — Blazor UI, REST API, Hangfire, Playwright downloads
+######################################################################
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS restore
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY MIP.Aws.slnx ./
+COPY src/MIP.Aws.Domain/MIP.Aws.Domain.csproj ./src/MIP.Aws.Domain/
+COPY src/MIP.Aws.Shared/MIP.Aws.Shared.csproj ./src/MIP.Aws.Shared/
+COPY src/MIP.Aws.Application/MIP.Aws.Application.csproj ./src/MIP.Aws.Application/
+COPY src/MIP.Aws.Persistence/MIP.Aws.Persistence.csproj ./src/MIP.Aws.Persistence/
+COPY src/MIP.Aws.Infrastructure/MIP.Aws.Infrastructure.csproj ./src/MIP.Aws.Infrastructure/
+COPY src/MIP.Aws.Blazor/MIP.Aws.Blazor.csproj ./src/MIP.Aws.Blazor/
+COPY src/MIP.Aws.Api/MIP.Aws.Api.csproj ./src/MIP.Aws.Api/
+RUN dotnet restore src/MIP.Aws.Api/MIP.Aws.Api.csproj
+
+FROM restore AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY . .
+RUN dotnet publish src/MIP.Aws.Api/MIP.Aws.Api.csproj \
+    -c $BUILD_CONFIGURATION \
+    -o /app/publish \
+    /p:UseAppHost=false /p:ContinuousIntegrationBuild=true
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS playwright-install
+WORKDIR /install
+COPY --from=build /app/publish .
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget ca-certificates bash \
+    && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends powershell \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb \
+    && pwsh ./playwright.ps1 install --with-deps chromium
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    DOTNET_NOLOGO=1 \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+EXPOSE 8080
+RUN groupadd --system mip && useradd --system --gid mip --home /app mip
+COPY --from=build /app/publish .
+COPY --from=playwright-install /ms-playwright /ms-playwright
+COPY --from=playwright-install /install/.playwright /app/.playwright
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget ca-certificates bash \
+    && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends powershell \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb \
+    && pwsh ./playwright.ps1 install-deps \
+    && find /app/.playwright -type f \( -name node -o -name '*.sh' \) -exec chmod 755 {} + \
+    && mkdir -p /app/storage \
+    && chown -R mip:mip /app /ms-playwright
+USER mip
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget --spider --quiet http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["dotnet", "MIP.Aws.Api.dll"]

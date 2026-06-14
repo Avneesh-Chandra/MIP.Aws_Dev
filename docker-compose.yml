@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.Api
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Server=sqlserver,1433;Database=MIPAws;User Id=sa;Password=Your_password123;TrustServerCertificate=True;MultipleActiveResultSets=true"
+      ConnectionStrings__Hangfire: "Server=sqlserver,1433;Database=MIPAws_Hangfire;User Id=sa;Password=Your_password123;TrustServerCertificate=True;MultipleActiveResultSets=true"
+      Jwt__SigningKey: "Replace-With-32-Character-Minimum-Signing-Key!!"
+      Storage__LocalRoot: "/app/storage"
+      Aws__Region: "us-east-1"
+      Aws__S3__Enabled: "false"
+      Aws__Ses__Enabled: "false"
+      MailAutomation__Enabled: "false"
+      IdentitySeed__DefaultAdminPassword: "ChangeMe@12345678"
+    volumes:
+      - mip-storage:/app/storage
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.Worker
+    environment:
+      DOTNET_ENVIRONMENT: Production
+    profiles:
+      - worker
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Your_password123"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Your_password123" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mip-storage:

@@ -1,0 +1,47 @@
+@* Single Interactive Server island so MudThemeProvider and theme toggle share state.
+   Previously MudThemeProvider was interactive while Routes/@code was static — ToggleTheme
+   called StateHasChanged on the wrong renderer, so the moon icon appeared dead. *@
+@using static Microsoft.AspNetCore.Components.Web.RenderMode
+@implements IDisposable
+@rendermode InteractiveServer
+<MudThemeProvider Theme="GfhTheme.Default" @bind-IsDarkMode="_isDark" />
+<MudPopoverProvider />
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Medium" CloseButton="true" BackdropClick="false" />
+<MudSnackbarProvider />
+<UserTimeZoneLoader />
+
+<CascadingValue Value="_isDark" Name="IsDarkMode">
+    <CascadingValue Value="_toggleTheme">
+        <CascadingAuthenticationState>
+            <Router AppAssembly="typeof(MIP.Aws.Blazor.Components.Pages.Home).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+                <Found Context="routeData">
+                    <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                        <NotAuthorized>
+                            <RedirectToLogin />
+                        </NotAuthorized>
+                    </AuthorizeRouteView>
+                    <FocusOnNavigate RouteData="routeData" Selector="h1" />
+                </Found>
+            </Router>
+        </CascadingAuthenticationState>
+    </CascadingValue>
+</CascadingValue>
+
+@code {
+    private bool _isDark;
+    private Action _toggleTheme = default!;
+
+    protected override void OnInitialized()
+    {
+        _toggleTheme = () =>
+        {
+            _isDark = !_isDark;
+            StateHasChanged();
+        };
+        UserTz.Changed += OnUserTimeZoneChanged;
+    }
+
+    private void OnUserTimeZoneChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => UserTz.Changed -= OnUserTimeZoneChanged;
+}

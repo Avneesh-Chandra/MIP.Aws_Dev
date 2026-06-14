@@ -1,0 +1,123 @@
+@using MIP.Aws.Application.Features.AutoAiRecovery
+@using MIP.Aws.Domain.Enums
+@inject IMediator Mediator
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+else if (_status is not null)
+{
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudChip T="string" Size="Size.Small" Color="@StatusChipColor(_status.Status)" Variant="Variant.Filled">
+                @FormatStatus(_status.Status)
+            </MudChip>
+            @if (_status.SuggestionsTried > 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    @_status.SuggestionsTried suggestion@(_status.SuggestionsTried == 1 ? "" : "s") tried
+                </MudText>
+            }
+            @if (!string.IsNullOrWhiteSpace(_status.SuccessfulOptionTitle))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                    @_status.SuccessfulOptionTitle
+                </MudChip>
+            }
+        </MudStack>
+
+        @if (!string.IsNullOrWhiteSpace(_status.ResultSummary))
+        {
+            <MudText Typo="Typo.body2">@_status.ResultSummary</MudText>
+        }
+
+        @if (_timeline.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Recovery timeline</MudText>
+            <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineAlign="TimelineAlign.Default">
+                @foreach (var step in _timeline.OrderBy(s => s.Order))
+                {
+                    <MudTimelineItem Color="@(step.Succeeded ? Color.Success : Color.Default)" Size="Size.Small">
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@step.Step</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @step.Timestamp.ToString("yyyy-MM-dd HH:mm") UTC
+                        </MudText>
+                        <MudText Typo="Typo.body2">@step.Detail</MudText>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        }
+        else if (IsInProgress(_status.Status))
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                <MudText Typo="Typo.body2">Automatic recovery is in progress…</MudText>
+            </MudStack>
+        }
+    </MudStack>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid DownloadJobId { get; set; }
+
+    private AutoAiRecoveryStatusDto? _status;
+    private IReadOnlyList<AutoAiRecoveryTimelineStepDto> _timeline = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _status = await Mediator.Send(new GetAutoAiRecoveryStatusQuery(DownloadJobId));
+            _timeline = _status is null
+                ? []
+                : await Mediator.Send(new GetAutoAiRecoveryTimelineQuery(DownloadJobId));
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static bool IsInProgress(AutoAiRecoveryRunStatus status) =>
+        status is AutoAiRecoveryRunStatus.Queued
+            or AutoAiRecoveryRunStatus.Analyzing
+            or AutoAiRecoveryRunStatus.SuggestionSelected
+            or AutoAiRecoveryRunStatus.ApplyingCandidate
+            or AutoAiRecoveryRunStatus.RetryingDownload
+            or AutoAiRecoveryRunStatus.CandidateFailed;
+
+    private static Color StatusChipColor(AutoAiRecoveryRunStatus status) => status switch
+    {
+        AutoAiRecoveryRunStatus.CompletedSuccess or AutoAiRecoveryRunStatus.CandidateSucceeded => Color.Success,
+        AutoAiRecoveryRunStatus.CompletedFailure or AutoAiRecoveryRunStatus.RolledBack => Color.Error,
+        AutoAiRecoveryRunStatus.SkippedUnsafe
+            or AutoAiRecoveryRunStatus.SkippedCooldown
+            or AutoAiRecoveryRunStatus.SkippedNoSuggestions
+            or AutoAiRecoveryRunStatus.SkippedIneligible => Color.Warning,
+        _ => Color.Info
+    };
+
+    private static string FormatStatus(AutoAiRecoveryRunStatus status) => status switch
+    {
+        AutoAiRecoveryRunStatus.Queued => "Queued",
+        AutoAiRecoveryRunStatus.Analyzing => "Analyzing failure",
+        AutoAiRecoveryRunStatus.SuggestionSelected => "Suggestion selected",
+        AutoAiRecoveryRunStatus.ApplyingCandidate => "Applying fix",
+        AutoAiRecoveryRunStatus.RetryingDownload => "Retrying download",
+        AutoAiRecoveryRunStatus.CandidateSucceeded => "Candidate succeeded",
+        AutoAiRecoveryRunStatus.CandidateFailed => "Candidate failed",
+        AutoAiRecoveryRunStatus.RolledBack => "Rolled back",
+        AutoAiRecoveryRunStatus.CompletedSuccess => "Completed — success",
+        AutoAiRecoveryRunStatus.CompletedFailure => "Completed — failed",
+        AutoAiRecoveryRunStatus.SkippedUnsafe => "Skipped — unsafe",
+        AutoAiRecoveryRunStatus.SkippedCooldown => "Skipped — cooldown",
+        AutoAiRecoveryRunStatus.SkippedNoSuggestions => "Skipped — no suggestions",
+        AutoAiRecoveryRunStatus.SkippedIneligible => "Skipped — ineligible",
+        _ => status.ToString()
+    };
+}

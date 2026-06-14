@@ -1,0 +1,45 @@
+@using MIP.Aws.Application.Features.SourceRecovery
+
+<MudDialog>
+    <DialogContent>
+        @if (Preview is null || Preview.Changes.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No configuration changes in this option.</MudAlert>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Current</th>
+                        <th>New</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var change in Preview.Changes)
+                    {
+                        <tr>
+                            <td>@change.Field</td>
+                            <td><code>@Display(change.CurrentValue)</code></td>
+                            <td><code>@Display(change.NewValue)</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public SourceRecoveryPreviewDto? Preview { get; set; }
+
+    private void Close() => Dialog.Close();
+
+    private static string Display(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+}

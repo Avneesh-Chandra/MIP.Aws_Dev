@@ -1,0 +1,29 @@
+######################################################################
+# MIP.Aws Worker — background processing scaffold
+######################################################################
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS restore
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY MIP.Aws.slnx ./
+COPY src/MIP.Aws.Worker/MIP.Aws.Worker.csproj ./src/MIP.Aws.Worker/
+RUN dotnet restore src/MIP.Aws.Worker/MIP.Aws.Worker.csproj
+
+FROM restore AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY . .
+RUN dotnet publish src/MIP.Aws.Worker/MIP.Aws.Worker.csproj \
+    -c $BUILD_CONFIGURATION \
+    -o /app/publish \
+    /p:UseAppHost=false /p:ContinuousIntegrationBuild=true
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+ENV DOTNET_NOLOGO=1 \
+    DOTNET_RUNNING_IN_CONTAINER=true
+RUN groupadd --system mip && useradd --system --gid mip --home /app mip && chown -R mip:mip /app
+COPY --from=build /app/publish .
+USER mip
+
+ENTRYPOINT ["dotnet", "MIP.Aws.Worker.dll"]

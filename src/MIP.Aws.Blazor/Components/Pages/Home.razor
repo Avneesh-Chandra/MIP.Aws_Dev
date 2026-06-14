@@ -1,0 +1,23 @@
+@page "/"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@using System.Security.Claims
+@using MIP.Aws.Domain.Security
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            var roles = state.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray();
+            Navigation.NavigateTo(RoleDashboardRoutes.GetHomeRoute(roles), replace: true);
+        }
+        else
+        {
+            Navigation.NavigateTo("/Account/Login", replace: true);
+        }
+    }
+}

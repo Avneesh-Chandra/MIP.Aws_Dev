@@ -1,0 +1,148 @@
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Logout">
+                Signs out on the licensed portal (daralkhaleej: click subscriber id in the top-right, e.g. <strong>JM37955283</strong>, then
+                <strong>Sign out</strong> / <strong>تسجيل الخروج</strong>) to release PressReader concurrent session slots.
+                If the probe browser is not signed in, it will log in with stored credentials first, then sign out.
+            </MudAlert>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Logout" Color="Color.Warning" />
+                <MudText Typo="Typo.body1" Style="font-weight:600;">@SourceName</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.Logout"
+                           Disabled="_running"
+                           OnClick="RunAsync">
+                    @if (_running)
+                    {
+                        <MudProgressCircular Class="ms-n2" Size="Size.Small" Indeterminate="true" />
+                        <MudText>Signing out…</MudText>
+                    }
+                    else
+                    {
+                        <MudText>Run logout probe</MudText>
+                    }
+                </MudButton>
+            </MudStack>
+
+            @if (_result is not null)
+            {
+                if (_result.Success)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">
+                        <MudText Style="font-weight:600;">Logout succeeded</MudText>
+                        <MudText Typo="Typo.body2">@_result.Message</MudText>
+                        @if (_result.HadActiveSession)
+                        {
+                            <MudText Typo="Typo.caption">An active subscriber session was found and released.</MudText>
+                        }
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Icon="@Icons.Material.Filled.ErrorOutline">
+                        <MudText Style="font-weight:600;">Logout failed @(_result.FailureCode is { Length: > 0 } ? $"({_result.FailureCode})" : "")</MudText>
+                        <MudText Typo="Typo.body2">@_result.Message</MudText>
+                    </MudAlert>
+                }
+
+                <MudTabs Outlined="true" Rounded="true" PanelClass="pa-3">
+                    <MudTabPanel Text="Screenshot" Icon="@Icons.Material.Filled.PhotoCamera"
+                                 Disabled="@string.IsNullOrEmpty(_result.ScreenshotRelativePath)">
+                        @if (!string.IsNullOrEmpty(_result.ScreenshotRelativePath))
+                        {
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.caption" Color="Color.Tertiary"><code>@_result.ScreenshotRelativePath</code></MudText>
+                                <MudPaper Outlined="true" Class="pa-2" Style="background:#0a0a0a;">
+                                    <MudImage Src="@BuildArtifactUrl(_result.ScreenshotRelativePath)"
+                                              Alt="Logout probe screenshot"
+                                              Fluid="true"
+                                              Style="display:block;max-height:60vh;margin:0 auto;" />
+                                </MudPaper>
+                                <MudButton OnClick="@(() => OpenArtifact(_result.ScreenshotRelativePath))"
+                                           Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">Open full size</MudButton>
+                            </MudStack>
+                        }
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="HTML snapshot" Icon="@Icons.Material.Filled.Html"
+                                 Disabled="@string.IsNullOrEmpty(_result.HtmlSnapshotRelativePath)">
+                        @if (!string.IsNullOrEmpty(_result.HtmlSnapshotRelativePath))
+                        {
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.caption" Color="Color.Tertiary"><code>@_result.HtmlSnapshotRelativePath</code></MudText>
+                                <MudPaper Outlined="true" Class="pa-0" Style="height:60vh;overflow:hidden;">
+                                    <iframe src="@BuildArtifactUrl(_result.HtmlSnapshotRelativePath)"
+                                            style="width:100%;height:100%;border:0;background:#fff;"
+                                            sandbox="allow-same-origin"
+                                            title="HTML snapshot"></iframe>
+                                </MudPaper>
+                                <MudButton OnClick="@(() => OpenArtifact(_result.HtmlSnapshotRelativePath))"
+                                           Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">Open in new tab</MudButton>
+                            </MudStack>
+                        }
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid SourceId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+
+    private NewsPortalLogoutTestResultDto? _result;
+    private bool _running;
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        _result = null;
+        try
+        {
+            _result = await Mediator.Send(new TestNewsSourceLogoutCommand(SourceId));
+            if (_result.Success)
+            {
+                Snackbar.Add("Logout probe succeeded.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Logout probe failed: {_result.Message}", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Probe execution failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private void Close() => Dialog.Close(DialogResult.Ok(true));
+
+    private static string BuildArtifactUrl(string? key) =>
+        string.IsNullOrEmpty(key) ? string.Empty : $"/api/v1/portal-artifacts?key={Uri.EscapeDataString(key)}";
+
+    private async Task OpenArtifact(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        var url = BuildArtifactUrl(key);
+        await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
+    }
+}

@@ -1,0 +1,70 @@
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                Requires <strong>IsDownloadAllowed</strong> and stored encrypted credentials. Uses the licensed portal Download control only.
+            </MudAlert>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudText Typo="Typo.body1" Style="font-weight:600;">@SourceName</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_running" OnClick="RunAsync">
+                    @(_running ? "Running…" : "Run download test")
+                </MudButton>
+            </MudStack>
+            @if (_result is not null)
+            {
+                <MudAlert Severity="@(_result.Success ? Severity.Success : Severity.Error)" Variant="Variant.Filled">
+                    @_result.Message
+                </MudAlert>
+                @if (_result.Success && !string.IsNullOrEmpty(_result.PdfViewUrl))
+                {
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                               Href="@_result.PdfViewUrl" Target="_blank">View saved PDF</MudButton>
+                }
+                @if (!string.IsNullOrEmpty(_result.ScreenshotRelativePath))
+                {
+                    <MudImage Src="@BuildArtifactUrl(_result.ScreenshotRelativePath)" Fluid="true" Style="max-height:50vh;" />
+                }
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public Guid SourceId { get; set; }
+    [Parameter] public string SourceName { get; set; } = "";
+
+    private bool _running;
+    private NewsPortalDownloadTestResultDto? _result;
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        try
+        {
+            _result = await Mediator.Send(new TestNewsSourcePortalDownloadCommand(SourceId));
+            Snackbar.Add(_result.Success ? "Download test succeeded" : "Download test failed", _result.Success ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private void Cancel() => Dialog.Close();
+
+    private static string BuildArtifactUrl(string relative) =>
+        $"/api/v1/portal-artifacts?key={Uri.EscapeDataString(relative)}";
+}

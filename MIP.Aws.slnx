@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MIP.Aws.Api/MIP.Aws.Api.csproj" />
+    <Project Path="src/MIP.Aws.Application/MIP.Aws.Application.csproj" />
+    <Project Path="src/MIP.Aws.Blazor/MIP.Aws.Blazor.csproj" />
+    <Project Path="src/MIP.Aws.Domain/MIP.Aws.Domain.csproj" />
+    <Project Path="src/MIP.Aws.Infrastructure/MIP.Aws.Infrastructure.csproj" />
+    <Project Path="src/MIP.Aws.Persistence/MIP.Aws.Persistence.csproj" />
+    <Project Path="src/MIP.Aws.Shared/MIP.Aws.Shared.csproj" />
+    <Project Path="src/MIP.Aws.Worker/MIP.Aws.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MIP.Aws.Tests/MIP.Aws.Tests.csproj" />
+  </Folder>
+</Solution>

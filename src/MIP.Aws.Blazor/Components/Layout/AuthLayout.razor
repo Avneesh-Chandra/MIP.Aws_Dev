@@ -1,0 +1,16 @@
+@*
+    Minimal chrome for anonymous Account/* pages (Login, Logout, AccessDenied).
+    We deliberately do NOT mount the MainLayout/MudAppBar here:
+      - It pulls in dozens of MudBlazor nav icons that flash full-page-large before
+        component CSS settles, and renders broken when the user is unauthenticated
+        (AuthorizeView fallbacks expand giant inline SVGs).
+      - It triggers AuthorizeView lookups + extra policy round-trips on a page where
+        the only goal is to collect credentials.
+    MudThemeProvider / MudPopoverProvider / etc. are already mounted at the Routes level
+    so MudBlazor styles still work for any controls used inside <Body/>.
+*@
+@inherits LayoutComponentBase
+
+<main class="mi-auth-shell">
+    @Body
+</main>

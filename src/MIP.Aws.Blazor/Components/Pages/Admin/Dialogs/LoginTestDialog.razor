@@ -1,0 +1,143 @@
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Policy">
+                The login probe drives the configured selectors against the licensed portal using the stored GFH credentials.
+                On failure, Playwright captures a screenshot and HTML snapshot so an admin can diagnose without touching the live portal repeatedly.
+            </MudAlert>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.VpnKey" Color="Color.Primary" />
+                <MudText Typo="Typo.body1" Style="font-weight:600;">@SourceName</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.PlayCircle"
+                           Disabled="_running"
+                           OnClick="RunAsync">
+                    @if (_running)
+                    {
+                        <MudProgressCircular Class="ms-n2" Size="Size.Small" Indeterminate="true" />
+                        <MudText>Running…</MudText>
+                    }
+                    else
+                    {
+                        <MudText>Run login probe</MudText>
+                    }
+                </MudButton>
+            </MudStack>
+
+            @if (_result is not null)
+            {
+                if (_result.Success)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">
+                        <MudText Style="font-weight:600;">Login succeeded</MudText>
+                        <MudText Typo="Typo.body2">@_result.Message</MudText>
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Icon="@Icons.Material.Filled.ErrorOutline">
+                        <MudText Style="font-weight:600;">Login failed @(_result.FailureCode is { Length: > 0 } ? $"({_result.FailureCode})" : "")</MudText>
+                        <MudText Typo="Typo.body2">@_result.Message</MudText>
+                    </MudAlert>
+                }
+
+                <MudTabs Outlined="true" Rounded="true" PanelClass="pa-3">
+                    <MudTabPanel Text="Screenshot" Icon="@Icons.Material.Filled.PhotoCamera"
+                                 Disabled="@string.IsNullOrEmpty(_result.ScreenshotRelativePath)">
+                        @if (!string.IsNullOrEmpty(_result.ScreenshotRelativePath))
+                        {
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.caption" Color="Color.Tertiary"><code>@_result.ScreenshotRelativePath</code></MudText>
+                                <MudPaper Outlined="true" Class="pa-2" Style="background:#0a0a0a;">
+                                    <MudImage Src="@BuildArtifactUrl(_result.ScreenshotRelativePath)"
+                                              Alt="Login probe screenshot"
+                                              Fluid="true"
+                                              Style="display:block;max-height:60vh;margin:0 auto;" />
+                                </MudPaper>
+                                <MudButton OnClick="@(() => OpenArtifact(_result.ScreenshotRelativePath))"
+                                           Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">Open full size</MudButton>
+                            </MudStack>
+                        }
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="HTML snapshot" Icon="@Icons.Material.Filled.Html"
+                                 Disabled="@string.IsNullOrEmpty(_result.HtmlSnapshotRelativePath)">
+                        @if (!string.IsNullOrEmpty(_result.HtmlSnapshotRelativePath))
+                        {
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.caption" Color="Color.Tertiary"><code>@_result.HtmlSnapshotRelativePath</code></MudText>
+                                <MudPaper Outlined="true" Class="pa-0" Style="height:60vh;overflow:hidden;">
+                                    <iframe src="@BuildArtifactUrl(_result.HtmlSnapshotRelativePath)"
+                                            style="width:100%;height:100%;border:0;background:#fff;"
+                                            sandbox="allow-same-origin"
+                                            title="HTML snapshot"></iframe>
+                                </MudPaper>
+                                <MudButton OnClick="@(() => OpenArtifact(_result.HtmlSnapshotRelativePath))"
+                                           Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">Open in new tab</MudButton>
+                            </MudStack>
+                        }
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid SourceId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+
+    private NewsPortalLoginTestResultDto? _result;
+    private bool _running;
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        _result = null;
+        try
+        {
+            _result = await Mediator.Send(new TestNewsSourceLoginCommand(SourceId));
+            if (_result.Success)
+            {
+                Snackbar.Add("Login probe succeeded.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Login probe failed: {_result.Message}", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Probe execution failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private void Close() => Dialog.Close(DialogResult.Ok(true));
+
+    private static string BuildArtifactUrl(string? key) =>
+        string.IsNullOrEmpty(key) ? string.Empty : $"/api/v1/portal-artifacts?key={Uri.EscapeDataString(key)}";
+
+    private async Task OpenArtifact(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        var url = BuildArtifactUrl(key);
+        await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
+    }
+}

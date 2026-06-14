@@ -1,0 +1,557 @@
+@using System.Security.Claims
+@using MIP.Aws.Application.Abstractions.Operator
+@using MIP.Aws.Application.Features.Operator
+@using static MIP.Aws.Application.Features.Operator.DownloadMonitorStatusLabels
+@using MIP.Aws.Blazor.Components.Pages.Operator.Dialogs
+@implements IAsyncDisposable
+@inject IMediator Mediator
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<MudStack Spacing="4" Class="@RootClass">
+    @if (Embedded)
+    {
+        <div class="mi-exec-section-head">
+            <div>
+                <h2>Download monitor</h2>
+                <p class="mi-exec-section-desc">Newspaper acquisition status for the selected date — sources, PDFs, and interventions.</p>
+            </div>
+            <div class="mi-exec-download-monitor-toolbar">
+                <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Monitor date" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" MaxDate="DateTime.Today" />
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+                    Refresh
+                </MudButton>
+                <AuthorizeView Policy="@AuthPolicies.OperatorDownloadMonitor">
+                    <Authorized>
+                        <MudButton Href="/operator/download-monitor" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew">
+                            Full monitor
+                        </MudButton>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Large" Color="Color.Primary" />
+            <MudText Typo="Typo.h4" Style="font-weight:700;">Download Monitor</MudText>
+            <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">Newspaper acquisition supervision</MudChip>
+            <MudSpacer />
+            <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Monitor date" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" MaxDate="DateTime.Today" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+                Refresh
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="ExecuteBatchAsync" Disabled="@(_batchExecuting || _batchProgress?.IsActive == true)">
+                Execute PDF download Task
+            </MudButton>
+        </MudStack>
+    }
+
+    @if (_batchProgress is not null && (_batchProgress.IsActive || _batchProgress.IsComplete))
+    {
+        <MudPaper Outlined="true" Class="pa-4">
+            <MudStack Spacing="2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">PDF download batch</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@BatchPhaseColor(_batchProgress.CurrentPhase)" Variant="Variant.Filled">
+                        @_batchProgress.CurrentPhase
+                    </MudChip>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Started @_batchProgress.StartedAt.ToString("yyyy-MM-dd HH:mm") UTC
+                    </MudText>
+                </MudStack>
+                <MudProgressLinear Color="Color.Primary" Rounded="true" Size="Size.Large"
+                                   Value="@((double)_batchProgress.PercentComplete)" Max="100"
+                                   Indeterminate="@(_batchProgress.IsActive && _batchProgress.PercentComplete < 1)" />
+                <MudText Typo="Typo.body2">
+                    <strong>@_batchProgress.PercentComplete%</strong> — @_batchProgress.StatusSummary
+                </MudText>
+                @if (_batchProgress.Activities.Count > 0)
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true" Class="mt-2">
+                        <thead>
+                            <tr>
+                                <th>Source</th>
+                                <th>Status</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in _batchProgress.Activities.Take(12))
+                            {
+                                <tr>
+                                    <td>@item.SourceName</td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@BatchStateColor(item.State)" Variant="Variant.Outlined">
+                                            @item.State
+                                        </MudChip>
+                                    </td>
+                                    <td>@item.Activity</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    @if (_batchProgress.Activities.Count > 12)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            + @(_batchProgress.Activities.Count - 12) more sources
+                        </MudText>
+                    }
+                }
+            </MudStack>
+        </MudPaper>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_monitor is not null)
+    {
+        <MudGrid Spacing="3">
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Total sources</MudText>
+                    <MudText Typo="Typo.h5">@_monitor.Summary.TotalSources</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Successful today</MudText>
+                    <MudText Typo="Typo.h5" Color="Color.Success">@_monitor.Summary.SuccessfulToday</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Failed today</MudText>
+                    <MudText Typo="Typo.h5" Color="Color.Error">@_monitor.Summary.FailedToday</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Manual intervention</MudText>
+                    <MudText Typo="Typo.h5" Color="Color.Warning">@_monitor.Summary.PendingManualIntervention</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">PDFs today</MudText>
+                    <MudText Typo="Typo.h5">@_monitor.Summary.PdfsDownloadedToday</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Admin alerts pending</MudText>
+                    <MudText Typo="Typo.h5" Color="Color.Info">@_monitor.Summary.AdminNotificationsPending</MudText>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        @if (_monitor.Summary.SourcesRequiringAttention.Count > 0)
+        {
+            <MudPaper Outlined="true" Class="pa-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Sources requiring attention — @_monitor.MonitorDate.ToString("yyyy-MM-dd")</MudText>
+                <MudList T="string" Dense="true" Class="mt-2">
+                    @foreach (var item in _monitor.Summary.SourcesRequiringAttention)
+                    {
+                        <MudListItem T="string">
+                            <MudText Typo="Typo.body2"><strong>@item.SourceName</strong> — @item.Issue. @item.ActionRequired</MudText>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+
+        <MudPaper Outlined="true">
+            <MudTable T="DownloadMonitorSourceRowDto" Items="_monitor.Sources" Hover="true" Striped="true" Dense="true" Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>Source</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>Country</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Last attempt</MudTh>
+                    <MudTh>Last success</MudTh>
+                    <MudTh>Latest PDF</MudTh>
+                    <MudTh>Intervention</MudTh>
+                    <MudTh Style="text-align:right;">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate Context="row">
+                    <MudTd DataLabel="Source">
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@row.SourceName</MudText>
+                        @if (row.AdminInformed)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">Admin informed</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Type">@row.SourceType</MudTd>
+                    <MudTd DataLabel="Country">@(row.Country ?? "—")</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudChip T="string" Size="Size.Small" Color="@StatusColor(row.LastDownloadStatus)" Variant="Variant.Filled">@row.LastDownloadStatus</MudChip>
+                            @if (row.LastDownloadStatus == SuccessByAutoAiRecovery)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Icon="@Icons.Material.Filled.SmartToy">Auto</MudChip>
+                            }
+                            @if (ShowsAiRecoveryDetails(row.LastDownloadStatus) && row.LatestDownloadJobId is Guid recoveryJobId)
+                            {
+                                <AuthorizeView Policy="@AuthPolicies.SourceRecoveryView">
+                                    <Authorized>
+                                        <MudTooltip Text="View AI recovery details">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Info"
+                                                           Size="Size.Small"
+                                                           Color="Color.Success"
+                                                           aria-label="AI recovery details"
+                                                           OnClick="@(() => ViewAiRecoveryDetailsAsync(recoveryJobId, row.SourceName))" />
+                                        </MudTooltip>
+                                    </Authorized>
+                                </AuthorizeView>
+                            }
+                            @if (IsAutoRecoveryInProgress(row.LastDownloadStatus))
+                            {
+                                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Info" />
+                            }
+                        </MudStack>
+                    </MudTd>
+                    <MudTd DataLabel="Last attempt">@FormatWhen(row.LastDownloadTime)</MudTd>
+                    <MudTd DataLabel="Last success">@FormatWhen(row.LastSuccessfulDownload)</MudTd>
+                    <MudTd DataLabel="Latest PDF">
+                        @if (row.LatestPdfFileId is not null)
+                        {
+                            <AuthorizeView Policy="@AuthPolicies.OperatorLatestPdf">
+                                <Authorized>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Visibility"
+                                               OnClick="@(() => OpenPdfAsync(row.SourceId, inline: true))">View</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download"
+                                               OnClick="@(() => OpenPdfAsync(row.SourceId, inline: false))">Download</MudButton>
+                                </Authorized>
+                                <NotAuthorized>
+                                    <MudText Typo="Typo.caption" Color="Color.Tertiary">Available</MudText>
+                                </NotAuthorized>
+                            </AuthorizeView>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Tertiary">Not available</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Intervention">
+                        @if (row.ManualInterventionRequired)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Required</MudChip>
+                            @if (!string.IsNullOrWhiteSpace(row.SuggestedIntervention))
+                            {
+                                <MudText Typo="Typo.caption" Class="mt-1">@Truncate(row.SuggestedIntervention, 80)</MudText>
+                            }
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Tertiary">—</MudText>
+                        }
+                    </MudTd>
+                    <MudTd Style="text-align:right;">
+                        <MudStack Row="true" Spacing="1" Justify="Justify.FlexEnd">
+                            @if (row.LatestDownloadJobId is Guid jobId && row.ManualInterventionRequired)
+                            {
+                                <AuthorizeView Policy="@AuthPolicies.OperatorFailureDetails">
+                                    <Authorized>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ViewDetailsAsync(jobId, row.SourceName))">
+                                            Details
+                                        </MudButton>
+                                    </Authorized>
+                                </AuthorizeView>
+                                <AuthorizeView Policy="@AuthPolicies.OperatorInformAdmin">
+                                    <Authorized>
+                                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                                                   Disabled="@row.InformAdminDisabled"
+                                                   OnClick="@(() => InformAdminAsync(jobId, row.SourceName))">
+                                            @(row.AdminInformed ? "Inform Admin Again" : "Inform Admin")
+                                        </MudButton>
+                                    </Authorized>
+                                </AuthorizeView>
+                            }
+                        </MudStack>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public bool Embedded { get; set; }
+
+    /// <summary>When false, the parent supplies <see cref="Monitor"/> to avoid parallel DbContext use on the same circuit.</summary>
+    [Parameter] public bool SelfLoad { get; set; } = true;
+
+    [Parameter] public DownloadMonitorDto? Monitor { get; set; }
+
+    private string RootClass => Embedded ? "mi-exec-download-monitor-panel" : null!;
+
+    private bool _loading = true;
+    private bool _batchExecuting;
+    private DateTime? _selectedDate = DateTime.UtcNow.Date;
+    private DownloadMonitorDto? _monitor;
+    private DownloadMonitorBatchProgressResult? _batchProgress;
+    private DateTimeOffset? _batchStartedAt;
+    private CancellationTokenSource? _pollCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (SelfLoad)
+        {
+            await LoadAsync();
+            await RefreshBatchProgressAsync();
+            if (_batchProgress?.IsActive == true)
+            {
+                StartBatchPolling();
+            }
+        }
+        else if (Monitor is not null)
+        {
+            _monitor = Monitor;
+            _loading = false;
+        }
+        else
+        {
+            _loading = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        await ValueTask.CompletedTask;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!SelfLoad && Monitor is not null)
+        {
+            _monitor = Monitor;
+            _loading = false;
+        }
+    }
+
+    private async Task OnDateChanged(DateTime? value)
+    {
+        _selectedDate = value;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
+            _monitor = await Mediator.Send(new GetDownloadMonitorQuery(date));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load monitor: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteBatchAsync()
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = "Execute PDF download task",
+            Message = "This schedules today's PDF download for all monitored sources using the usual stagger interval. Automatic AI recovery runs when a download fails. A download monitor status email is sent when the batch completes. Continue?",
+            YesText = "Execute",
+            CancelText = "Cancel"
+        });
+        if (confirm != true)
+        {
+            return;
+        }
+
+        _batchExecuting = true;
+        StateHasChanged();
+        try
+        {
+            var actorId = await ResolveActorUserIdAsync();
+            var started = await Mediator.Send(new ExecuteDownloadMonitorBatchCommand(actorId));
+            _batchStartedAt = started.StartedAt;
+            Snackbar.Add($"PDF download batch started for {started.TotalSources} monitored source(s).", Severity.Success);
+            await RefreshBatchProgressAsync();
+            await LoadAsync();
+            StartBatchPolling();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not start batch: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _batchExecuting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartBatchPolling()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource();
+        var token = _pollCts.Token;
+        _ = PollBatchProgressAsync(token);
+    }
+
+    private async Task PollBatchProgressAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+                await InvokeAsync(async () =>
+                {
+                    await RefreshBatchProgressAsync();
+                    if (_batchProgress?.IsActive == true)
+                    {
+                        await LoadAsync();
+                    }
+                    else if (_batchProgress?.IsComplete == true)
+                    {
+                        await LoadAsync();
+                        Snackbar.Add("PDF download batch finished.", Severity.Info);
+                    }
+
+                    StateHasChanged();
+                });
+
+                if (_batchProgress is not { IsActive: true })
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Polling stopped.
+        }
+    }
+
+    private async Task RefreshBatchProgressAsync()
+    {
+        _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt));
+        if (_batchProgress is not null)
+        {
+            _batchStartedAt ??= _batchProgress.StartedAt;
+        }
+    }
+
+    private async Task<Guid> ResolveActorUserIdAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var id = state.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(id, out var userId) ? userId : Guid.Empty;
+    }
+
+    private static Color BatchPhaseColor(string phase) => phase switch
+    {
+        "Complete" => Color.Success,
+        "Auto AI recovery" => Color.Info,
+        "Downloading" => Color.Primary,
+        "Scheduling" => Color.Tertiary,
+        _ => Color.Default
+    };
+
+    private static Color BatchStateColor(string state) => state switch
+    {
+        "Success" => Color.Success,
+        "Failed" => Color.Error,
+        "AutoRecovery" => Color.Info,
+        "InProgress" => Color.Primary,
+        _ => Color.Default
+    };
+
+    private async Task ViewDetailsAsync(Guid jobId, string sourceName)
+    {
+        var parameters = new DialogParameters<OperatorFailureDetailsDialog>
+        {
+            { x => x.DownloadJobId, jobId },
+            { x => x.SourceName, sourceName }
+        };
+        await DialogService.ShowAsync<OperatorFailureDetailsDialog>($"Failure details — {sourceName}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+    }
+
+    private async Task ViewAiRecoveryDetailsAsync(Guid recoveryJobId, string sourceName)
+    {
+        var parameters = new DialogParameters<OperatorAiRecoverySuccessDialog>
+        {
+            { x => x.RecoveryDownloadJobId, recoveryJobId },
+            { x => x.SourceName, sourceName }
+        };
+        await DialogService.ShowAsync<OperatorAiRecoverySuccessDialog>($"AI recovery — {sourceName}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
+    }
+
+    private async Task InformAdminAsync(Guid jobId, string sourceName)
+    {
+        var parameters = new DialogParameters<OperatorInformAdminDialog>
+        {
+            { x => x.DownloadJobId, jobId },
+            { x => x.SourceName, sourceName }
+        };
+        var dlg = await DialogService.ShowAsync<OperatorInformAdminDialog>($"Inform Admin — {sourceName}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small });
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Admin has been informed.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenPdfAsync(Guid sourceId, bool inline)
+    {
+        var url = $"/api/v1/operator/sources/{sourceId}/latest-pdf?inline={inline.ToString().ToLowerInvariant()}";
+        await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
+    }
+
+    private static bool ShowsAiRecoveryDetails(string status) =>
+        status is SuccessByAiRecovery or SuccessByAutoAiRecovery;
+
+    private static bool IsAutoRecoveryInProgress(string status) =>
+        status is AutoAiRecoveryQueued or AutoAiRecoveryRunning;
+
+    private static Color StatusColor(string status) => status switch
+    {
+        Success => Color.Success,
+        SuccessByAiRecovery => Color.Success,
+        SuccessByAutoAiRecovery => Color.Success,
+        AutoAiRecoveryQueued => Color.Tertiary,
+        AutoAiRecoveryRunning => Color.Info,
+        FailedAfterAutoAiRecovery => Color.Error,
+        Failed => Color.Error,
+        InProgress => Color.Info,
+        Pending => Color.Default,
+        ManualActionRequired => Color.Warning,
+        NoPdfAvailable => Color.Secondary,
+        ComplianceBlocked => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "never" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max] + "…";
+}

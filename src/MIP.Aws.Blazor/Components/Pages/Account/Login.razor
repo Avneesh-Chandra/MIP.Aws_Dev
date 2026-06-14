@@ -1,0 +1,53 @@
+@page "/Account/Login"
+@layout MIP.Aws.Blazor.Components.Layout.AuthLayout
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+<PageTitle>Sign in</PageTitle>
+
+<div class="mi-auth-card">
+    <h1>GFH Media Intelligence</h1>
+    <form method="post" action="/account/cookie-login">
+        <p>
+            <label for="login-email">Email</label>
+            <input id="login-email"
+                   class="mi-input"
+                   type="email"
+                   name="email"
+                   autocomplete="username"
+                   required />
+        </p>
+        <p>
+            <label for="login-password">Password</label>
+            <input id="login-password"
+                   class="mi-input"
+                   type="password"
+                   name="password"
+                   autocomplete="current-password"
+                   required />
+        </p>
+        <button class="mi-btn" type="submit">Sign in</button>
+    </form>
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <p class="mi-error">@_errorMessage</p>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private string? _errorMessage;
+
+    protected override void OnParametersSet()
+    {
+        _errorMessage = Error switch
+        {
+            "missing" => "Email and password are required.",
+            "invalid" => "Sign-in failed. Check your credentials or account status.",
+            "locked" => "Account is locked out. Try again later or contact an administrator.",
+            "mfa" => "Multi-factor authentication is required; contact an administrator.",
+            _ => null
+        };
+    }
+}

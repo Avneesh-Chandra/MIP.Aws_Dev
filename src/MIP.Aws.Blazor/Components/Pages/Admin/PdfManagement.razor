@@ -1,0 +1,915 @@
+@page "/admin/pdf-management"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = AuthPolicies.NewsSourcePdfRead)]
+@using System.Linq
+@using MIP.Aws.Domain.Enums
+@using MIP.Aws.Blazor.Components.Pages.Admin.Dialogs
+@using MIP.Aws.Application.Features.NewsSources
+@using MIP.Aws.Application.Features.NewsSources.PdfEdition
+@using MIP.Aws.Application.Abstractions.News
+@inject IMediator Mediator
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>PDF management</PageTitle>
+
+<MudStack Spacing="4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h4" Style="font-weight:700;">PDF management</MudText>
+        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">Public PDF discovery &amp; licensed PressReader</MudChip>
+        <MudSpacer />
+        <AuthorizeView Policy="@AuthPolicies.NewsSourcePdfWrite">
+            <Authorized>
+                <MudMenu Label="Add source" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" AnchorOrigin="Origin.BottomRight">
+                    <MudMenuItem Icon="@Icons.Material.Filled.PictureAsPdf" OnClick="OpenCreatePublicPdfSourceAsync">Public PDF source</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.MenuBook" OnClick="OpenCreatePressReaderSourceAsync">PressReader portal source</MudMenuItem>
+                </MudMenu>
+            </Authorized>
+        </AuthorizeView>
+        <MudButton Href="/admin/news-sources" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Newspaper">News sources</MudButton>
+    </MudStack>
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Shield">
+        <strong>Licensed PressReader</strong> (Dar Al Khaleej) — subscriber login and edition PDF download via the portal UI.
+        <strong>Public PDF discovery</strong> — open websites with publisher-exposed PDF links. Compliance gates apply to both.
+    </MudAlert>
+
+    <MudPaper Outlined="true" Class="pa-4">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.MenuBook" Color="Color.Primary" />
+                <MudText Typo="Typo.h6" Style="font-weight:600;">Licensed PressReader — Dar Al Khaleej</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">daralkhaleej.pressreader.com</MudChip>
+            </MudStack>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                <MudLink Href="https://daralkhaleej.pressreader.com/al-khaleej-9aj7" Target="_blank">al-khaleej-9aj7</MudLink>
+                and
+                <MudLink Href="https://daralkhaleej.pressreader.com/alkhaleej-economy" Target="_blank">alkhaleej-economy</MudLink>.
+                Configure credentials and <em>IsDownloadAllowed</em> under PressReader settings (edit).
+            </MudText>
+            <MudTable T="NewsSourceListItemDto"
+                      Items="_licensedDarAlKhaleej"
+                      Hover="true"
+                      Dense="true"
+                      Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>Edition</MudTh>
+                    <MudTh>URL</MudTh>
+                    <MudTh>Active</MudTh>
+                    <MudTh>Download</MudTh>
+                    <MudTh>Last portal PDF</MudTh>
+                    <MudTh Style="text-align:right;">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate Context="source">
+                    <MudTd DataLabel="Edition">
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@source.Name</MudText>
+                        @if (!source.IsDownloadAllowed)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Download not allowed</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="URL">
+                        <MudLink Href="@source.BaseUrl" Target="_blank" Typo="Typo.body2">@TruncateUrl(source.BaseUrl)</MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="Active">
+                        <MudSwitch T="bool"
+                                   Value="@source.IsEnabled"
+                                   ValueChanged="@(v => ToggleSourceEnabledAsync(source.Id, source.Name, v))"
+                                   Color="Color.Success"
+                                   Disabled="@(_togglingSourceId == source.Id)"
+                                   Label="@(source.IsEnabled ? "Active" : "Inactive")" />
+                    </MudTd>
+                    <MudTd DataLabel="Download">
+                        @if (source.IsDownloadAllowed)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Allowed</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Blocked</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Last portal PDF">
+                        @FormatWhen(source.LastPdfDownloadedAt)
+                    </MudTd>
+                    <MudTd Style="text-align:right;">
+                        <MudStack Row="true" Spacing="1" Justify="Justify.FlexEnd" AlignItems="AlignItems.Center">
+                            <MudTooltip Text="@OperationalTooltip(source, "PressReader settings")">
+                                <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                               Disabled="@IsSourceInactive(source)"
+                                               OnClick="@(() => OpenPressReaderSettingsAsync(source.Id, source.Name))" />
+                            </MudTooltip>
+                            <AuthorizeView Policy="@AuthPolicies.SuperAdminOnly">
+                                <Authorized>
+                                    <MudTooltip Text="@OperationalTooltip(source, "Test login")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Color="Color.Secondary" Size="Size.Small"
+                                                       Disabled="@(_portalBusySourceId is not null || IsSourceInactive(source))"
+                                                       OnClick="@(() => OpenTestLoginAsync(source.Id, source.Name))" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="@OperationalTooltip(source, "Test download")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Info" Size="Size.Small"
+                                                       Disabled="@(_portalBusySourceId is not null || IsSourceInactive(source))"
+                                                       OnClick="@(() => OpenTestDownloadAsync(source.Id, source.Name))" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="@OperationalTooltip(source, "Test logout")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Warning" Size="Size.Small"
+                                                       Disabled="@(_portalBusySourceId is not null || IsSourceInactive(source))"
+                                                       OnClick="@(() => OpenTestLogoutAsync(source.Id, source.Name))" />
+                                    </MudTooltip>
+                                </Authorized>
+                            </AuthorizeView>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.CloudDownload"
+                                       Disabled="@(_portalBusySourceId is not null || IsSourceInactive(source))"
+                                       OnClick="@(() => DownloadEditionAsync(source.Id, source.Name))">
+                                @(_portalDownloadingSourceId == source.Id ? "Downloading…" : "Download edition")
+                            </MudButton>
+                            @if (_portalDownloadingSourceId == source.Id)
+                            {
+                                <MudStack Spacing="1" Style="min-width:140px; max-width:200px;">
+                                    <MudText Typo="Typo.caption" Style="line-height:1.2;">@_portalProgressPhase</MudText>
+                                    <MudProgressLinear Color="Color.Primary"
+                                                       Value="@_portalProgressPercent"
+                                                       Striped="true"
+                                                       Animated="true"
+                                                       Class="my-1" />
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@($"{_portalProgressPercent}%")</MudText>
+                                </MudStack>
+                            }
+                            else if (source.LastPdfDownloadedAt is not null)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Visibility"
+                                           OnClick="@(() => ViewPortalPdfAsync(source.Id))">View PDF</MudButton>
+                            }
+                        </MudStack>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Color="Color.Tertiary">
+                        No Dar Al Khaleej PressReader sources found. Seed or create WebPortalLogin sources for
+                        <code>daralkhaleej.pressreader.com</code>.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudStack>
+    </MudPaper>
+
+    <MudText Typo="Typo.h6" Style="font-weight:600;" Class="mt-2">Public PDF discovery</MudText>
+
+    <MudPaper Outlined="true" Class="pa-3">
+        <MudGrid Spacing="2" AlignItems="Center">
+            <MudItem xs="12" sm="5" md="4">
+                <MudTextField T="string" @bind-Value="_search"
+                              Immediate="true"
+                              Placeholder="Search by name or URL"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Clearable="true"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              DebounceInterval="300"
+                              OnDebounceIntervalElapsed="OnSearchChanged" />
+            </MudItem>
+            <MudItem xs="6" sm="3" md="2">
+                <MudSelect T="bool?" Label="PDF status" Margin="Margin.Dense" Variant="Variant.Outlined"
+                           Value="_pdfEnabledFilter" ValueChanged="OnPdfFilterChanged" Clearable="true">
+                    <MudSelectItem T="bool?" Value="true">PDF enabled</MudSelectItem>
+                    <MudSelectItem T="bool?" Value="false">PDF disabled</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" sm="3" md="2">
+                <MudSelect T="bool?" Label="Active status" Margin="Margin.Dense" Variant="Variant.Outlined"
+                           Value="_activeFilter" ValueChanged="OnActiveFilterChanged" Clearable="true">
+                    <MudSelectItem T="bool?" Value="true">Active only</MudSelectItem>
+                    <MudSelectItem T="bool?" Value="false">Inactive only</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="12" md="4" Class="d-flex justify-end">
+                <MudButton OnClick="@(() => LoadAsync())"
+                           Color="Color.Default"
+                           Variant="Variant.Outlined"
+                           Disabled="@(_pdfDownloadingSourceId is not null || _portalDownloadingSourceId is not null)"
+                           StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudPaper Outlined="true">
+        <MudTable T="NewsSourceListItemDto"
+                  Items="_filtered"
+                  Hover="true"
+                  Striped="true"
+                  Dense="true"
+                  Loading="_loading"
+                  LoadingProgressColor="Color.Primary"
+                  Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>Source</MudTh>
+                <MudTh>URL</MudTh>
+                <MudTh>Active</MudTh>
+                <MudTh>PDF</MudTh>
+                <MudTh>Last discovered</MudTh>
+                <MudTh>Last downloaded</MudTh>
+                <MudTh Style="text-align:right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate Context="source">
+                <MudTd DataLabel="Source">
+                    <MudText Typo="Typo.body2" Style="font-weight:600;">@source.Name</MudText>
+                </MudTd>
+                <MudTd DataLabel="URL">
+                    <MudLink Href="@source.BaseUrl" Target="_blank" Underline="Underline.Hover" Typo="Typo.body2">@TruncateUrl(source.BaseUrl)</MudLink>
+                </MudTd>
+                <MudTd DataLabel="Active">
+                    <MudSwitch T="bool"
+                               Value="@source.IsEnabled"
+                               ValueChanged="@(v => ToggleSourceEnabledAsync(source.Id, source.Name, v))"
+                               Color="Color.Success"
+                               Disabled="@(_togglingSourceId == source.Id)"
+                               Label="@(source.IsEnabled ? "Active" : "Inactive")" />
+                </MudTd>
+                <MudTd DataLabel="PDF">
+                    @if (source.PdfDiscoveryEnabled)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Enabled</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Disabled</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Last discovered">
+                    @FormatWhen(source.LastPdfDiscoveredAt)
+                </MudTd>
+                <MudTd DataLabel="Last downloaded">
+                    @FormatWhen(source.LastPdfDownloadedAt)
+                </MudTd>
+                <MudTd Style="text-align:right;">
+                    <MudStack Row="true" Spacing="1" Justify="Justify.FlexEnd" AlignItems="AlignItems.Center">
+                        <AuthorizeView Policy="@AuthPolicies.NewsSourcePdfWrite">
+                            <Authorized>
+                                <MudTooltip Text="@OperationalTooltip(source, "Configure PDF discovery settings")">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                                   Disabled="@IsSourceInactive(source)"
+                                                   OnClick="@(() => OpenPdfSettingsAsync(source.Id, source.Name))" />
+                                </MudTooltip>
+                            </Authorized>
+                        </AuthorizeView>
+                        @if (source.PdfDiscoveryEnabled)
+                        {
+                            <AuthorizeView Policy="@AuthPolicies.NewsSourcePdfWrite">
+                                <Authorized>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Search"
+                                               Disabled="@(_pdfBusySourceId is not null || IsSourceInactive(source))"
+                                               OnClick="@(() => DiscoverPdfAsync(source.Id))">
+                                        @(_pdfBusySourceId == source.Id && _pdfDownloadingSourceId != source.Id ? "Discovering…" : "Discover")
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload"
+                                               Disabled="@(_pdfBusySourceId is not null || IsSourceInactive(source))"
+                                               OnClick="@(() => DownloadTodayPdfAsync(source.Id))">
+                                        @(_pdfDownloadingSourceId == source.Id ? "Downloading…" : "Today's PDF")
+                                    </MudButton>
+                                </Authorized>
+                            </AuthorizeView>
+                            @if (_pdfDownloadingSourceId == source.Id)
+                            {
+                                <MudStack Spacing="1" Style="min-width:140px; max-width:200px;">
+                                    <MudText Typo="Typo.caption" Style="line-height:1.2;">@_pdfProgressPhase</MudText>
+                                    <MudProgressLinear Color="Color.Primary"
+                                                       Value="@_pdfProgressPercent"
+                                                       Striped="true"
+                                                       Animated="true"
+                                                       Class="my-1" />
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@($"{_pdfProgressPercent}%")</MudText>
+                                </MudStack>
+                            }
+                            else if (source.LastPdfDownloadedAt is not null)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Visibility"
+                                           OnClick="@(() => ViewLatestPdfAsync(source.Id))">View PDF</MudButton>
+                            }
+                        }
+                    </MudStack>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Tertiary">No sources match the current filters.</MudText>
+            </NoRecordsContent>
+            <LoadingContent>
+                <MudText Typo="Typo.body2">Loading sources…</MudText>
+            </LoadingContent>
+            <PagerContent>
+                <MudTablePager />
+            </PagerContent>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private const int PdfSettingsTabIndex = 6;
+
+    private bool _loading;
+    private string? _search;
+    private bool? _pdfEnabledFilter = true;
+    private bool? _activeFilter;
+    private IReadOnlyList<NewsSourceListItemDto> _sources = Array.Empty<NewsSourceListItemDto>();
+    private IReadOnlyList<NewsSourceListItemDto> _filtered = Array.Empty<NewsSourceListItemDto>();
+    private IReadOnlyList<NewsSourceListItemDto> _licensedDarAlKhaleej = Array.Empty<NewsSourceListItemDto>();
+    private Guid? _togglingSourceId;
+    private Guid? _portalBusySourceId;
+    private Guid? _portalDownloadingSourceId;
+    private int _portalProgressPercent;
+    private string _portalProgressPhase = "Starting…";
+    private Guid? _pdfBusySourceId;
+    private Guid? _pdfDownloadingSourceId;
+    private int _pdfProgressPercent;
+    private string _pdfProgressPhase = "Starting…";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static bool IsSourceInactive(NewsSourceListItemDto source) => !source.IsEnabled;
+
+    private static string OperationalTooltip(NewsSourceListItemDto source, string whenActive) =>
+        IsSourceInactive(source) ? "Source is inactive — set Active to use this action." : whenActive;
+
+    private async Task LoadAsync(bool bypassBusyGuard = false)
+    {
+        if (!bypassBusyGuard && (_pdfDownloadingSourceId is not null || _portalDownloadingSourceId is not null))
+        {
+            return;
+        }
+
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var paged = await Mediator.Send(new GetNewsSourcesQuery(1, 200, null));
+            _sources = paged.Items;
+            ApplyClientFilter();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load sources: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ApplyClientFilter()
+    {
+        _licensedDarAlKhaleej = _sources
+            .Where(DarAlKhaleejPressReaderUi.IsLicensedPortal)
+            .OrderBy(x => x.Name)
+            .ToList();
+
+        IEnumerable<NewsSourceListItemDto> q = _sources;
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(x =>
+                x.Name.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                x.BaseUrl.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (_pdfEnabledFilter is not null)
+        {
+            q = q.Where(x => x.PdfDiscoveryEnabled == _pdfEnabledFilter.Value);
+        }
+
+        if (_activeFilter is not null)
+        {
+            q = q.Where(x => x.IsEnabled == _activeFilter.Value);
+        }
+
+        q = q.Where(x => !DarAlKhaleejPressReaderUi.IsLicensedPortal(x));
+
+        _filtered = q.OrderBy(x => x.Name).ToList();
+    }
+
+    private void OnSearchChanged(string? value)
+    {
+        _search = value;
+        ApplyClientFilter();
+        StateHasChanged();
+    }
+
+    private void OnPdfFilterChanged(bool? value)
+    {
+        _pdfEnabledFilter = value;
+        ApplyClientFilter();
+        StateHasChanged();
+    }
+
+    private void OnActiveFilterChanged(bool? value)
+    {
+        _activeFilter = value;
+        ApplyClientFilter();
+        StateHasChanged();
+    }
+
+    private async Task ToggleSourceEnabledAsync(Guid id, string name, bool isEnabled)
+    {
+        if (_togglingSourceId is not null)
+        {
+            return;
+        }
+
+        _togglingSourceId = id;
+        StateHasChanged();
+        try
+        {
+            await Mediator.Send(new SetNewsSourceEnabledCommand(id, isEnabled));
+            Snackbar.Add(
+                isEnabled ? $"{name} is now active." : $"{name} is inactive — PDF jobs and schedulers will skip it.",
+                isEnabled ? Severity.Success : Severity.Info);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not update source status: {ex.Message}", Severity.Error);
+            await LoadAsync();
+        }
+        finally
+        {
+            _togglingSourceId = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenCreatePublicPdfSourceAsync()
+    {
+        var parameters = new DialogParameters<SourceEditorDialog>
+        {
+            { x => x.SourceId, (Guid?)null },
+            { x => x.InitialTabIndex, PdfSettingsTabIndex },
+            { x => x.PresetSourceType, NewsSourceType.PublicHtml },
+            { x => x.PresetPdfDiscoveryEnabled, true }
+        };
+        var dlg = await DialogService.ShowAsync<SourceEditorDialog>("New public PDF source", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Public PDF source created.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenCreatePressReaderSourceAsync()
+    {
+        var parameters = new DialogParameters<SourceEditorDialog>
+        {
+            { x => x.SourceId, (Guid?)null },
+            { x => x.InitialTabIndex, DarAlKhaleejPressReaderUi.PressReaderEditorTabIndex },
+            { x => x.PresetSourceType, NewsSourceType.WebPortalLogin }
+        };
+        var dlg = await DialogService.ShowAsync<SourceEditorDialog>("New PressReader source", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("PressReader source created.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenPdfSettingsAsync(Guid id, string name)
+    {
+        var parameters = new DialogParameters<SourceEditorDialog>
+        {
+            { x => x.SourceId, (Guid?)id },
+            { x => x.InitialTabIndex, PdfSettingsTabIndex }
+        };
+        var dlg = await DialogService.ShowAsync<SourceEditorDialog>($"PDF settings — {name}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("PDF settings saved.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenPressReaderSettingsAsync(Guid id, string name)
+    {
+        var parameters = new DialogParameters<SourceEditorDialog>
+        {
+            { x => x.SourceId, (Guid?)id },
+            { x => x.InitialTabIndex, DarAlKhaleejPressReaderUi.PressReaderEditorTabIndex }
+        };
+        var dlg = await DialogService.ShowAsync<SourceEditorDialog>($"PressReader — {name}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("PressReader settings saved.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private Task OpenTestLoginAsync(Guid id, string name)
+    {
+        var parameters = new DialogParameters<LoginTestDialog>
+        {
+            { x => x.SourceId, id },
+            { x => x.SourceName, name }
+        };
+        return DialogService.ShowAsync<LoginTestDialog>($"Test login — {name}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+    }
+
+    private Task OpenTestDownloadAsync(Guid id, string name)
+    {
+        var parameters = new DialogParameters<PortalDownloadTestDialog>
+        {
+            { x => x.SourceId, id },
+            { x => x.SourceName, name }
+        };
+        return DialogService.ShowAsync<PortalDownloadTestDialog>($"Test download — {name}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+    }
+
+    private Task OpenTestLogoutAsync(Guid id, string name)
+    {
+        var parameters = new DialogParameters<LogoutTestDialog>
+        {
+            { x => x.SourceId, id },
+            { x => x.SourceName, name }
+        };
+        return DialogService.ShowAsync<LogoutTestDialog>($"Test logout — {name}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
+    }
+
+    private async Task DownloadEditionAsync(Guid id, string name)
+    {
+        if (_portalBusySourceId is not null)
+        {
+            return;
+        }
+
+        var source = _sources.FirstOrDefault(s => s.Id == id);
+        if (source is not null && IsSourceInactive(source))
+        {
+            return;
+        }
+
+        _portalBusySourceId = id;
+        _portalDownloadingSourceId = id;
+        _portalProgressPercent = 0;
+        _portalProgressPhase = "Starting…";
+        StateHasChanged();
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var refreshGrid = false;
+
+        try
+        {
+            await Mediator.Send(new DownloadNewsSourceEditionCommand(id));
+            _portalProgressPhase = "Queued…";
+            _portalProgressPercent = 12;
+            await InvokeAsync(StateHasChanged);
+
+            var completed = await WaitForPortalDownloadCompletionAsync(id, startedAt, CancellationToken.None);
+
+            if (completed?.IsComplete == true && completed.Status == nameof(DownloadJobStatus.Succeeded))
+            {
+                _portalProgressPercent = 100;
+                _portalProgressPhase = "Complete";
+                refreshGrid = true;
+                Snackbar.Add($"Edition downloaded for {name}.", Severity.Success);
+            }
+            else if (completed?.IsComplete == true)
+            {
+                _portalProgressPercent = 100;
+                _portalProgressPhase = completed.Phase;
+                var detail = string.IsNullOrWhiteSpace(completed.ErrorMessage)
+                    ? completed.Phase
+                    : completed.ErrorMessage;
+                Snackbar.Add($"Edition download failed for {name}: {detail}", Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add($"Edition download queued for {name}. Check download jobs if it does not finish shortly.", Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _portalBusySourceId = null;
+            _portalDownloadingSourceId = null;
+            _portalProgressPercent = 0;
+            if (refreshGrid)
+            {
+                await LoadAsync(bypassBusyGuard: true);
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task<PortalEditionDownloadProgressDto?> WaitForPortalDownloadCompletionAsync(
+        Guid id,
+        DateTimeOffset startedAt,
+        CancellationToken cancellationToken)
+    {
+        PortalEditionDownloadProgressDto? last = null;
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(8);
+        while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                last = await Mediator.Send(new GetPortalEditionDownloadProgressQuery(id, startedAt), cancellationToken);
+                if (last is not null)
+                {
+                    _portalProgressPercent = last.Percent;
+                    _portalProgressPhase = last.Phase;
+                    await InvokeAsync(StateHasChanged);
+
+                    if (last.IsComplete)
+                    {
+                        return last;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                // Ignore transient poll errors while the download runs.
+            }
+
+            try
+            {
+                await Task.Delay(350, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        return last;
+    }
+
+    private async Task ViewPortalPdfAsync(Guid id)
+    {
+        try
+        {
+            var latest = await Mediator.Send(new GetLatestPortalEditionQuery(id));
+            if (latest is null)
+            {
+                Snackbar.Add("No portal PDF saved yet. Run Test download or Download edition first.", Severity.Info);
+                return;
+            }
+
+            await JS.InvokeVoidAsync("open", latest.PdfViewUrl, "_blank", "noopener,noreferrer");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not open PDF: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DiscoverPdfAsync(Guid id)
+    {
+        if (_pdfBusySourceId is not null)
+        {
+            return;
+        }
+
+        var source = _sources.FirstOrDefault(s => s.Id == id);
+        if (source is not null && IsSourceInactive(source))
+        {
+            return;
+        }
+
+        _pdfBusySourceId = id;
+        StateHasChanged();
+        try
+        {
+            var outcome = await Mediator.Send(new DiscoverPdfEditionCommand(id));
+            NotifyPdfOutcome(outcome);
+            await ShowPdfResultDialogAsync(id, outcome);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"PDF discovery failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _pdfBusySourceId = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadTodayPdfAsync(Guid id)
+    {
+        if (_pdfBusySourceId is not null)
+        {
+            return;
+        }
+
+        var source = _sources.FirstOrDefault(s => s.Id == id);
+        if (source is not null && IsSourceInactive(source))
+        {
+            return;
+        }
+
+        _pdfBusySourceId = id;
+        _pdfDownloadingSourceId = id;
+        _pdfProgressPercent = 0;
+        _pdfProgressPhase = "Starting…";
+        StateHasChanged();
+
+        using var pollCts = new CancellationTokenSource();
+        var pollTask = PollPdfDownloadProgressAsync(id, pollCts.Token);
+        var refreshGrid = false;
+
+        try
+        {
+            var outcome = await Mediator.Send(new DownloadTodayPdfCommand(id));
+            _pdfProgressPercent = 100;
+            _pdfProgressPhase = "Complete";
+            await InvokeAsync(StateHasChanged);
+            NotifyPdfOutcome(outcome);
+            refreshGrid = outcome.Status is PdfEditionStatus.Downloaded or PdfEditionStatus.SkippedDuplicate;
+            if (outcome.Status != PdfEditionStatus.BlockedByCompliance)
+            {
+                await StopPdfPollAsync(pollCts, pollTask);
+                await ShowPdfResultDialogAsync(id, outcome);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"PDF download failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            await StopPdfPollAsync(pollCts, pollTask);
+            _pdfBusySourceId = null;
+            _pdfDownloadingSourceId = null;
+            _pdfProgressPercent = 0;
+            if (refreshGrid)
+            {
+                await LoadAsync(bypassBusyGuard: true);
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static async Task StopPdfPollAsync(CancellationTokenSource pollCts, Task pollTask)
+    {
+        if (!pollCts.IsCancellationRequested)
+        {
+            pollCts.Cancel();
+        }
+
+        try
+        {
+            await pollTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when the download finishes or the dialog opens
+        }
+    }
+
+    private async Task PollPdfDownloadProgressAsync(Guid id, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var snapshot = await Mediator.Send(new GetPdfEditionDownloadProgressQuery(id), cancellationToken);
+                if (snapshot is not null)
+                {
+                    _pdfProgressPercent = snapshot.Percent;
+                    _pdfProgressPhase = snapshot.Phase;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                // Ignore transient poll errors while the download runs.
+            }
+
+            try
+            {
+                await Task.Delay(350, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private void NotifyPdfOutcome(PdfEditionDownloadOutcome outcome)
+    {
+        switch (outcome.Status)
+        {
+            case PdfEditionStatus.Downloaded:
+                Snackbar.Add("Today's PDF downloaded successfully.", Severity.Success);
+                break;
+            case PdfEditionStatus.Validated:
+                Snackbar.Add("PDF candidate validated. Use Today's PDF to download the file.", Severity.Success);
+                break;
+            case PdfEditionStatus.Failed:
+            case PdfEditionStatus.BlockedByCompliance:
+                Snackbar.Add(
+                    string.IsNullOrWhiteSpace(outcome.FailureReason)
+                        ? $"PDF operation failed ({outcome.Status})."
+                        : $"PDF operation failed: {outcome.FailureReason}",
+                    Severity.Warning);
+                break;
+        }
+    }
+
+    private async Task ViewLatestPdfAsync(Guid id)
+    {
+        try
+        {
+            var outcome = await Mediator.Send(new GetLatestPdfEditionQuery(id));
+            if (outcome is null)
+            {
+                var history = await Mediator.Send(new GetPdfEditionHistoryQuery(id, 1));
+                var last = history.FirstOrDefault();
+                if (last is not null && last.Status != nameof(PdfEditionStatus.Downloaded))
+                {
+                    var reason = string.IsNullOrWhiteSpace(last.FailureReason) ? last.Status : last.FailureReason;
+                    Snackbar.Add($"No downloaded PDF edition found. Last attempt: {reason}. Use Today's PDF to retry.", Severity.Warning);
+                }
+                else
+                {
+                    Snackbar.Add("No downloaded PDF edition found. Use Today's PDF to download first.", Severity.Info);
+                }
+
+                return;
+            }
+
+            await ShowPdfResultDialogAsync(id, outcome);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not load latest PDF: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ShowPdfResultDialogAsync(Guid newsSourceId, PdfEditionDownloadOutcome outcome)
+    {
+        var parameters = new DialogParameters<PdfEditionResultDialog>
+        {
+            { x => x.Outcome, outcome },
+            { x => x.NewsSourceId, newsSourceId }
+        };
+        await DialogService.ShowAsync<PdfEditionResultDialog>(
+            "PDF edition",
+            parameters,
+            new DialogOptions
+            {
+                MaxWidth = MaxWidth.Medium,
+                FullWidth = true,
+                CloseButton = true,
+                CloseOnEscapeKey = true
+            });
+    }
+
+    private RenderFragment FormatWhen(DateTimeOffset? value) => builder =>
+    {
+        if (value is null)
+        {
+            builder.OpenComponent<MudText>(0);
+            builder.AddAttribute(1, "Typo", Typo.caption);
+            builder.AddAttribute(2, "Color", Color.Tertiary);
+            builder.AddAttribute(3, "ChildContent", (RenderFragment)(b => b.AddContent(0, "never")));
+            builder.CloseComponent();
+        }
+        else
+        {
+            builder.OpenComponent<MudText>(0);
+            builder.AddAttribute(1, "Typo", Typo.caption);
+            builder.AddAttribute(2, "ChildContent", (RenderFragment)(b => b.AddContent(0, UserTz.Format(value.Value, "yyyy-MM-dd HH:mm"))));
+            builder.CloseComponent();
+        }
+    };
+
+    private static string TruncateUrl(string url) =>
+        url.Length <= 50 ? url : url[..47] + "…";
+}

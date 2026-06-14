@@ -1,0 +1,50 @@
+# Build
+bin/
+obj/
+out/
+publish/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# Packages
+*.nupkg
+packages/
+
+# Node
+node_modules/
+
+# Secrets & local config
+appsettings.Development.json
+appsettings.*.local.json
+secrets.json
+*.pfx
+*.publishsettings
+
+# Data
+storage/
+downloads/
+logs/
+*.mdf
+*.ldf
+*.dbmdl
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Playwright
+playwright-report/
+test-results/
+.ms-playwright/

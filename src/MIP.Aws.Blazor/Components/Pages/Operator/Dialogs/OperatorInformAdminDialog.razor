@@ -1,0 +1,47 @@
+@using MIP.Aws.Application.Features.Operator
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            This creates an admin intervention notification and optionally sends an email alert.
+        </MudAlert>
+        <MudTextField T="string" @bind-Value="_note" Label="Operator note (optional)" Lines="3" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="SubmitAsync" Disabled="_busy">
+            Inform Admin
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid DownloadJobId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+
+    private string? _note;
+    private bool _busy;
+
+    private void Cancel() => Dialog.Cancel();
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Mediator.Send(new InformAdminCommand(DownloadJobId, _note));
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

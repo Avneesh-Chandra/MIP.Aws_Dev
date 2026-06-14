@@ -1,0 +1,949 @@
+@using System.ComponentModel.DataAnnotations
+@using MIP.Aws.Application.Features.NewsSources
+@using MIP.Aws.Application.Features.NewsSources.PdfSelectorSuggestion
+@using MIP.Aws.Application.Abstractions.News
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_model is null)
+        {
+            <MudAlert Severity="Severity.Error">Source not found.</MudAlert>
+        }
+        else
+        {
+            <MudForm @ref="_form" Model="_model" ValidationDelay="0">
+                <MudTabs Outlined="true" Position="Position.Top" Rounded="true" PanelClass="pa-4" KeepPanelsAlive="true" @bind-ActivePanelIndex="_activeTab">
+
+                    @* ───────── General ───────── *@
+                    <MudTabPanel Text="General" Icon="@Icons.Material.Filled.Info">
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Source name" Required="true" RequiredError="Name is required."
+                                              @bind-Value="_model.Name" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Base URL" Required="true" RequiredError="Base URL is required."
+                                              @bind-Value="_model.BaseUrl" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Edition URL" @bind-Value="_model.EditionUrl" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.MenuBook"
+                                              HelperText="Direct edition page/link used by discovery and downloads." />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSelect T="NewsSourceType" Label="Source type" @bind-Value="_model.SourceType" Variant="Variant.Outlined">
+                                    @foreach (var t in Enum.GetValues<NewsSourceType>())
+                                    {
+                                        <MudSelectItem T="NewsSourceType" Value="t">@t</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSelect T="ContentAcquisitionMode" Label="Acquisition mode" @bind-Value="_model.AcquisitionMode" Variant="Variant.Outlined">
+                                    @foreach (var m in Enum.GetValues<ContentAcquisitionMode>())
+                                    {
+                                        <MudSelectItem T="ContentAcquisitionMode" Value="m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSelect T="NewsSourceAccessMode" Label="Access mode" @bind-Value="_model.SourceAccessMode" Variant="Variant.Outlined">
+                                    @foreach (var m in Enum.GetValues<NewsSourceAccessMode>())
+                                    {
+                                        <MudSelectItem T="NewsSourceAccessMode" Value="m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect T="Guid?" Label="Category" @bind-Value="_model.SourceCategoryId" Variant="Variant.Outlined" Clearable="true">
+                                    @foreach (var c in _categories)
+                                    {
+                                        <MudSelectItem T="Guid?" Value="@((Guid?)c.Id)">@c.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="6" md="3">
+                                <MudTextField T="string" Label="Default language" @bind-Value="_model.DefaultLanguage" Variant="Variant.Outlined"
+                                              HelperText="ISO 639 code (en, ar, ...)"  />
+                            </MudItem>
+                            <MudItem xs="6" md="3">
+                                <MudTextField T="string" Label="Country" @bind-Value="_model.Country" Variant="Variant.Outlined"
+                                              HelperText="ISO 3166 (BH, AE, ...)" />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField T="string" Label="Notes" @bind-Value="_model.Notes" Variant="Variant.Outlined"
+                                              Lines="3" />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudSwitch T="bool" @bind-Value="_model.IsEnabled" Color="Color.Success" Label="Enabled" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── Portal access ───────── *@
+                    <MudTabPanel Text="Portal access" Icon="@Icons.Material.Filled.VpnKey"
+                                 Disabled="!IsPortal">
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            Portal access fields only apply when <strong>SourceType = WebPortalLogin</strong>. Automation interacts only with publisher-exposed controls — never paywalls, CAPTCHA, MFA, or robots.txt.
+                        </MudAlert>
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Login URL" @bind-Value="_model.LoginUrl" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Edition URL" @bind-Value="_model.EditionUrl" Variant="Variant.Outlined"
+                                              HelperText="The page that exposes the edition download button." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Logout URL" @bind-Value="_model.LogoutUrl" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect T="PortalLoginMethod" Label="Login method" @bind-Value="_model.LoginMethod" Variant="Variant.Outlined">
+                                    @foreach (var m in Enum.GetValues<PortalLoginMethod>())
+                                    {
+                                        <MudSelectItem T="PortalLoginMethod" Value="m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.RequiresLogin" Label="Requires login" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.RequiresCaptcha" Label="Has CAPTCHA — must NOT be automated" Color="Color.Error" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.IsDownloadAllowed" Label="Download allowed (per licence)" Color="Color.Success" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.UseHeadlessBrowser" Label="Use headless browser" Color="Color.Primary" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── Manual-assisted (MFA / OTP) ───────── *@
+                    <MudTabPanel Text="MFA / OTP" Icon="@Icons.Material.Filled.SmsFailed" Disabled="!IsPortal">
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            For portals that authenticate with mobile / e-mail / authenticator OTP. The platform will
+                            <strong> never bypass OTP / MFA / CAPTCHA / paywalls</strong> and will never read SMS or
+                            intercept second-factor channels. An authorised GFH operator must complete the challenge
+                            in an assisted-login session. OTP values are <strong>never stored or logged</strong>.
+                        </MudAlert>
+                        @if (IsManualAssistedSelected)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.GppMaybe">
+                                <strong>Manual login required.</strong> Unattended Test Login and scheduled
+                                automation are disabled for this source. The operator must run an
+                                <em>Assisted Login</em> session before each download window.
+                            </MudAlert>
+                        }
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.RequiresMfa" Label="Requires MFA (any second factor)" Color="Color.Warning" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.RequiresOtp" Label="Requires OTP (SMS / e-mail / authenticator)" Color="Color.Warning" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.ManualLoginRequired" Label="Manual login required (assisted session)" Color="Color.Error" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="int?" Label="Assisted session timeout (minutes)"
+                                              @bind-Value="_model.AssistedSessionTimeoutMinutes"
+                                              Variant="Variant.Outlined"
+                                              HelperText="How long the captured browser state stays valid (1..240). Defaults to 30 when MFA/OTP is on." />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField T="string" Label="OTP / assisted-login instructions for the operator"
+                                              @bind-Value="_model.OtpInstructions" Variant="Variant.Outlined"
+                                              Lines="3"
+                                              HelperText="e.g. 'Enter the OTP sent to the GFH mobile-on-file. Do not share with any automated system.'" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── Selectors ───────── *@
+                    <MudTabPanel Text="Selectors" Icon="@Icons.Material.Filled.SelectAll" Disabled="!IsPortal">
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            CSS selectors used by the Playwright login probe. Use the test-login dialog to verify before saving the source as <em>enabled</em>.
+                        </MudAlert>
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Username selector"
+                                              @bind-Value="_model.UsernameSelector" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person"
+                                              HelperText="e.g. input[name='username']" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Password selector"
+                                              @bind-Value="_model.PasswordSelector" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Password"
+                                              HelperText="e.g. input[type='password']" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Submit selector"
+                                              @bind-Value="_model.SubmitSelector" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.SendAndArchive"
+                                              HelperText="e.g. button[type='submit']" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Login success selector"
+                                              @bind-Value="_model.LoginSuccessSelector" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.CheckCircle"
+                                              HelperText="Element only visible after a successful login." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Success URL pattern"
+                                              @bind-Value="_model.SuccessUrlPattern" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Pattern"
+                                              HelperText="Regex/substring on the post-login URL (alternative success signal)." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Edition download selector"
+                                              @bind-Value="_model.DownloadSelector" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Download"
+                                              HelperText="Optional. Leave empty for viewer-only portals (e.g. PressReader); automation stores an HTML snapshot of Edition URL instead." />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="PressReader" Icon="@Icons.Material.Filled.MenuBook" Disabled="!IsPortal">
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            Licensed PressReader: login then <strong>right-click the newspaper spread</strong> (center pages) → page actions panel → <strong>Download</strong>.
+                            Selectors: email <code>input[placeholder*='البريد']</code>, password <code>input[placeholder*='كلمة المرور']</code>, submit <code>[role='dialog'] button:has-text('تسجيل الدخول')</code>, download <code>button:has-text('تنزيل')</code>.
+                        </MudAlert>
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudSelect T="string" Label="Portal strategy" @bind-Value="_model.PortalStrategyKey" Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@("Generic")">Generic WebPortal</MudSelectItem>
+                                    <MudSelectItem Value="@("PressReader")">PressReader</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudNumericField T="int" @bind-Value="_model.DownloadWaitTimeoutSeconds" Label="Download timeout (seconds)" Min="30" Max="600" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Login icon selector" @bind-Value="_model.LoginIconSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Newspaper canvas selector" @bind-Value="_model.NewspaperCanvasSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Context menu selector" @bind-Value="_model.ContextMenuSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Download menu item selector" @bind-Value="_model.DownloadMenuItemSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── Credentials ───────── *@
+                    <MudTabPanel Text="Credentials" Icon="@Icons.Material.Filled.Lock" Disabled="!IsPortal">
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            Stored credentials are encrypted at rest (DataProtection). Existing passwords are never returned by the API — leave the password field blank to keep the stored value.
+                        </MudAlert>
+                        @if (IsManualAssistedSelected)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.NoEncryption">
+                                Manual-assisted sources <strong>do not store a password</strong>. The operator
+                                authenticates interactively each session. The credential password field is
+                                disabled and any previously stored secret will be cleared on save.
+                            </MudAlert>
+                        }
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Portal username"
+                                              @bind-Value="_model.PortalUsername" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.AccountCircle" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Credential username"
+                                              @bind-Value="_model.CredentialUsername" Variant="Variant.Outlined"
+                                              HelperText="Account user supplied by GFH (subscriber portal)." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="@PasswordLabel"
+                                              @bind-Value="_model.CredentialPassword" Variant="Variant.Outlined"
+                                              InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                                              Disabled="IsManualAssistedSelected"
+                                              Adornment="Adornment.End"
+                                              AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                              OnAdornmentClick="@(() => _showPassword = !_showPassword)" />
+                            </MudItem>
+                            @if (_existingHasPassword && !IsCreate)
+                            {
+                                <MudItem xs="12" md="6">
+                                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.VerifiedUser">A password is currently stored.</MudAlert>
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── Schedule ───────── *@
+                    <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.Schedule">
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.ScheduleEnabled" Color="Color.Success" Label="Recurring schedule enabled" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="int?" Label="Download frequency (minutes)"
+                                              @bind-Value="_model.DownloadFrequencyMinutes" Variant="Variant.Outlined"
+                                              HelperText="Used by light schedulers. Cron below is authoritative for Hangfire." />
+                            </MudItem>
+                            <MudItem xs="12" md="8">
+                                <MudTextField T="string" Label="Cron expression"
+                                              @bind-Value="_model.CronExpression" Variant="Variant.Outlined"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.AccessTime"
+                                              HelperText="6-field Quartz-style cron (e.g. 0 0 6 * * ?)" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="Time zone ID"
+                                              @bind-Value="_model.ScheduleTimeZoneId" Variant="Variant.Outlined"
+                                              HelperText="IANA / Windows TZ (Asia/Bahrain, UTC, ...)" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    @* ───────── PDF Edition Discovery ───────── *@
+                    <MudTabPanel Text="PDF Edition Discovery" Icon="@Icons.Material.Filled.PictureAsPdf">
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                            Detects publicly available PDF edition links on publisher homepages. Never bypasses login, paywalls, CAPTCHA, or robots.txt.
+                        </MudAlert>
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12">
+                                <MudSwitch T="bool" @bind-Value="_model.PdfDiscoveryEnabled" Label="Enable PDF discovery" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.AiSelectorSuggestionEnabled" Label="AI selector suggestions" Color="Color.Secondary" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.PublicHtmlExtractionEnabled" Label="Public HTML extraction" Color="Color.Secondary" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.GenerateInternalReportAllowed" Label="Internal article PDF report" Color="Color.Secondary" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Discovery page URL" @bind-Value="_model.PdfDiscoveryPageUrl" Variant="Variant.Outlined"
+                                              HelperText="Defaults to Base URL when empty." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSelect T="PdfDiscoveryMode" Label="Discovery mode" @bind-Value="_model.PdfDiscoveryMode" Variant="Variant.Outlined">
+                                    @foreach (var m in Enum.GetValues<PdfDiscoveryMode>())
+                                    {
+                                        <MudSelectItem T="PdfDiscoveryMode" Value="m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Download button selector" @bind-Value="_model.PdfDownloadSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="PDF link selector" @bind-Value="_model.PdfLinkSelector" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField T="string" Label="Link keywords (comma-separated)" @bind-Value="_model.PdfLinkKeywords" Variant="Variant.Outlined" Lines="2" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Date pattern" @bind-Value="_model.PdfDatePattern" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudNumericField T="int" @bind-Value="_model.MinimumPdfSizeKb" Label="Minimum PDF size (KB)" Variant="Variant.Outlined" Min="1" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.PreferTodayEdition" Label="Prefer today's edition" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.PreferLatestEdition" Label="Prefer latest edition" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudSwitch T="bool" @bind-Value="_model.RequirePdfContentType" Label="Require PDF content-type" Color="Color.Primary" />
+                            </MudItem>
+                        </MudGrid>
+
+                        @if (!IsCreate && _model.PdfDiscoveryEnabled)
+                        {
+                            <MudDivider Class="my-4" />
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                                AI suggestions are advisory only. The system will not download until the selector is validated and approved by an authorized user.
+                            </MudAlert>
+                            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3">
+                                <AuthorizeView Policy="@AuthPolicies.NewsSourcePdfWrite">
+                                    <Authorized>
+                                        <MudButton Variant="Variant.Outlined"
+                                                   Color="Color.Secondary"
+                                                   StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                                   Disabled="@_aiSuggestBusy"
+                                                   OnClick="SuggestSelectorsAsync">
+                                            @(_aiSuggestBusy ? "Requesting AI suggestions…" : "Suggest selector with AI")
+                                        </MudButton>
+                                    </Authorized>
+                                </AuthorizeView>
+                                <MudText Typo="Typo.caption" Color="Color.Tertiary">
+                                    Runs only when normal discovery finds no PDF candidates and AI is enabled.
+                                </MudText>
+                            </MudStack>
+
+                            @if (_selectorSuggestions.Count > 0)
+                            {
+                                <MudTable T="PdfSelectorSuggestionDto" Items="_selectorSuggestions" Dense="true" Hover="true" Striped="true">
+                                    <HeaderContent>
+                                        <MudTh>Selector</MudTh>
+                                        <MudTh>Purpose</MudTh>
+                                        <MudTh>Confidence</MudTh>
+                                        <MudTh>Reason</MudTh>
+                                        <MudTh>Status</MudTh>
+                                        <MudTh Style="text-align:right;">Actions</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate Context="suggestion">
+                                        <MudTd DataLabel="Selector">
+                                            <MudText Typo="Typo.body2" Style="font-family:monospace;">@suggestion.SuggestedSelector</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Tertiary">@suggestion.ExpectedAction</MudText>
+                                        </MudTd>
+                                        <MudTd DataLabel="Purpose">@suggestion.Purpose</MudTd>
+                                        <MudTd DataLabel="Confidence">
+                                            <MudChip T="string" Size="Size.Small" Color="@ConfidenceColor(suggestion.Confidence)">@($"{suggestion.Confidence:P0}")</MudChip>
+                                        </MudTd>
+                                        <MudTd DataLabel="Reason">
+                                            <MudText Typo="Typo.caption">@suggestion.Reason</MudText>
+                                            @if (!string.IsNullOrWhiteSpace(suggestion.TestFailureReason))
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Error">@suggestion.TestFailureReason</MudText>
+                                            }
+                                        </MudTd>
+                                        <MudTd DataLabel="Status">@suggestion.Status</MudTd>
+                                        <MudTd Style="text-align:right;">
+                                            <AuthorizeView Policy="@AuthPolicies.NewsSourcePdfWrite">
+                                                <Authorized>
+                                                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                               Disabled="@IsSuggestionActionDisabled(suggestion, "test")"
+                                                               OnClick="@(() => TestSuggestionAsync(suggestion.Id))">Test</MudButton>
+                                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                                               Disabled="@IsSuggestionActionDisabled(suggestion, "accept")"
+                                                               OnClick="@(() => AcceptSuggestionAsync(suggestion.Id))">Accept</MudButton>
+                                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                                               Disabled="@IsSuggestionActionDisabled(suggestion, "reject")"
+                                                               OnClick="@(() => RejectSuggestionAsync(suggestion.Id))">Reject</MudButton>
+                                                </Authorized>
+                                            </AuthorizeView>
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        }
+                        else if (!IsCreate)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="mt-3">
+                                Enable PDF discovery to use AI-assisted selector suggestions.
+                            </MudText>
+                        }
+                    </MudTabPanel>
+
+                    @* ───────── Automation ───────── *@
+                    <MudTabPanel Text="Automation" Icon="@Icons.Material.Filled.SettingsApplications">
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <MudTextField T="string" Label="Connector key" @bind-Value="_model.ConnectorKey" Variant="Variant.Outlined"
+                                              HelperText="Optional partner connector identifier." />
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudSwitch T="bool" @bind-Value="_model.RequiresAuthentication" Color="Color.Primary" Label="Requires authentication" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+                </MudTabs>
+            </MudForm>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_saving">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Save"
+                   Disabled="_saving || _model is null"
+                   OnClick="SaveAsync">
+            @if (_saving)
+            {
+                <MudProgressCircular Class="ms-n2" Size="Size.Small" Indeterminate="true" />
+                <MudText>Saving…</MudText>
+            }
+            else
+            {
+                <MudText>@(IsCreate ? "Create" : "Save changes")</MudText>
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public Guid? SourceId { get; set; }
+    [Parameter] public int InitialTabIndex { get; set; }
+    /// <summary>When creating a source, pre-select type (e.g. from PDF management).</summary>
+    [Parameter] public NewsSourceType? PresetSourceType { get; set; }
+    /// <summary>When creating a source, turn on PDF discovery defaults.</summary>
+    [Parameter] public bool PresetPdfDiscoveryEnabled { get; set; }
+
+    private MudForm? _form;
+    private SourceFormModel? _model;
+    private int _activeTab;
+    private IReadOnlyList<SourceCategoryDto> _categories = Array.Empty<SourceCategoryDto>();
+    private bool _loading;
+    private bool _saving;
+    private bool _showPassword;
+    private bool _existingHasPassword;
+    private bool _aiSuggestBusy;
+    private IReadOnlyList<PdfSelectorSuggestionDto> _selectorSuggestions = Array.Empty<PdfSelectorSuggestionDto>();
+
+    private bool IsCreate => SourceId is null;
+    private bool IsPortal => _model is { SourceType: NewsSourceType.WebPortalLogin };
+    private bool IsManualAssistedSelected =>
+        _model is not null && (
+            _model.ManualLoginRequired
+            || _model.RequiresMfa
+            || _model.RequiresOtp
+            || _model.LoginMethod is PortalLoginMethod.ManualOtpAssisted or PortalLoginMethod.ManualBrowserSession);
+    private string PasswordLabel => IsCreate || !_existingHasPassword ? "Credential password" : "Credential password (leave blank to keep stored value)";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _activeTab = Math.Max(0, InitialTabIndex);
+        _loading = true;
+        try
+        {
+            _categories = await Mediator.Send(new GetSourceCategoriesQuery());
+
+            if (SourceId is null)
+            {
+                _model = new SourceFormModel();
+                ApplyCreatePreset();
+            }
+            else
+            {
+                var dto = await Mediator.Send(new GetNewsSourceByIdQuery(SourceId.Value));
+                _existingHasPassword = dto.HasStoredPortalPassword;
+                _model = SourceFormModel.FromDetail(dto);
+                await LoadSelectorSuggestionsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load source: {ex.Message}", Severity.Error);
+            Dialog.Cancel();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null || _form is null) return;
+        await _form.Validate();
+        if (!_form.IsValid)
+        {
+            Snackbar.Add("Please review the highlighted fields.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            // Don't send a blank password unless the user explicitly typed one (so the existing
+            // encrypted credential is preserved on the server). Empty string is treated as "leave it".
+            // Manual-assisted (MFA/OTP) sources NEVER carry a stored password, so we force null.
+            var pw = IsManualAssistedSelected
+                ? null
+                : (string.IsNullOrEmpty(_model.CredentialPassword) ? null : _model.CredentialPassword);
+
+            if (IsCreate)
+            {
+                var id = await Mediator.Send(new CreateNewsSourceCommand(
+                    _model.Name, _model.BaseUrl, _model.SourceType, _model.AcquisitionMode, _model.SourceAccessMode,
+                    _model.RequiresLogin, _model.LoginUrl, _model.EditionUrl, _model.LogoutUrl,
+                    _model.PortalUsername, _model.LoginMethod,
+                    _model.UsernameSelector, _model.PasswordSelector, _model.SubmitSelector, _model.DownloadSelector,
+                    _model.LoginSuccessSelector, _model.SuccessUrlPattern,
+                    _model.RequiresCaptcha, _model.IsDownloadAllowed,
+                    _model.Notes, _model.DefaultLanguage, _model.Country,
+                    _model.RequiresAuthentication, _model.UseHeadlessBrowser,
+                    _model.DownloadFrequencyMinutes, _model.ConnectorKey, _model.SourceCategoryId,
+                    _model.IsEnabled,
+                    _model.CronExpression, _model.ScheduleTimeZoneId, _model.ScheduleEnabled,
+                    _model.CredentialUsername, pw,
+                    _model.RequiresMfa, _model.RequiresOtp, _model.ManualLoginRequired,
+                    _model.OtpInstructions, _model.AssistedSessionTimeoutMinutes,
+                    _model.ToPdfDiscoveryDto(),
+                    _model.ToPortalDto()));
+                Dialog.Close(DialogResult.Ok<Guid>(id));
+            }
+            else
+            {
+                await Mediator.Send(new UpdateNewsSourceCommand(
+                    SourceId!.Value,
+                    _model.Name, _model.BaseUrl, _model.SourceType, _model.AcquisitionMode, _model.SourceAccessMode,
+                    _model.RequiresLogin, _model.LoginUrl, _model.EditionUrl, _model.LogoutUrl,
+                    _model.PortalUsername, _model.LoginMethod,
+                    _model.UsernameSelector, _model.PasswordSelector, _model.SubmitSelector, _model.DownloadSelector,
+                    _model.LoginSuccessSelector, _model.SuccessUrlPattern,
+                    _model.RequiresCaptcha, _model.IsDownloadAllowed,
+                    _model.Notes, _model.DefaultLanguage, _model.Country,
+                    _model.RequiresAuthentication, _model.UseHeadlessBrowser,
+                    _model.DownloadFrequencyMinutes, _model.ConnectorKey, _model.SourceCategoryId,
+                    _model.IsEnabled,
+                    _model.CronExpression, _model.ScheduleTimeZoneId, _model.ScheduleEnabled,
+                    _model.CredentialUsername, pw,
+                    _model.RequiresMfa, _model.RequiresOtp, _model.ManualLoginRequired,
+                    _model.OtpInstructions, _model.AssistedSessionTimeoutMinutes,
+                    _model.ToPdfDiscoveryDto(),
+                    _model.ToPortalDto()));
+                Dialog.Close(DialogResult.Ok(true));
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ApplyCreatePreset()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        if (PresetSourceType is { } presetType)
+        {
+            _model.SourceType = presetType;
+            if (presetType == NewsSourceType.WebPortalLogin)
+            {
+                _model.RequiresLogin = true;
+                _model.RequiresAuthentication = true;
+                _model.UseHeadlessBrowser = true;
+                _model.IsDownloadAllowed = true;
+                _model.PortalStrategyKey = "PressReader";
+            }
+            else if (presetType is NewsSourceType.PublicHtml or NewsSourceType.PublicPdf)
+            {
+                _model.AcquisitionMode = ContentAcquisitionMode.PublicWebWithRobotsRespect;
+                _model.IsDownloadAllowed = true;
+            }
+        }
+
+        if (PresetPdfDiscoveryEnabled)
+        {
+            _model.PdfDiscoveryEnabled = true;
+        }
+    }
+
+    private async Task LoadSelectorSuggestionsAsync()
+    {
+        if (SourceId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _selectorSuggestions = await Mediator.Send(new GetPdfSelectorSuggestionsQuery(SourceId.Value));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load selector suggestions: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private async Task SuggestSelectorsAsync()
+    {
+        if (SourceId is null || _aiSuggestBusy)
+        {
+            return;
+        }
+
+        _aiSuggestBusy = true;
+        StateHasChanged();
+        try
+        {
+            var created = await Mediator.Send(new SuggestPdfSelectorsCommand(SourceId.Value));
+            if (created.Count == 0)
+            {
+                Snackbar.Add("AI returned no valid selector suggestions.", Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add($"{created.Count} AI selector suggestion(s) generated.", Severity.Success);
+            }
+
+            await LoadSelectorSuggestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"AI selector suggestion failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _aiSuggestBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task TestSuggestionAsync(Guid suggestionId)
+    {
+        if (SourceId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var outcome = await Mediator.Send(new TestPdfSelectorSuggestionCommand(SourceId.Value, suggestionId));
+            Snackbar.Add(
+                outcome.Passed ? "Selector passed PDF validation." : $"Selector test failed: {outcome.FailureReason}",
+                outcome.Passed ? Severity.Success : Severity.Warning);
+            await LoadSelectorSuggestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Selector test failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task AcceptSuggestionAsync(Guid suggestionId)
+    {
+        if (SourceId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Mediator.Send(new AcceptPdfSelectorSuggestionCommand(SourceId.Value, suggestionId));
+            Snackbar.Add("Selector accepted and saved to PDF discovery settings.", Severity.Success);
+            var dto = await Mediator.Send(new GetNewsSourceByIdQuery(SourceId.Value));
+            _model = SourceFormModel.FromDetail(dto);
+            await LoadSelectorSuggestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Accept failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RejectSuggestionAsync(Guid suggestionId)
+    {
+        if (SourceId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Mediator.Send(new RejectPdfSelectorSuggestionCommand(SourceId.Value, suggestionId));
+            Snackbar.Add("Selector suggestion rejected.", Severity.Info);
+            await LoadSelectorSuggestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Reject failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Color ConfidenceColor(double confidence) =>
+        confidence >= 0.8 ? Color.Success : confidence >= 0.55 ? Color.Info : Color.Warning;
+
+    private static bool IsSuggestionActionDisabled(PdfSelectorSuggestionDto suggestion, string action) =>
+        action switch
+        {
+            "test" => suggestion.Status is "Accepted" or "Rejected",
+            "accept" => suggestion.Status != "TestedPassed",
+            "reject" => suggestion.Status is "Accepted" or "Rejected",
+            _ => true
+        };
+
+    private void Cancel() => Dialog.Cancel();
+
+    public sealed class SourceFormModel
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        [StringLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Base URL is required.")]
+        [Url]
+        public string BaseUrl { get; set; } = string.Empty;
+
+        public NewsSourceType SourceType { get; set; } = NewsSourceType.PublicHtml;
+        public ContentAcquisitionMode AcquisitionMode { get; set; } = ContentAcquisitionMode.PublicWebWithRobotsRespect;
+        public NewsSourceAccessMode SourceAccessMode { get; set; } = NewsSourceAccessMode.PublicWeb;
+
+        public bool RequiresLogin { get; set; }
+        public string? LoginUrl { get; set; }
+        public string? EditionUrl { get; set; }
+        public string? LogoutUrl { get; set; }
+        public string? PortalUsername { get; set; }
+
+        public PortalLoginMethod LoginMethod { get; set; } = PortalLoginMethod.FormCssSelectors;
+        public string? UsernameSelector { get; set; }
+        public string? PasswordSelector { get; set; }
+        public string? SubmitSelector { get; set; }
+        public string? DownloadSelector { get; set; }
+        public string? LoginSuccessSelector { get; set; }
+        public string? SuccessUrlPattern { get; set; }
+
+        public bool RequiresCaptcha { get; set; }
+        public bool IsDownloadAllowed { get; set; } = true;
+
+        public bool RequiresMfa { get; set; }
+        public bool RequiresOtp { get; set; }
+        public bool ManualLoginRequired { get; set; }
+        public string? OtpInstructions { get; set; }
+        public int? AssistedSessionTimeoutMinutes { get; set; }
+
+        public string? Notes { get; set; }
+        public string? DefaultLanguage { get; set; }
+        public string? Country { get; set; }
+        public bool RequiresAuthentication { get; set; }
+        public bool UseHeadlessBrowser { get; set; }
+        public int? DownloadFrequencyMinutes { get; set; }
+        public string? ConnectorKey { get; set; }
+        public Guid? SourceCategoryId { get; set; }
+        public bool IsEnabled { get; set; } = true;
+
+        public string? CronExpression { get; set; }
+        public string? ScheduleTimeZoneId { get; set; } = "UTC";
+        public bool ScheduleEnabled { get; set; }
+
+        public string? CredentialUsername { get; set; }
+        public string? CredentialPassword { get; set; }
+
+        public bool PdfDiscoveryEnabled { get; set; }
+        public PdfDiscoveryMode PdfDiscoveryMode { get; set; } = PdfDiscoveryMode.Hybrid;
+        public string? PdfDiscoveryPageUrl { get; set; }
+        public string? PdfDownloadSelector { get; set; }
+        public string? PdfLinkSelector { get; set; }
+        public string? PdfLinkKeywords { get; set; }
+        public string? PdfDatePattern { get; set; }
+        public bool PreferTodayEdition { get; set; } = true;
+        public bool PreferLatestEdition { get; set; } = true;
+        public bool RequirePdfContentType { get; set; } = true;
+        public int MinimumPdfSizeKb { get; set; } = 100;
+        public bool AiSelectorSuggestionEnabled { get; set; }
+        public bool PublicHtmlExtractionEnabled { get; set; }
+        public bool GenerateInternalReportAllowed { get; set; }
+        public PdfSelectorExpectedAction? PdfDownloadExpectedAction { get; set; }
+        public PdfSelectorExpectedAction? PdfLinkExpectedAction { get; set; }
+
+        public string? PortalStrategyKey { get; set; } = "Generic";
+        public string? LoginIconSelector { get; set; }
+        public string? NewspaperCanvasSelector { get; set; }
+        public string? ContextMenuSelector { get; set; }
+        public string? DownloadMenuItemSelector { get; set; }
+        public int DownloadWaitTimeoutSeconds { get; set; } = 180;
+
+        public PortalAutomationFieldsDto ToPortalDto() => new(
+            PortalStrategyKey,
+            LoginIconSelector,
+            NewspaperCanvasSelector,
+            ContextMenuSelector,
+            DownloadMenuItemSelector,
+            DownloadWaitTimeoutSeconds);
+
+        public PdfDiscoveryFieldsDto ToPdfDiscoveryDto() => new(
+            PdfDiscoveryEnabled,
+            PdfDiscoveryMode,
+            PdfDiscoveryPageUrl,
+            PdfDownloadSelector,
+            PdfLinkSelector,
+            PdfLinkKeywords,
+            PdfDatePattern,
+            PreferTodayEdition,
+            PreferLatestEdition,
+            RequirePdfContentType,
+            MinimumPdfSizeKb,
+            PdfDownloadExpectedAction,
+            PdfLinkExpectedAction,
+            null,
+            null,
+            null,
+            null,
+            AiSelectorSuggestionEnabled,
+            PublicHtmlExtractionEnabled,
+            GenerateInternalReportAllowed,
+            SourcePdfDiscoveryOutcome.Unknown,
+            null);
+
+        public static SourceFormModel FromDetail(NewsSourceDetailDto x) => new()
+        {
+            Name = x.Name,
+            BaseUrl = x.BaseUrl,
+            SourceType = x.SourceType,
+            AcquisitionMode = x.AcquisitionMode,
+            SourceAccessMode = x.SourceAccessMode,
+            RequiresLogin = x.RequiresLogin,
+            LoginUrl = x.LoginUrl,
+            EditionUrl = x.EditionUrl,
+            LogoutUrl = x.LogoutUrl,
+            PortalUsername = x.PortalUsername,
+            LoginMethod = x.LoginMethod,
+            UsernameSelector = x.UsernameSelector,
+            PasswordSelector = x.PasswordSelector,
+            SubmitSelector = x.SubmitSelector,
+            DownloadSelector = x.DownloadSelector,
+            LoginSuccessSelector = x.LoginSuccessSelector,
+            SuccessUrlPattern = x.SuccessUrlPattern,
+            RequiresCaptcha = x.RequiresCaptcha,
+            IsDownloadAllowed = x.IsDownloadAllowed,
+            RequiresMfa = x.RequiresMfa,
+            RequiresOtp = x.RequiresOtp,
+            ManualLoginRequired = x.ManualLoginRequired,
+            OtpInstructions = x.OtpInstructions,
+            AssistedSessionTimeoutMinutes = x.AssistedSessionTimeoutMinutes,
+            Notes = x.Notes,
+            DefaultLanguage = x.DefaultLanguage,
+            Country = x.Country,
+            RequiresAuthentication = x.RequiresAuthentication,
+            UseHeadlessBrowser = x.UseHeadlessBrowser,
+            DownloadFrequencyMinutes = x.DownloadFrequencyMinutes,
+            ConnectorKey = x.ConnectorKey,
+            SourceCategoryId = x.SourceCategoryId,
+            IsEnabled = x.IsEnabled,
+            CronExpression = x.CronExpression,
+            ScheduleTimeZoneId = x.ScheduleTimeZoneId ?? "UTC",
+            ScheduleEnabled = x.ScheduleEnabled,
+            CredentialUsername = null,
+            CredentialPassword = null,
+            PdfDiscoveryEnabled = x.PdfDiscovery.PdfDiscoveryEnabled,
+            PdfDiscoveryMode = x.PdfDiscovery.PdfDiscoveryMode,
+            PdfDiscoveryPageUrl = x.PdfDiscovery.PdfDiscoveryPageUrl,
+            PdfDownloadSelector = x.PdfDiscovery.PdfDownloadSelector,
+            PdfLinkSelector = x.PdfDiscovery.PdfLinkSelector,
+            PdfLinkKeywords = x.PdfDiscovery.PdfLinkKeywords,
+            PdfDatePattern = x.PdfDiscovery.PdfDatePattern,
+            PreferTodayEdition = x.PdfDiscovery.PreferTodayEdition,
+            PreferLatestEdition = x.PdfDiscovery.PreferLatestEdition,
+            RequirePdfContentType = x.PdfDiscovery.RequirePdfContentType,
+            MinimumPdfSizeKb = x.PdfDiscovery.MinimumPdfSizeKb,
+            AiSelectorSuggestionEnabled = x.PdfDiscovery.AiSelectorSuggestionEnabled,
+            PublicHtmlExtractionEnabled = x.PdfDiscovery.PublicHtmlExtractionEnabled,
+            GenerateInternalReportAllowed = x.PdfDiscovery.GenerateInternalReportAllowed,
+            PdfDownloadExpectedAction = x.PdfDiscovery.PdfDownloadExpectedAction,
+            PdfLinkExpectedAction = x.PdfDiscovery.PdfLinkExpectedAction,
+            PortalStrategyKey = x.Portal.PortalStrategyKey ?? "Generic",
+            LoginIconSelector = x.Portal.LoginIconSelector,
+            NewspaperCanvasSelector = x.Portal.NewspaperCanvasSelector,
+            ContextMenuSelector = x.Portal.ContextMenuSelector,
+            DownloadMenuItemSelector = x.Portal.DownloadMenuItemSelector,
+            DownloadWaitTimeoutSeconds = x.Portal.DownloadWaitTimeoutSeconds,
+        };
+    }
+}

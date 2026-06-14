@@ -1,0 +1,144 @@
+@using MIP.Aws.Application.Abstractions.News
+@using MIP.Aws.Application.Features.NewsSources.PdfEdition
+@using MIP.Aws.Domain.Enums
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">PDF edition result</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (Outcome is null)
+        {
+            <MudText>No result.</MudText>
+        }
+        else
+        {
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.body2"><strong>Status:</strong> @Outcome.Status</MudText>
+                @if (Outcome.Confidence is not null)
+                {
+                    <MudText Typo="Typo.body2"><strong>Confidence:</strong> @Outcome.Confidence.Value.ToString("0.00")</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(Outcome.DiscoveryMethod))
+                {
+                    <MudText Typo="Typo.body2"><strong>Method:</strong> @Outcome.DiscoveryMethod</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(Outcome.SourceUrl))
+                {
+                    <MudText Typo="Typo.body2"><strong>Candidate URL:</strong> @Outcome.SourceUrl</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(Outcome.SavedPath))
+                {
+                    <MudText Typo="Typo.body2"><strong>Saved path:</strong> @Outcome.SavedPath</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(Outcome.FailureReason))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@Outcome.FailureReason</MudAlert>
+                }
+                @if (Outcome.Candidates.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-2">Candidates</MudText>
+                    <MudSimpleTable Dense="true">
+                        <thead><tr><th>URL</th><th>Score</th><th>Method</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in Outcome.Candidates.Take(8))
+                            {
+                                <tr>
+                                    <td>@c.Url</td>
+                                    <td>@c.Confidence.ToString("0.00")</td>
+                                    <td>@c.Method</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+
+                @if (ShowManualAssist)
+                {
+                    <MudDivider Class="my-2" />
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        Automatic discovery did not find today's PDF. Paste a URL you verified in the browser
+                        (homepage, issue viewer such as <code>/files/pdf/issue…/index.html</code>, or a direct <code>.pdf</code> link)
+                        and retry.
+                    </MudAlert>
+                    <MudTextField T="string"
+                                  Label="Manual PDF or issue URL"
+                                  @bind-Value="_manualUrl"
+                                  Variant="Variant.Outlined"
+                                  Placeholder="https://aawsat.com/files/pdf/issue17358/index.html"
+                                  Disabled="_busy"
+                                  Immediate="true" />
+                    <MudCheckBox T="bool"
+                                 @bind-Value="_saveAsDiscoveryPage"
+                                 Label="Save this URL as the discovery page for future runs"
+                                 Disabled="_busy" />
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               Disabled="_busy || string.IsNullOrWhiteSpace(_manualUrl)"
+                               OnClick="RetryManualAsync">
+                        @(_busy ? "Downloading…" : "Download with manual URL")
+                    </MudButton>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!string.IsNullOrWhiteSpace(Outcome?.ViewUrl))
+        {
+            <MudButton Href="@Outcome.ViewUrl" Target="_blank" Color="Color.Primary" Variant="Variant.Filled">Open PDF</MudButton>
+        }
+        <MudButton ButtonType="ButtonType.Button" OnClick="Close" Disabled="_busy">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public PdfEditionDownloadOutcome? Outcome { get; set; }
+    [Parameter] public Guid? NewsSourceId { get; set; }
+
+    private string _manualUrl = string.Empty;
+    private bool _saveAsDiscoveryPage;
+    private bool _busy;
+
+    private bool ShowManualAssist =>
+        NewsSourceId is not null
+        && Outcome is not null
+        && Outcome.Status is PdfEditionStatus.NoPublicPdfAvailable or PdfEditionStatus.Failed
+        && Outcome.Status != PdfEditionStatus.Downloaded;
+
+    private void Close() => MudDialog.Cancel();
+
+    private async Task RetryManualAsync()
+    {
+        if (NewsSourceId is not Guid id || string.IsNullOrWhiteSpace(_manualUrl))
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Mediator.Send(new DownloadManualPdfCommand(id, _manualUrl.Trim(), _saveAsDiscoveryPage));
+            Outcome = result;
+            if (result.Status == PdfEditionStatus.Downloaded)
+            {
+                Snackbar.Add("PDF downloaded using your manual URL.", Severity.Success);
+            }
+            else if (!string.IsNullOrWhiteSpace(result.FailureReason))
+            {
+                Snackbar.Add(result.FailureReason, Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Manual download failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,51 @@
+namespace MIP.Aws.Application.Features.NewsSources;
+
+using MIP.Aws.Domain.Enums;
+
+public sealed record NewsSourceListItemDto(
+    Guid Id,
+    string Name,
+    string SourceType,
+    string BaseUrl,
+    bool IsEnabled,
+    string? DefaultLanguage,
+    string? Country,
+    bool UseHeadlessBrowser,
+    DateTimeOffset? LastDownloadAt,
+    string? CategoryName,
+    bool ManualLoginRequired,
+    bool RequiresOtp,
+    bool RequiresMfa,
+    bool IsDownloadAllowed,
+    bool PdfDiscoveryEnabled,
+    DateTimeOffset? LastPdfDiscoveredAt,
+    DateTimeOffset? LastPdfDownloadedAt,
+    bool AiSelectorSuggestionEnabled,
+    bool PublicHtmlExtractionEnabled,
+    bool GenerateInternalReportAllowed,
+    SourcePdfDiscoveryOutcome LastPdfDiscoveryOutcome,
+    DateTimeOffset? LastPublicHtmlExtractedAt);
+
+public sealed record PdfDiscoveryFieldsDto(
+    bool PdfDiscoveryEnabled,
+    PdfDiscoveryMode PdfDiscoveryMode,
+    string? PdfDiscoveryPageUrl,
+    string? PdfDownloadSelector,
+    string? PdfLinkSelector,
+    string? PdfLinkKeywords,
+    string? PdfDatePattern,
+    bool PreferTodayEdition,
+    bool PreferLatestEdition,
+    bool RequirePdfContentType,
+    int MinimumPdfSizeKb,
+    PdfSelectorExpectedAction? PdfDownloadExpectedAction,
+    PdfSelectorExpectedAction? PdfLinkExpectedAction,
+    DateTimeOffset? LastPdfDiscoveredAt,
+    DateTimeOffset? LastPdfDownloadedAt,
+    string? LastPdfUrl,
+    string? LastSavedPdfPath,
+    bool AiSelectorSuggestionEnabled,
+    bool PublicHtmlExtractionEnabled,
+    bool GenerateInternalReportAllowed,
+    SourcePdfDiscoveryOutcome LastPdfDiscoveryOutcome,
+    DateTimeOffset? LastPublicHtmlExtractedAt);

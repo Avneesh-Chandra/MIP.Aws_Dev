@@ -1,0 +1,290 @@
+/* ─── App shell: single-row header, breadcrumbs, welcome, KPI cards ─── */
+
+.mi-layout {
+    --mi-appbar-offset: 48px;
+}
+
+.mi-layout .mud-main-content {
+    padding-top: 0.75rem;
+}
+
+/* Classic GFH navy app bar (#0A2342 from theme Primary / AppbarBackground) */
+.mi-appbar.mud-appbar {
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
+    overflow: hidden !important;
+    background-color: #0A2342 !important;
+    color: #FFFFFF !important;
+}
+
+.mi-appbar .mud-toolbar-appbar {
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
+    padding: 0 0.5rem !important;
+    overflow: hidden !important;
+}
+
+.mi-appbar-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 48px;
+    gap: 0.35rem;
+    box-sizing: border-box;
+}
+
+.mi-appbar-brand {
+    flex-shrink: 0;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: #FFFFFF !important;
+    text-decoration: none !important;
+    padding: 0 0.35rem;
+}
+
+.mi-appbar-brand:hover {
+    color: #E7ECF3 !important;
+    opacity: 0.92;
+}
+
+.mi-appbar-nav-scroller {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 0;
+}
+
+.mi-appbar-nav-track {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    gap: 0;
+}
+
+.mi-appbar-nav-track::-webkit-scrollbar {
+    display: none;
+}
+
+.mi-nav-scroll-btn.mud-icon-button-root {
+    flex-shrink: 0;
+    margin: 0;
+    opacity: 0.9;
+}
+
+.mi-nav-scroll-btn.mud-icon-button-root:disabled {
+    opacity: 0.35;
+}
+
+.mi-appbar-nav-btn.mud-button-root {
+    text-transform: none;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    min-height: 36px;
+    padding: 0 10px;
+    line-height: 1.2;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.mi-appbar-nav-btn .mud-button-label {
+    white-space: nowrap;
+}
+
+.mi-appbar-nav-btn.mud-button-root:hover {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.mi-appbar-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 0.15rem;
+    margin-left: auto;
+    padding-left: 0.35rem;
+}
+
+.mi-appbar-time-inline {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 0 0.5rem 0 0.25rem;
+    font-variant-numeric: tabular-nums;
+    color: #FFFFFF;
+}
+
+.mi-welcome-strip {
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+    padding: 0 0.25rem;
+}
+
+.mi-welcome-strip strong {
+    color: var(--mud-palette-text-primary);
+    font-weight: 600;
+}
+
+.mi-welcome-role {
+    color: var(--mud-palette-primary);
+    font-weight: 500;
+}
+
+.mi-layout-main {
+    background: var(--mud-palette-background);
+    min-height: calc(100vh - 80px);
+}
+
+.mi-page-container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 0.75rem 1.25rem 2rem !important;
+}
+
+.mi-chrome-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.mi-breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.15rem 0.35rem;
+    font-size: 0.8125rem;
+    padding: 0.35rem 0.5rem;
+}
+
+.mi-breadcrumbs-link {
+    color: var(--mud-palette-primary) !important;
+    font-weight: 500;
+}
+
+.mi-breadcrumbs-sep {
+    opacity: 0.45;
+    font-size: 1rem !important;
+}
+
+.mi-breadcrumbs-current {
+    font-weight: 600;
+    color: var(--mud-palette-text-primary);
+}
+
+/* KPI / metric cards */
+.mi-stat-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    min-height: 108px;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 12px !important;
+    border: 1px solid var(--mud-palette-lines-default);
+}
+
+.mi-stat-card-label {
+    display: block;
+    margin: 0 0 0.35rem 0 !important;
+    padding: 0 !important;
+    line-height: 1.35 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase;
+    font-size: 0.6875rem !important;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.mi-stat-card-value {
+    margin: 0 !important;
+    line-height: 1.15 !important;
+    font-weight: 700 !important;
+}
+
+.mi-stat-grid {
+    align-items: stretch;
+}
+
+.mi-stat-grid .mud-grid-item {
+    display: flex;
+}
+
+.mi-stat-grid .mud-grid-item > * {
+    flex: 1;
+    width: 100%;
+}
+
+.mi-stat-card-caption {
+    display: block;
+    margin-top: 0.35rem !important;
+    line-height: 1.35 !important;
+}
+
+.mi-stat-card--alert {
+    border-left: 4px solid var(--mud-palette-error) !important;
+}
+
+/* Legacy KPI tiles on pages not yet using StatCard */
+.mud-grid .mud-paper.pa-3 .mud-typography-overline {
+    display: block;
+    margin: 0 0 0.35rem 0 !important;
+    padding: 0 !important;
+    line-height: 1.35 !important;
+    letter-spacing: 0.08em !important;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.mud-grid .mud-paper.pa-3 {
+    min-height: 96px;
+    overflow: hidden;
+    border-radius: 12px;
+}
+
+/* Page titles */
+.mi-page-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.75rem 1rem;
+}
+
+.mi-page-title-block {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.mi-page-title {
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
+}
+
+.mi-page-subtitle {
+    margin: 0.15rem 0 0 !important;
+    line-height: 1.45 !important;
+}
+
+@media (max-width: 720px) {
+    .mi-appbar-brand {
+        font-size: 0.875rem !important;
+        max-width: 8.5rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mi-appbar-time-inline {
+        display: none;
+    }
+}

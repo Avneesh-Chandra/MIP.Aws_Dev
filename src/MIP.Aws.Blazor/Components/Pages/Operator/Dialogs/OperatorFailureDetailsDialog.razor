@@ -1,0 +1,158 @@
+@using MIP.Aws.Application.Features.Operator
+@using MIP.Aws.Blazor.Components.Shared
+@inject IMediator Mediator
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_details is null)
+        {
+            <MudAlert Severity="Severity.Error">Failure details could not be loaded.</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="2">
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                    <MudText Typo="Typo.body2"><strong>@_details.FailureCode</strong> — @_details.FailureMessage</MudText>
+                </MudAlert>
+                <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                    <tbody>
+                        <tr><td>Source URL</td><td><MudLink Href="@_details.SourceUrl" Target="_blank">@_details.SourceUrl</MudLink></td></tr>
+                        <tr><td>Attempted</td><td>@FormatWhen(_details.AttemptedAt)</td></tr>
+                        <tr><td>Retry count</td><td>@_details.RetryCount</td></tr>
+                        <tr><td>Compliance blocked</td><td>@(_details.ComplianceBlocked ? "Yes" : "No")</td></tr>
+                        <tr><td>Manual action flag</td><td>@(_details.RequiresManualAction ? "Yes" : "No")</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+                <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Suggested intervention</MudText>
+                <MudText Typo="Typo.body2">@_details.SuggestedIntervention</MudText>
+                @if (_details.LastSuccessfulPdf?.Available == true)
+                {
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                               OnClick="@(() => OpenUrl(_details.LastSuccessfulPdf!.ViewUrl))">
+                        @LastSuccessfulPdfCaption(_details.LastSuccessfulPdf)
+                    </MudButton>
+                }
+                @if (HasFailureArtifacts(_details))
+                {
+                    <PortalFailureArtifactsPanel ScreenshotUrl="@_details.ScreenshotUrl"
+                                                 HtmlSnapshotUrl="@_details.HtmlSnapshotUrl" />
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        No page screenshot or HTML snapshot was captured for this failure. Early failures (e.g. credentials or compliance) may occur before the portal page is opened.
+                    </MudAlert>
+                }
+                @if (_details.OperatorNotes.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Operator notes</MudText>
+                    @foreach (var note in _details.OperatorNotes)
+                    {
+                        <MudPaper Outlined="true" Class="pa-2">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@note.CreatedAt.ToString("yyyy-MM-dd HH:mm") UTC</MudText>
+                            <MudText Typo="Typo.body2">@note.Note</MudText>
+                        </MudPaper>
+                    }
+                }
+
+                <AuthorizeView Policy="@AuthPolicies.OperatorDownloadMonitor">
+                    <Authorized>
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.h6" Style="font-weight:600;">Automatic AI Recovery</MudText>
+                        <AutoAiRecoveryTimelinePanel DownloadJobId="DownloadJobId" />
+                    </Authorized>
+                </AuthorizeView>
+
+                <AuthorizeView Policy="@AuthPolicies.SourceRecoveryView">
+                    <Authorized>
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.h6" Style="font-weight:600;">Manual AI Recovery Suggestions</MudText>
+                        <SourceRecoveryPanel DownloadJobId="DownloadJobId" OnRecoveryApplied="RefreshDetailsAsync" />
+                    </Authorized>
+                </AuthorizeView>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <AuthorizeView Policy="@AuthPolicies.OperatorNotes">
+            <Authorized>
+                <MudButton Variant="Variant.Outlined" OnClick="AddNoteAsync" Disabled="_details is null">Add note</MudButton>
+            </Authorized>
+        </AuthorizeView>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid DownloadJobId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+    [Parameter] public bool ShowAiRecovery { get; set; }
+
+    [Inject] private IDialogService DialogService { get; set; } = default!;
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
+    private DownloadFailureDetailsDto? _details;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _details = await Mediator.Send(new GetDownloadFailureDetailsQuery(DownloadJobId));
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RefreshDetailsAsync()
+    {
+        _details = await Mediator.Send(new GetDownloadFailureDetailsQuery(DownloadJobId));
+        StateHasChanged();
+    }
+
+    private async Task AddNoteAsync()
+    {
+        var parameters = new DialogParameters<OperatorNoteDialog>
+        {
+            { x => x.DownloadJobId, DownloadJobId }
+        };
+        var dlg = await DialogService.ShowAsync<OperatorNoteDialog>("Add operator note", parameters);
+        var result = await dlg.Result;
+        if (result is { Canceled: false })
+        {
+            _details = await Mediator.Send(new GetDownloadFailureDetailsQuery(DownloadJobId));
+            Snackbar.Add("Note saved.", Severity.Success);
+        }
+    }
+
+    private void Close() => Dialog.Close();
+
+    private async Task OpenUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
+    }
+
+    private static string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "—" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+
+    private static string LastSuccessfulPdfCaption(LatestPdfLinkDto pdf)
+    {
+        var when = FormatWhen(pdf.DownloadedAt);
+        return when == "—"
+            ? "Last successful PDF"
+            : $"Last successful PDF — {when}";
+    }
+
+    private static bool HasFailureArtifacts(DownloadFailureDetailsDto details) =>
+        !string.IsNullOrWhiteSpace(details.ScreenshotUrl)
+        || !string.IsNullOrWhiteSpace(details.HtmlSnapshotUrl);
+}

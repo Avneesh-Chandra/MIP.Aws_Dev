@@ -1,0 +1,67 @@
+using GFH.MediaIntelligence.Application.Configuration;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
+namespace GFH.MediaIntelligence.Infrastructure.Configuration;
+
+/// <summary>
+/// Centralized fail-fast validation. Bound options must be self-consistent before the host opens
+/// the request port; missing critical configuration in production stops the boot sequence.
+/// </summary>
+public static class StartupValidation
+{
+    public static IServiceCollection AddPlatformOptionsValidation(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .Validate(o => !string.IsNullOrWhiteSpace(o.SigningKey) && o.SigningKey.Length >= 32, "Jwt:SigningKey must be at least 32 characters.")
+            .Validate(o => o.AccessTokenMinutes > 0, "Jwt:AccessTokenMinutes must be > 0.")
+            .ValidateOnStart();
+
+        services.AddOptions<TelemetryOptions>()
+            .Bind(configuration.GetSection(TelemetryOptions.SectionName))
+            .Validate(o => o.TraceSamplingProbability is >= 0.0 and <= 1.0, "Telemetry:TraceSamplingProbability must be in [0,1].")
+            .ValidateOnStart();
+
+        services.AddOptions<RedisCacheOptions>()
+            .Bind(configuration.GetSection(RedisCacheOptions.SectionName))
+            .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.ConnectionString), "RedisCache:ConnectionString required when Enabled=true.")
+            .ValidateOnStart();
+
+        services.AddOptions<KeyVaultOptions>()
+            .Bind(configuration.GetSection(KeyVaultOptions.SectionName))
+            .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.VaultUri), "KeyVault:VaultUri required when Enabled=true.")
+            .ValidateOnStart();
+
+        services.AddOptions<BlobStorageOptions>()
+            .Bind(configuration.GetSection(BlobStorageOptions.SectionName))
+            .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.ConnectionString) || !string.IsNullOrWhiteSpace(o.ServiceUri),
+                "BlobStorage requires ConnectionString or ServiceUri when Enabled=true.")
+            .ValidateOnStart();
+
+        services.AddOptions<SecurityOptions>()
+            .Bind(configuration.GetSection(SecurityOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<HangfireQueueOptions>()
+            .Bind(configuration.GetSection(HangfireQueueOptions.SectionName))
+            .Validate(o => o.Queues is { Length: > 0 }, "HangfireQueues:Queues must contain at least one queue.")
+            .Validate(o => o.RetryAttempts >= 0, "HangfireQueues:RetryAttempts must be >= 0.")
+            .ValidateOnStart();
+
+        services.AddOptions<ResilienceOptions>()
+            .Bind(configuration.GetSection(ResilienceOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<FeatureFlagOptions>()
+            .Bind(configuration.GetSection(FeatureFlagOptions.SectionName))
+            .ValidateOnStart();
+
+        // Release-profile gate: warns in Development, hard-fails in Staging/Production when
+        // critical secrets, feature flags, or platform integrations are not production-ready.
+        services.AddHostedService<ReleaseProfileValidator>();
+
+        return services;
+    }
+}

@@ -1,0 +1,65 @@
+using MIP.Aws.Domain.Enums;
+
+namespace MIP.Aws.Application.Features.NewsSources;
+
+public sealed record NewsSourceDetailDto(
+    Guid Id,
+    string Name,
+    string BaseUrl,
+    NewsSourceType SourceType,
+    ContentAcquisitionMode AcquisitionMode,
+    NewsSourceAccessMode SourceAccessMode,
+    bool RequiresLogin,
+    string? LoginUrl,
+    string? EditionUrl,
+    string? LogoutUrl,
+    string? PortalUsername,
+    bool HasStoredPortalPassword,
+    PortalLoginMethod LoginMethod,
+    string? UsernameSelector,
+    string? PasswordSelector,
+    string? SubmitSelector,
+    string? DownloadSelector,
+    string? LoginSuccessSelector,
+    string? SuccessUrlPattern,
+    bool RequiresCaptcha,
+    bool IsDownloadAllowed,
+    bool RequiresManualAction,
+    bool RequiresMfa,
+    bool RequiresOtp,
+    bool ManualLoginRequired,
+    string? OtpInstructions,
+    int? AssistedSessionTimeoutMinutes,
+    string? Notes,
+    string? DefaultLanguage,
+    string? Country,
+    bool RequiresAuthentication,
+    bool UseHeadlessBrowser,
+    int? DownloadFrequencyMinutes,
+    string? ConnectorKey,
+    Guid? SourceCategoryId,
+    string? CategoryName,
+    bool IsEnabled,
+    DateTimeOffset? LastDownloadAt,
+    string? CronExpression,
+    string? ScheduleTimeZoneId,
+    bool ScheduleEnabled,
+    PdfDiscoveryFieldsDto PdfDiscovery,
+    PortalAutomationFieldsDto Portal);
+
+public sealed record DownloadMetricsDto(
+    int TotalDownloads,
+    int FailedDownloads,
+    int ActiveSources,
+    int PendingJobs,
+    IReadOnlyList<RecentDownloadJobDto> LatestJobs);
+
+public sealed record RecentDownloadJobDto(
+    Guid Id,
+    Guid NewsSourceId,
+    string SourceName,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt,
+    long? DurationMs,
+    int? HttpStatus);

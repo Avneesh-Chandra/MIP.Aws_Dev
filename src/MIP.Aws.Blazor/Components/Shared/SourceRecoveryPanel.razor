@@ -1,0 +1,449 @@
+@using MIP.Aws.Application.Features.SourceRecovery
+@using MIP.Aws.Blazor.Components.Pages.Operator.Dialogs
+@using MIP.Aws.Blazor.Components.Shared
+@using MIP.Aws.Domain.Enums
+@inject IMediator Mediator
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudStack Spacing="3">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_analysis is null && !_analyzing)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoFixHigh"
+                   OnClick="AnalyzeAsync" Disabled="!DownloadJobId.HasValue">
+            Analyze with AI
+        </MudButton>
+    }
+    else if (_analyzing)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+            <MudText Typo="Typo.body2">AI is analyzing failure logs, HTML, and screenshots…</MudText>
+        </MudStack>
+    }
+    else if (_analysis is not null)
+    {
+        <MudText Typo="Typo.subtitle2" Style="font-weight:600;">AI Recovery Suggestions</MudText>
+        @if (!_analysis.AiEnabled)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Variant="Variant.Outlined">
+                AI is unavailable — showing heuristic recovery options.
+            </MudAlert>
+        }
+
+        @if (HasAnalysisArtifacts(_analysis))
+        {
+            <PortalFailureArtifactsPanel ScreenshotUrl="@_analysis.ScreenshotUrl"
+                                         HtmlSnapshotUrl="@_analysis.HtmlSnapshotUrl"
+                                         Title="Source page for recovery"
+                                         Subtitle="Captured page used by AI to suggest fixes for this source." />
+        }
+
+        @if (_showRetryProgress)
+        {
+            <MudPaper Outlined="true" Class="pa-3">
+                <MudStack Spacing="1">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                        <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Apply &amp; Retry in progress</MudText>
+                        <MudText Typo="Typo.subtitle2" Style="font-weight:700;">@_retryProgress%</MudText>
+                    </MudStack>
+                    <MudProgressLinear Value="_retryProgress" Min="0" Max="100" Color="Color.Primary" Class="my-1" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@_retryProgressLabel</MudText>
+                </MudStack>
+            </MudPaper>
+        }
+
+        @if (_retryPdfSucceeded is true)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Filled" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
+                <MudText Typo="Typo.body2" Style="font-weight:600;">@_retryOutcomeMessage</MudText>
+            </MudAlert>
+        }
+        else if (_retryPdfSucceeded is false)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Icon="@Icons.Material.Filled.Error">
+                <MudText Typo="Typo.body2" Style="font-weight:600;">@_retryOutcomeMessage</MudText>
+            </MudAlert>
+        }
+        else if (_applyResult is not null && !_showRetryProgress)
+        {
+            <MudAlert Severity="@ApplySeverity(_applyResult.Status)" Variant="Variant.Filled" Dense="true">
+                @_applyResult.Message
+            </MudAlert>
+        }
+
+        @foreach (var option in _analysis.Options.OrderByDescending(o => o.ConfidenceScore))
+        {
+            <MudPaper Outlined="true" Class="pa-3">
+                <MudStack Spacing="1">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudChip T="string" Size="Size.Small" Color="@ConfidenceColor(option.ConfidenceScore)">
+                            @option.ConfidenceScore%
+                        </MudChip>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@option.Title</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Risk: @option.RiskLevel</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Predicted: @option.PredictedSuccessPercent%</MudChip>
+                    </MudStack>
+                    @if (!string.IsNullOrWhiteSpace(option.Description))
+                    {
+                        <MudText Typo="Typo.body2">@option.Description</MudText>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(option.ExpectedFix))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Expected fix: @option.ExpectedFix</MudText>
+                    }
+                    @if (option.AffectedFields.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption">Fields: @string.Join(", ", option.AffectedFields)</MudText>
+                    }
+                    @if (option.AffectedWorkflowSteps.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption">Workflow: @string.Join(" → ", option.AffectedWorkflowSteps)</MudText>
+                    }
+                    <MudStack Row="true" Spacing="2">
+                        <AuthorizeView Policy="@AuthPolicies.SourceRecoveryApply">
+                            <Authorized>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                           OnClick="@(() => PreviewAsync(option.OptionIndex))">
+                                    Preview Changes
+                                </MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                           Disabled="_applying || _showRetryProgress"
+                                           OnClick="@(() => ApplyAsync(option.OptionIndex))">
+                                    Apply &amp; Retry
+                                </MudButton>
+                            </Authorized>
+                        </AuthorizeView>
+                    </MudStack>
+                </MudStack>
+            </MudPaper>
+        }
+
+        @if (_analysis.ScreenshotFindings.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Screenshot findings</MudText>
+            @foreach (var finding in _analysis.ScreenshotFindings)
+            {
+                <MudText Typo="Typo.caption">• @finding</MudText>
+            }
+        }
+
+        @if (_analysis.HtmlFindings.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Style="font-weight:600;">HTML findings</MudText>
+            @foreach (var finding in _analysis.HtmlFindings)
+            {
+                <MudText Typo="Typo.caption">• @finding</MudText>
+            }
+        }
+
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid? DownloadJobId { get; set; }
+    [Parameter] public Guid? AttemptId { get; set; }
+    [Parameter] public EventCallback OnRecoveryApplied { get; set; }
+
+    private const int MaxFinalizePolls = 36;
+
+    private bool _loading;
+    private bool _analyzing;
+    private bool _applying;
+    private bool _showRetryProgress;
+    private int _retryProgress;
+    private string _retryProgressLabel = string.Empty;
+    private bool? _retryPdfSucceeded;
+    private string? _retryOutcomeMessage;
+    private SourceRecoveryAnalysisDto? _analysis;
+    private SourceRecoveryApplyResultDto? _applyResult;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AttemptId is Guid id && _analysis?.AttemptId != id)
+        {
+            await LoadAttemptAsync(id);
+        }
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        if (!DownloadJobId.HasValue) return;
+        _analyzing = true;
+        _applyResult = null;
+        ResetRetryOutcome();
+        try
+        {
+            _analysis = await Mediator.Send(new AnalyzeSourceRecoveryCommand(DownloadJobId.Value));
+            await OnRecoveryApplied.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"AI analysis failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _analyzing = false;
+        }
+    }
+
+    private async Task LoadAttemptAsync(Guid attemptId)
+    {
+        _loading = true;
+        try
+        {
+            _analysis = await Mediator.Send(new GetSourceRecoveryAnalysisQuery(attemptId));
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task PreviewAsync(int optionIndex)
+    {
+        if (_analysis is null) return;
+        try
+        {
+            var preview = await Mediator.Send(new PreviewSourceRecoveryCommand(_analysis.AttemptId, optionIndex));
+            var parameters = new DialogParameters<SourceRecoveryPreviewDialog>
+            {
+                { x => x.Preview, preview }
+            };
+            await DialogService.ShowAsync<SourceRecoveryPreviewDialog>("Preview configuration changes", parameters,
+                new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Preview failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ApplyAsync(int optionIndex)
+    {
+        if (_analysis is null) return;
+        _applying = true;
+        ResetRetryOutcome();
+        BeginRetryProgress(8, "Applying AI recovery fix to source configuration…");
+        try
+        {
+            _applyResult = await Mediator.Send(new ApplySourceRecoveryCommand(_analysis.AttemptId, optionIndex));
+            if (_applyResult.Status == SourceRecoveryAttemptStatus.PendingAdminApproval)
+            {
+                ResetRetryOutcome();
+                Snackbar.Add(_applyResult.Message, ApplySeverity(_applyResult.Status));
+                return;
+            }
+
+            if (_applyResult.Status == SourceRecoveryAttemptStatus.RetryEnqueued
+                || _applyResult.Status == SourceRecoveryAttemptStatus.CandidateApplied)
+            {
+                SetRetryProgress(22, "Configuration saved — starting PDF download retry…");
+                await PollFinalizeAsync(_applyResult.AttemptId);
+            }
+            else
+            {
+                Snackbar.Add(_applyResult.Message, ApplySeverity(_applyResult.Status));
+            }
+
+            await OnRecoveryApplied.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            CompleteRetryOutcome(
+                succeeded: false,
+                $"Apply & Retry failed: {ex.Message}");
+            Snackbar.Add($"Apply failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _applying = false;
+            if (_retryPdfSucceeded is null)
+            {
+                _showRetryProgress = false;
+            }
+        }
+    }
+
+    private async Task PollFinalizeAsync(Guid attemptId)
+    {
+        var consecutiveErrors = 0;
+        string? lastError = null;
+
+        for (var i = 0; i < MaxFinalizePolls; i++)
+        {
+            SetRetryProgress(
+                PollProgressPercent(i),
+                i < 3
+                    ? "Discovering PDF edition on source page…"
+                    : i < 10
+                        ? "Downloading and validating today's PDF…"
+                        : "Finalizing recovery attempt…");
+
+            try
+            {
+                var result = await Mediator.Send(new FinalizeSourceRecoveryAttemptCommand(attemptId));
+                consecutiveErrors = 0;
+                if (IsTerminalRecoveryStatus(result.Status))
+                {
+                    _applyResult = result;
+                    SetRetryProgress(100, "Complete.");
+                    CompleteRetryOutcome(
+                        result.Status == SourceRecoveryAttemptStatus.Succeeded,
+                        BuildOutcomeMessage(result));
+                    Snackbar.Add(result.Message, ApplySeverity(result.Status));
+                    await OnRecoveryApplied.InvokeAsync();
+                    StateHasChanged();
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                consecutiveErrors++;
+                lastError = ex.Message;
+                if (consecutiveErrors >= 3)
+                {
+                    Snackbar.Add($"Finalize check failed: {ex.Message}", Severity.Warning);
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+
+        try
+        {
+            var finalResult = await Mediator.Send(new FinalizeSourceRecoveryAttemptCommand(attemptId));
+            if (IsTerminalRecoveryStatus(finalResult.Status))
+            {
+                _applyResult = finalResult;
+                SetRetryProgress(100, "Complete.");
+                CompleteRetryOutcome(
+                    finalResult.Status == SourceRecoveryAttemptStatus.Succeeded,
+                    BuildOutcomeMessage(finalResult));
+                Snackbar.Add(finalResult.Message, ApplySeverity(finalResult.Status));
+                await OnRecoveryApplied.InvokeAsync();
+                StateHasChanged();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            lastError = ex.Message;
+        }
+
+        _applyResult = new SourceRecoveryApplyResultDto(
+            attemptId,
+            Guid.Empty,
+            null,
+            SourceRecoveryAttemptStatus.RetryEnqueued,
+            lastError ?? "Retry is still running. Check Download Monitor in a minute.");
+        CompleteRetryOutcome(
+            succeeded: false,
+            lastError is not null
+                ? $"Apply & Retry could not be finalized: {lastError}"
+                : "PDF download is still running. Refresh Download Monitor in a minute to confirm the result.");
+        Snackbar.Add(_applyResult.Message, Severity.Info);
+    }
+
+    private static bool IsTerminalRecoveryStatus(SourceRecoveryAttemptStatus status) =>
+        status is SourceRecoveryAttemptStatus.Succeeded
+            or SourceRecoveryAttemptStatus.Failed
+            or SourceRecoveryAttemptStatus.RolledBack;
+
+    private void ResetRetryOutcome()
+    {
+        _showRetryProgress = false;
+        _retryProgress = 0;
+        _retryProgressLabel = string.Empty;
+        _retryPdfSucceeded = null;
+        _retryOutcomeMessage = null;
+    }
+
+    private void BeginRetryProgress(int percent, string label)
+    {
+        _showRetryProgress = true;
+        _retryProgress = percent;
+        _retryProgressLabel = label;
+        StateHasChanged();
+    }
+
+    private void SetRetryProgress(int percent, string label)
+    {
+        _retryProgress = Math.Clamp(percent, 0, 100);
+        _retryProgressLabel = label;
+        StateHasChanged();
+    }
+
+    private void CompleteRetryOutcome(bool succeeded, string message)
+    {
+        _retryPdfSucceeded = succeeded;
+        _retryOutcomeMessage = message;
+        _showRetryProgress = false;
+        StateHasChanged();
+    }
+
+    private static int PollProgressPercent(int pollIndex) =>
+        25 + (int)Math.Round((pollIndex + 1) * 70.0 / MaxFinalizePolls);
+
+    private static string BuildOutcomeMessage(SourceRecoveryApplyResultDto result)
+    {
+        var detail = SimplifyFailureDetail(result.Message);
+        return result.Status switch
+        {
+            SourceRecoveryAttemptStatus.Succeeded =>
+                "PDF downloaded successfully. Today's edition is ready — use View/Download in Download Monitor or PDF Management.",
+            SourceRecoveryAttemptStatus.RolledBack =>
+                $"Apply & Retry finished without a valid PDF. The previous source settings were restored. {detail}",
+            SourceRecoveryAttemptStatus.Failed =>
+                $"Apply & Retry finished without a valid PDF. {detail}",
+            _ =>
+                $"Apply & Retry finished. {detail}"
+        };
+    }
+
+    private static string SimplifyFailureDetail(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "Check Download Monitor for the latest failure details.";
+        }
+
+        if (message.Contains("HTML", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("login", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The download returned an HTML login or error page instead of a PDF, so today's edition was not saved.";
+        }
+
+        if (message.Contains("HTML", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The download returned HTML instead of a PDF, so today's edition was not saved.";
+        }
+
+        return message.Trim();
+    }
+
+    private static bool HasAnalysisArtifacts(SourceRecoveryAnalysisDto analysis) =>
+        !string.IsNullOrWhiteSpace(analysis.ScreenshotUrl)
+        || !string.IsNullOrWhiteSpace(analysis.HtmlSnapshotUrl);
+
+    private static Color ConfidenceColor(int score) => score switch
+    {
+        >= 90 => Color.Success,
+        >= 70 => Color.Info,
+        >= 50 => Color.Warning,
+        _ => Color.Error
+    };
+
+    private static Severity ApplySeverity(SourceRecoveryAttemptStatus status) => status switch
+    {
+        SourceRecoveryAttemptStatus.Succeeded => Severity.Success,
+        SourceRecoveryAttemptStatus.PendingAdminApproval => Severity.Warning,
+        SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack => Severity.Error,
+        _ => Severity.Info
+    };
+
+}

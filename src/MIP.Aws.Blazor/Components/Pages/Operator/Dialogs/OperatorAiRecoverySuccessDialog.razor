@@ -1,0 +1,157 @@
+@using MIP.Aws.Application.Features.Operator
+@using MIP.Aws.Blazor.Components.Shared
+@inject IMediator Mediator
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_details is null)
+        {
+            <MudAlert Severity="Severity.Error">AI recovery details could not be loaded.</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="3">
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true"
+                          Icon="@(_details.IsAutomatic ? Icons.Material.Filled.SmartToy : Icons.Material.Filled.AutoFixHigh)">
+                    <MudText Typo="Typo.body2">
+                        @if (_details.IsAutomatic)
+                        {
+                            <text>Today's PDF was recovered by automatic AI recovery after a safe configuration fix was applied and retried.</text>
+                        }
+                        else
+                        {
+                            <text>Today's PDF was recovered after an operator-applied AI configuration fix was retried successfully.</text>
+                        }
+                    </MudText>
+                </MudAlert>
+
+                <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Original issue</MudText>
+                <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                    <tbody>
+                        <tr><td>Failure type</td><td>@_details.FailureType</td></tr>
+                        @if (!string.IsNullOrWhiteSpace(_details.FailureCode))
+                        {
+                            <tr><td>Failure code</td><td>@_details.FailureCode</td></tr>
+                        }
+                        <tr><td>When</td><td>@FormatWhen(_details.OriginalFailedAt)</td></tr>
+                        <tr><td>What happened</td><td>@_details.OriginalFailureMessage</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+                @if (HasFailureArtifacts(_details))
+                {
+                    <PortalFailureArtifactsPanel ScreenshotUrl="@_details.ScreenshotUrl"
+                                                 HtmlSnapshotUrl="@_details.HtmlSnapshotUrl" />
+                }
+
+                <MudText Typo="Typo.subtitle2" Style="font-weight:600;">AI fix applied</MudText>
+                <MudPaper Outlined="true" Class="pa-3">
+                    <MudStack Spacing="1">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@_details.AppliedOptionTitle</MudText>
+                            @if (_details.PredictedSuccessPercent is int predicted)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                                    Predicted @predicted%
+                                </MudChip>
+                            }
+                        </MudStack>
+                        @if (!string.IsNullOrWhiteSpace(_details.AppliedOptionDescription))
+                        {
+                            <MudText Typo="Typo.body2">@_details.AppliedOptionDescription</MudText>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_details.AppliedOptionExpectedFix))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Expected fix: @_details.AppliedOptionExpectedFix</MudText>
+                        }
+                    </MudStack>
+                </MudPaper>
+
+                @if (_details.ConfigurationChanges.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Configuration changes</MudText>
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                <th>Field</th>
+                                <th>Before</th>
+                                <th>After</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var change in _details.ConfigurationChanges)
+                            {
+                                <tr>
+                                    <td>@change.Field</td>
+                                    <td><code>@Display(change.BeforeValue)</code></td>
+                                    <td><code>@Display(change.AfterValue)</code></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+
+                <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Recovery outcome</MudText>
+                <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                    <tbody>
+                        <tr><td>Applied by</td><td>@_details.AppliedByLabel</td></tr>
+                        <tr><td>Applied at</td><td>@FormatWhen(_details.AppliedAt)</td></tr>
+                        <tr><td>Completed at</td><td>@FormatWhen(_details.RecoveryCompletedAt)</td></tr>
+                        @if (_details.ActualSuccessPercent is int actual)
+                        {
+                            <tr><td>Actual success</td><td>@actual%</td></tr>
+                        }
+                        <tr><td>Result</td><td>@_details.OutcomeSummary</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public Guid? RecoveryDownloadJobId { get; set; }
+    [Parameter] public Guid? AttemptId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+
+    private AiRecoverySuccessDetailsDto? _details;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (AttemptId is Guid attemptId)
+            {
+                _details = await Mediator.Send(new GetAiRecoverySuccessDetailsByAttemptQuery(attemptId));
+            }
+            else if (RecoveryDownloadJobId is Guid recoveryJobId)
+            {
+                _details = await Mediator.Send(new GetAiRecoverySuccessDetailsQuery(recoveryJobId));
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Close() => Dialog.Close();
+
+    private static string Display(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private static string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "—" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+
+    private static bool HasFailureArtifacts(AiRecoverySuccessDetailsDto details) =>
+        !string.IsNullOrWhiteSpace(details.ScreenshotUrl)
+        || !string.IsNullOrWhiteSpace(details.HtmlSnapshotUrl);
+}
