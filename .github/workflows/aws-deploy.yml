@@ -59,12 +59,15 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       - uses: hashicorp/setup-terraform@v3
+        if: github.event.inputs.apply_terraform == 'true'
 
       - name: Terraform Init
+        if: github.event.inputs.apply_terraform == 'true'
         working-directory: infra/terraform
         run: terraform init
 
       - name: Terraform Plan
+        if: github.event.inputs.apply_terraform == 'true'
         working-directory: infra/terraform
         env:
           TF_VAR_db_username: ${{ secrets.TF_VAR_db_username }}
