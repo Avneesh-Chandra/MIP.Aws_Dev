@@ -19,11 +19,20 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: aws-production
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify AWS secrets are configured
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::Missing GitHub secrets AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY."
+            echo "Add them at: Settings → Secrets and variables → Actions → Repository secrets"
+            echo "Use the same IAM access key as your local mip-dev profile (IAM → Users → Security credentials → Create access key)."
+            exit 1
+          fi
+          echo "AWS secrets present."
 
       - uses: actions/setup-dotnet@v4
         with:
