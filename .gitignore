@@ -32,9 +32,9 @@ secrets.json
 *.pfx
 *.publishsettings
 
-# Data
-storage/
-downloads/
+# Data (repo-root only — do not use bare storage/ or Abstractions/Storage is excluded)
+/storage/
+/downloads/
 logs/
 *.mdf
 *.ldf
