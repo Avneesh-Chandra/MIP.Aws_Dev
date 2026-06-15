@@ -7,11 +7,30 @@ public sealed class StorageOptions
 {
     public const string SectionName = "Storage";
 
+    /// <summary>local | S3</summary>
+    public string Provider { get; set; } = "local";
+
     /// <summary>When true, <see cref="RootPath"/> is treated as a full directory path.</summary>
     public bool UseAbsoluteRoot { get; set; }
 
+    /// <summary>Alias for <see cref="RootPath"/> used in docker/compose configs.</summary>
+    public string? LocalRoot
+    {
+        get => RootPath;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                RootPath = value;
+            }
+        }
+    }
+
     /// <summary>Base directory for all stored artifacts.</summary>
     public string RootPath { get; set; } = "App_Data/storage";
+
+    /// <summary>Presigned URL lifetime for S3 downloads.</summary>
+    public int PresignedUrlExpiryMinutes { get; set; } = 60;
 
     public string NewspapersRelativePath { get; set; } = "newspapers";
 

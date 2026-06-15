@@ -1,7 +1,7 @@
 namespace MIP.Aws.Application.Abstractions.Intelligence;
 
 /// <summary>
-/// Sanitized DOM candidate sent to Azure OpenAI for selector suggestion (no secrets).
+/// Sanitized DOM candidate sent to the AI provider for selector suggestion (no secrets).
 /// </summary>
 public sealed record PdfSelectorCandidateElement(
     string Tag,

@@ -38,12 +38,13 @@ using MIP.Aws.Infrastructure.Operator;
 using MIP.Aws.Infrastructure.Portal;
 using MIP.Aws.Infrastructure.Scheduling;
 using MIP.Aws.Infrastructure.Security;
-using MIP.Aws.Infrastructure.Storage;
+using MIP.Aws.Infrastructure.Reporting;
 using MIP.Aws.Infrastructure.Telemetry;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace MIP.Aws.Infrastructure;
@@ -60,10 +61,14 @@ public static class DependencyInjection
     public static IServiceCollection AddMipAwsInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
+        IHostEnvironment environment,
         bool enableHangfireProcessing = true)
     {
         services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
         services.Configure<PdfEditionSchedulerOptions>(configuration.GetSection(PdfEditionSchedulerOptions.SectionName));
+        services.Configure<MailAutomationOptions>(configuration.GetSection(MailAutomationOptions.SectionName));
+        services.Configure<MailOptions>(configuration.GetSection(MailOptions.SectionName));
+        services.Configure<EmailSafetyOptions>(configuration.GetSection(EmailSafetyOptions.SectionName));
         services.Configure<AutoAiDownloadRecoveryOptions>(configuration.GetSection(AutoAiDownloadRecoveryOptions.SectionName));
         services.Configure<AiSourceRecoveryOptions>(configuration.GetSection(AiSourceRecoveryOptions.SectionName));
         services.Configure<NewsIngestionComplianceOptions>(configuration.GetSection(NewsIngestionComplianceOptions.SectionName));
@@ -118,7 +123,6 @@ public static class DependencyInjection
         services.AddScoped<IPdfEditionAdminNotificationService, PdfEditionAdminNotificationService>();
         services.AddScoped<IPdfSelectorSuggestionService, NoopPdfSelectorSuggestionService>();
         services.AddScoped<SourceRecoveryContextBuilder>();
-        services.AddScoped<IAiSelectorSuggestionService, News.PdfEdition.SelectorSuggestion.NoopSelectorSuggestionService>();
         services.AddScoped<IDownloadManager, NewsDownloadManager>();
         services.AddSingleton<INewsDownloadJobScheduler, HangfireNewsDownloadJobScheduler>();
         services.AddSingleton<IIntelligenceJobScheduler, NoopIntelligenceJobScheduler>();
@@ -126,8 +130,7 @@ public static class DependencyInjection
         services.AddSingleton<IDownloadMonitorBatchRunService, DownloadMonitorBatchRunService>();
         services.AddScoped<IDownloadMonitorDailyStatusEmailService, DownloadMonitorDailyStatusEmailService>();
 
-        services.AddSingleton<IAiRecoveryProvider, MockAiRecoveryProvider>();
-        services.AddScoped<IAISourceRecoveryService, MockSourceRecoveryService>();
+        services.AddMipAwsAi(configuration, environment);
         services.AddScoped<ISourceRecoveryAnalysisService, SourceRecoveryService>();
         services.AddScoped<ISourceRecoveryOrchestrator, SourceRecoveryOrchestrator>();
         services.AddScoped<IAiRecoverySuggestionRanker, AiRecoverySuggestionRanker>();
@@ -142,9 +145,9 @@ public static class DependencyInjection
         services.AddTransient<DownloadMonitorScheduledJobs>();
         services.AddSingleton<IScheduledJobRegistry, HangfireScheduledJobRegistry>();
 
-        services.AddSingleton<IFileStorageService, LocalFileStorageService>();
-        services.AddSingleton<ISecretStore, LocalDataProtectionSecretStore>();
-        services.AddSingleton<IReportEmailSender, MockReportEmailSender>();
+        services.AddScoped<IMailSettingsService, MailSettingsService>();
+        services.AddScoped<IMailConfigStatusService, MailConfigStatusService>();
+        services.AddSingleton<ReportEmailSafetyService>();
         services.AddSingleton<IAuditService, NoopAuditService>();
         services.AddMemoryCache();
 
@@ -192,52 +195,6 @@ internal sealed class NoopAuditService : IAuditService
 
     public Task RecordOcrProcessingAsync(Guid downloadedFileId, bool success, string? failureReason, TimeSpan duration, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
-}
-
-internal sealed class MockSourceRecoveryService(IAiRecoveryProvider provider) : IAISourceRecoveryService
-{
-    public bool IsEnabled => true;
-
-    public async Task<SourceRecoveryAnalysisDto> AnalyzeFailureAsync(
-        Guid newsSourceId,
-        Guid downloadJobId,
-        Guid actorUserId,
-        CancellationToken cancellationToken)
-    {
-        var analysis = await provider.AnalyzeAsync(
-            new SourceRecoveryAnalysisRequest(
-                newsSourceId,
-                "source",
-                "download_failed",
-                "Download failed",
-                null,
-                null),
-            cancellationToken).ConfigureAwait(false);
-        return analysis with { SourceId = newsSourceId };
-    }
-
-    public async Task<IReadOnlyList<SourceRecoveryOptionDto>> GenerateRecoveryOptionsAsync(
-        SourceRecoveryAnalysisContext context,
-        CancellationToken cancellationToken)
-    {
-        var analysis = await provider.AnalyzeAsync(
-            new SourceRecoveryAnalysisRequest(
-                context.SourceId,
-                context.SourceName,
-                context.FailureType,
-                context.FailureMessage,
-                context.HtmlSnapshot,
-                context.ScreenshotReference),
-            cancellationToken).ConfigureAwait(false);
-        return analysis.Options;
-    }
-
-    public int PredictSuccessProbability(SourceRecoveryOptionDto option) => option.PredictedSuccessPercent;
-
-    public int RecommendBestOptionIndex(IReadOnlyList<SourceRecoveryOptionDto> options) => options.Count > 0 ? 0 : -1;
-
-    public SourceRecoveryConfigurationPatchDto CreateConfigurationPatch(SourceRecoveryOptionDto option) =>
-        option.Patch;
 }
 
 internal sealed class MockReportEmailSender(ILogger<MockReportEmailSender> logger) : IReportEmailSender

@@ -48,3 +48,12 @@ Thumbs.db
 playwright-report/
 test-results/
 .ms-playwright/
+
+# Local build/deploy artifacts
+artifacts/
+*.log
+bedrock-*.json
+test-*.json
+out-*.json
+cookies.txt
+monitor.html

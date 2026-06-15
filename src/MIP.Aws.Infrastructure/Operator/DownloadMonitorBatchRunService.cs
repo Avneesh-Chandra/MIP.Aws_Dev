@@ -48,7 +48,7 @@ public sealed class DownloadMonitorBatchRunService(
 
         var startedAt = DateTimeOffset.UtcNow;
         var hangfireJobId = BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
-            j => j.ScheduleStaggeredDailyDownloadsAsync());
+            j => j.ExecuteOperatorPdfBatchAsync(startedAt));
 
         var entry = new BatchCacheEntry(startedAt, sources.Count, hangfireJobId);
         cache.Set(ActiveBatchCacheKey, entry, BatchCacheTtl);

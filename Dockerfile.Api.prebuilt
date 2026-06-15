@@ -1,0 +1,43 @@
+######################################################################
+# MIP.Aws API — pre-published on host (avoids in-container dotnet restore)
+# Build: dotnet publish ... -o artifacts/api-publish
+#        docker build -f Dockerfile.Api.prebuilt -t mip-aws-api:local .
+######################################################################
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS playwright-install
+WORKDIR /install
+COPY artifacts/api-publish/ .
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget ca-certificates bash nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g playwright@1.49.0 \
+    && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    DOTNET_NOLOGO=1 \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+EXPOSE 8080
+RUN groupadd --system mip && useradd --system --gid mip --home /app mip
+COPY artifacts/api-publish/ .
+COPY --from=playwright-install /ms-playwright /ms-playwright
+COPY --from=playwright-install /install/.playwright /app/.playwright
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget ca-certificates bash nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g playwright@1.49.0 \
+    && playwright install-deps chromium \
+    && find /app/.playwright -type f \( -name node -o -name '*.sh' \) -exec chmod 755 {} + 2>/dev/null || true \
+    && mkdir -p /app/storage \
+    && chown -R mip:mip /app /ms-playwright
+USER mip
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget --spider --quiet http://localhost:8080/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "MIP.Aws.Api.dll"]

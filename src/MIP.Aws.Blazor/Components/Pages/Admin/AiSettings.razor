@@ -1,0 +1,108 @@
+@page "/admin/ai-settings"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Authorize(Roles = ApplicationRoles.SuperAdmin)]
+@using MIP.Aws.Application.Abstractions.Intelligence
+@using MIP.Aws.Domain.Security
+@inject IAiProviderFactory ProviderFactory
+@inject IAiBedrockTestService BedrockTestService
+
+<PageTitle>AI Settings</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <MudText Typo="Typo.h5" Class="mb-2">AI Settings</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+        Local Bedrock testing uses your AWS CLI profile (e.g. <code>mip-dev</code>) in <code>eu-north-1</code>.
+    </MudText>
+
+    @if (_loadError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">@_loadError</MudAlert>
+    }
+    else if (_status is null)
+    {
+        <MudAlert Severity="Severity.Error">Unable to load AI status.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="pa-4 mb-4">
+            <MudStack Spacing="2">
+                <MudText><strong>Active provider:</strong> @_status.Provider</MudText>
+                <MudText><strong>AI enabled:</strong> @(_status.Enabled ? "Yes" : "No")</MudText>
+                <MudText><strong>Mock mode:</strong> @(_status.MockMode ? "Yes" : "No")</MudText>
+                <MudText><strong>Bedrock region:</strong> @(_status.Region ?? "—")</MudText>
+                <MudText><strong>Bedrock model:</strong> @(_status.ModelId ?? "—")</MudText>
+                <MudText><strong>AWS profile:</strong> @(_status.AwsProfile ?? "(default credential chain)")</MudText>
+                <MudText><strong>Last test:</strong> @(_status.LastTestStatus ?? "—")</MudText>
+                <MudText><strong>Last request:</strong> @(_status.LastRequestAt?.ToString("u") ?? "—")</MudText>
+                @if (!string.IsNullOrWhiteSpace(_status.LastError))
+                {
+                    <MudAlert Severity="Severity.Warning">@_status.LastError</MudAlert>
+                }
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Test Bedrock</MudText>
+            <MudTextField @bind-Value="_testPrompt" Label="Prompt" Lines="3" Variant="Variant.Outlined" Class="mb-3" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_testing" OnClick="RunTestAsync">
+                @(_testing ? "Testing…" : "Test Bedrock")
+            </MudButton>
+
+            @if (_testResult is not null)
+            {
+                <MudAlert Severity="@(_testResult.Success ? Severity.Success : Severity.Error)" Class="mt-3">
+                    @if (_testResult.Success)
+                    {
+                        <div><strong>Success</strong> (@_testResult.LatencyMs ms)</div>
+                        <div class="mt-2">@_testResult.Output</div>
+                    }
+                    else
+                    {
+                        <div><strong>Failed</strong></div>
+                        <div class="mt-2">@_testResult.Error</div>
+                    }
+                </MudAlert>
+            }
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private AiAdminStatusDto? _status;
+    private string? _loadError;
+    private BedrockTestResult? _testResult;
+    private bool _testing;
+    private string _testPrompt = "Suggest a safe PDF selector recovery for a failed newspaper download.";
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            RefreshStatus();
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Failed to load AI settings: {ex.Message}";
+        }
+    }
+
+    private void RefreshStatus()
+    {
+        _status = ProviderFactory.GetAdminStatus();
+    }
+
+    private async Task RunTestAsync()
+    {
+        _testing = true;
+        _testResult = null;
+        try
+        {
+            _testResult = await BedrockTestService.TestAsync(new BedrockTestRequest(_testPrompt));
+            RefreshStatus();
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+}

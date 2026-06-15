@@ -12,4 +12,10 @@ public sealed class MailSettings : AuditableEntity
     public string? RedirectAllTo { get; set; }
 
     public string SubjectPrefix { get; set; } = "[GFH-MIP-TEST]";
+
+    public string? StatusEmailRecipient { get; set; }
+
+    public bool? StatusEmailEnabled { get; set; }
+
+    public bool? MailAutomationEnabled { get; set; }
 }

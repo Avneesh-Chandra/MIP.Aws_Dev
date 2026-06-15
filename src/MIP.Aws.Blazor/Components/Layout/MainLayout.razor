@@ -234,6 +234,12 @@
             Add("Hangfire", "/hangfire", Icons.Material.Filled.Work);
         }
 
+        if (user.IsInRole(ApplicationRoles.SuperAdmin))
+        {
+            Add("AI settings", "/admin/ai-settings", Icons.Material.Filled.Psychology);
+            Add("Mail settings", "/admin/mail-settings", Icons.Material.Filled.Email);
+        }
+
         return items;
     }
 

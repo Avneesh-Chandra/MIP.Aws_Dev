@@ -73,16 +73,34 @@ See `Dockerfile.Api`, `Dockerfile.Worker`, and `docker-compose.yml`.
 
 ## AWS deployment overview
 
-Target architecture:
+Target architecture (Terraform in `infra/terraform/`):
 
 - **ECS Fargate** — API container (Blazor + Hangfire + Playwright)
 - **RDS SQL Server** — app + Hangfire databases
-- **S3** — PDF and artifact storage
-- **SES** — download monitor status email
+- **S3** — PDF and artifact storage (`AwsS3FileStorageService`)
+- **SES** — download monitor status email (`AwsSesEmailSender`)
 - **Secrets Manager** — JWT signing key, DB credentials, PressReader credentials
 - **CloudWatch** — logs and metrics
 
-Full guide: [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)
+| Guide | Purpose |
+|-------|---------|
+| [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) | Step-by-step deployment |
+| [docs/AWS_DATABASE_MIGRATIONS.md](docs/AWS_DATABASE_MIGRATIONS.md) | EF migrations on RDS |
+| [docs/AWS_COST_CONTROL.md](docs/AWS_COST_CONTROL.md) | Low-cost defaults |
+| [docs/AWS_SECURITY.md](docs/AWS_SECURITY.md) | IAM, secrets, network |
+
+### GitHub Actions
+
+- `aws-ci.yml` — build, test, Terraform validate
+- `aws-deploy.yml` — manual ECR push + Terraform (workflow_dispatch)
+
+### Required GitHub Secrets
+
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `TF_VAR_db_username`, `TF_VAR_db_password`, `TF_VAR_mip_bucket_name`, `TF_VAR_ses_sender_email`, `TF_VAR_jwt_signing_key`
+
+### Deploy scripts
+
+`scripts/aws-login.ps1`, `build-images.ps1`, `push-ecr.ps1`, `terraform-plan.ps1`, `terraform-apply.ps1`, `update-ecs.ps1`, `run-migrations.ps1`
 
 ## Configuration
 

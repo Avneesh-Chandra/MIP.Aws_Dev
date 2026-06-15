@@ -15,6 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\MIP.Aws.Api\MIP.Aws.Api.csproj" />
+    <ProjectReference Include="..\..\src\MIP.Aws.Application\MIP.Aws.Application.csproj" />
+    <ProjectReference Include="..\..\src\MIP.Aws.Infrastructure\MIP.Aws.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

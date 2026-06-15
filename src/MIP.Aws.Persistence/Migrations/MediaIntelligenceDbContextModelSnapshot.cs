@@ -1761,6 +1761,9 @@ namespace MIP.Aws.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<bool?>("MailAutomationEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<DateTimeOffset?>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -1776,6 +1779,13 @@ namespace MIP.Aws.Persistence.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<string>("StatusEmailRecipient")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<bool?>("StatusEmailEnabled")
+                        .HasColumnType("bit");
 
                     b.Property<string>("SubjectPrefix")
                         .IsRequired()

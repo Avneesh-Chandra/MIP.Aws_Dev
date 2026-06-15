@@ -1,0 +1,20 @@
+######################################################################
+# MIP.Aws API — slim image (no Playwright). Use for mail/admin deploy
+# when Docker disk is constrained. PDF downloads need Dockerfile.Api.
+######################################################################
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_RUNNING_IN_CONTAINER=true
+EXPOSE 8080
+RUN groupadd --system mip && useradd --system --gid mip --home /app mip \
+    && mkdir -p /app/storage && chown -R mip:mip /app
+COPY artifacts/api-publish/ .
+USER mip
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget --spider --quiet http://localhost:8080/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "MIP.Aws.Api.dll"]

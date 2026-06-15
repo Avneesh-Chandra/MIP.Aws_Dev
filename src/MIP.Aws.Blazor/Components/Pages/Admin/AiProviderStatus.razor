@@ -1,0 +1,45 @@
+@page "/admin/ai-provider"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = $"{ApplicationRoles.SuperAdmin},{ApplicationRoles.ContentAdmin}")]
+@using MIP.Aws.Application.Abstractions.Intelligence
+@using MIP.Aws.Domain.Security
+@inject IAiProviderFactory ProviderFactory
+
+<PageTitle>AI Provider</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <MudText Typo="Typo.h5" Class="mb-4">AI Provider Status</MudText>
+
+    @if (_status is null)
+    {
+        <MudAlert Severity="Severity.Error">Unable to load AI provider status.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="2">
+                <MudText><strong>Active provider:</strong> @_status.ActiveProvider</MudText>
+                <MudText><strong>AI enabled:</strong> @(_status.AiEnabled ? "Yes" : "No")</MudText>
+                <MudText><strong>Mock mode:</strong> @(_status.MockMode ? "Yes" : "No")</MudText>
+                <MudText><strong>Bedrock enabled:</strong> @(_status.BedrockEnabled ? "Yes" : "No")</MudText>
+                <MudText><strong>Bedrock region:</strong> @(_status.BedrockRegion ?? "—")</MudText>
+                <MudText><strong>Bedrock model:</strong> @(_status.BedrockModelId ?? "—")</MudText>
+                <MudText><strong>Last request:</strong> @(_status.LastRequestAt?.ToString("u") ?? "—")</MudText>
+                <MudText><strong>Last status:</strong> @(_status.LastRequestStatus ?? "—")</MudText>
+                @if (!string.IsNullOrWhiteSpace(_status.LastError))
+                {
+                    <MudAlert Severity="Severity.Warning">@_status.LastError</MudAlert>
+                }
+            </MudStack>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private AiProviderStatusDto? _status;
+
+    protected override void OnInitialized()
+    {
+        _status = ProviderFactory.GetStatus();
+    }
+}

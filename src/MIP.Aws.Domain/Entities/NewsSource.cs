@@ -137,7 +137,7 @@ public class NewsSource : AuditableEntity
 
     public bool PdfDiscoveryEnabled { get; set; }
 
-    /// <summary>When true, AI selector suggestions may be requested for this source (also requires global Azure OpenAI).</summary>
+    /// <summary>When true, AI selector suggestions may be requested for this source (also requires global AI/Bedrock configuration).</summary>
     public bool AiSelectorSuggestionEnabled { get; set; }
 
     /// <summary>When null, inherits global Auto AI Download Recovery setting.</summary>

@@ -1,0 +1,90 @@
+name: AWS Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_terraform:
+        description: "Run terraform apply after plan"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      image_tag:
+        description: "Docker image tag"
+        required: false
+        default: "latest"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aws-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: mip-aws-dev-api
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          docker build -f Dockerfile.Api -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Build and push Worker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: mip-aws-dev-worker
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          docker build -f Dockerfile.Worker -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        env:
+          TF_VAR_db_username: ${{ secrets.TF_VAR_db_username }}
+          TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+          TF_VAR_mip_bucket_name: ${{ secrets.TF_VAR_mip_bucket_name }}
+          TF_VAR_ses_sender_email: ${{ secrets.TF_VAR_ses_sender_email }}
+          TF_VAR_jwt_signing_key: ${{ secrets.TF_VAR_jwt_signing_key }}
+          TF_VAR_api_image_tag: ${{ github.event.inputs.image_tag }}
+          TF_VAR_worker_image_tag: ${{ github.event.inputs.image_tag }}
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+          TF_VAR_bedrock_region: ${{ vars.BEDROCK_REGION || secrets.AWS_REGION }}
+          TF_VAR_bedrock_model_id: ${{ vars.BEDROCK_MODEL_ID }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.event.inputs.apply_terraform == 'true'
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Force ECS API service redeploy
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecs update-service --cluster mip-aws-dev-cluster --service mip-aws-dev-api --force-new-deployment --region $AWS_REGION
+          aws ecs update-service --cluster mip-aws-dev-cluster --service mip-aws-dev-worker --force-new-deployment --region $AWS_REGION || true

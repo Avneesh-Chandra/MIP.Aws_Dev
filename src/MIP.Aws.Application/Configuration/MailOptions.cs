@@ -4,14 +4,15 @@ public enum MailActiveProvider
 {
     AzureCommunicationServices,
     MicrosoftGraph,
-    Smtp
+    Smtp,
+    AwsSes
 }
 
 public sealed class MailOptions
 {
     public const string SectionName = "Mail";
 
-    public MailActiveProvider ActiveProvider { get; set; } = MailActiveProvider.AzureCommunicationServices;
+    public MailActiveProvider ActiveProvider { get; set; } = MailActiveProvider.AwsSes;
 
     public bool DevelopmentSafetyEnabled { get; set; } = true;
 

@@ -1,0 +1,60 @@
+# AviAws — first-time eu-north-1 (Stockholm), minimal cost, no NAT
+# Copy to terraform.tfvars and replace CHANGE_ME values. NEVER commit terraform.tfvars.
+#
+#   copy infra\terraform\terraform.tfvars.avi-aws.example infra\terraform\terraform.tfvars
+#
+# Pre-flight:
+#   $env:AWS_PROFILE = "mip-dev"
+#   $env:AWS_REGION  = "eu-north-1"
+#   aws sts get-caller-identity --profile mip-dev
+
+# --- Region & naming ---
+aws_region   = "eu-north-1"
+project_name = "mip-aws"
+environment  = "dev"
+
+# Globally unique S3 bucket (lowercase, no underscores). Pattern: aviaws-mip-<region>-<env>-<suffix>
+# Example suffix: last 4 digits of AWS account id (640533249094 → 9094)
+mip_bucket_name = "aviaws-mip-eun1-dev-9094"
+
+# --- Database (smallest practical SQL Server Express) ---
+db_username = "mipadmin"
+db_password = "CHANGE_ME_STRONG_PASSWORD_20_CHARS_MIN"
+db_name     = "MIPAws"
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20
+db_engine            = "sqlserver-ex"
+
+# --- Auth (32+ characters) ---
+jwt_signing_key = "CHANGE_ME_MINIMUM_32_CHARACTER_JWT_SIGNING_KEY!!"
+
+# --- Email (must be verified in SES eu-north-1 before sending) ---
+ses_sender_email       = "noreply@your-domain.example"
+status_email_recipient = "ops@your-domain.example"
+
+# Set after first terraform apply (terraform output alb_dns_name), then re-apply or update ECS env
+admin_portal_url = "http://CHANGE_ME_AFTER_ALB_DEPLOY"
+
+# --- ECS (minimal Fargate; Hangfire runs in API — worker optional) ---
+enable_nat_gateway   = false
+api_desired_count    = 1
+worker_desired_count = 0
+api_cpu              = 256
+api_memory           = 1024
+worker_cpu           = 256
+worker_memory        = 512
+
+# --- Observability ---
+cloudwatch_retention_days = 7
+
+# --- Bedrock AI (pay-per-use; enable model access in console first) ---
+enable_bedrock   = true
+bedrock_region   = "eu-north-1"
+bedrock_model_id = "anthropic.claude-3-5-haiku-20241022-v1:0"
+
+# Link all Terraform resources to myApplications → MIP_Aws_Test (AviAws)
+aws_application_arn = "arn:aws:resource-groups:eu-north-1:640533249094:group/MIP_Aws_Test/0cp7d3a9r0n4a7f512w9eup5jy"
+
+# --- Images (push to ECR after apply) ---
+api_image_tag    = "latest"
+worker_image_tag = "latest"

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Features.NewsSources.PdfEdition;
 using MIP.Aws.Application.Features.Operator;
+using MIP.Aws.Application.Features.Reports;
 using MIP.Aws.Domain.Security;
 using MIP.Aws.Shared.Responses;
 using MediatR;
@@ -154,6 +155,18 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
     public sealed record OperatorNoteRequest(string Note);
 
     public sealed record InformAdminRequest(string? OperatorNote);
+
+    [HttpPost("download-monitor/send-status-email")]
+    [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<bool>>> SendStatusEmailAsync(
+        [FromQuery] DateOnly? date,
+        CancellationToken cancellationToken)
+    {
+        await mediator.Send(new SendDownloadMonitorStatusEmailCommand(date), cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(ApiResponse<bool>.Ok(true, "Download monitor status email sent."));
+    }
 
     private Guid GetActorUserId()
     {

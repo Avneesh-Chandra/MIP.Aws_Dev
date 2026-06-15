@@ -38,6 +38,46 @@ This guide describes deploying MIP.Aws to Amazon Web Services. The application i
 ## Prerequisites
 
 - AWS account with permissions for ECS, ECR, RDS, S3, SES, Secrets Manager, IAM, VPC
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- AWS CLI v2 configured (`aws configure` or environment variables)
+- Docker Desktop (local image builds)
+- GitHub repository secrets configured (see below)
+
+## Quick start (Terraform)
+
+```powershell
+cd D:\MIPaws
+copy infra\terraform\terraform.tfvars.example infra\terraform\terraform.tfvars
+# Edit terraform.tfvars — NEVER commit this file
+
+.\scripts\aws-login.ps1
+.\scripts\build-images.ps1
+.\scripts\terraform-plan.ps1
+# Review plan, then:
+.\scripts\terraform-apply.ps1
+.\scripts\push-ecr.ps1
+.\scripts\update-ecs.ps1
+.\scripts\run-migrations.ps1
+```
+
+Infrastructure code: `infra/terraform/` with modules for VPC, ECS, RDS, S3, SES, ALB, IAM, CloudWatch, Secrets Manager, ECR.
+
+## GitHub Secrets (deploy workflow)
+
+| Secret | Purpose |
+|--------|---------|
+| `AWS_ACCESS_KEY_ID` | CI/CD AWS auth |
+| `AWS_SECRET_ACCESS_KEY` | CI/CD AWS auth |
+| `AWS_REGION` | e.g. `us-east-1` |
+| `TF_VAR_db_username` | RDS master user |
+| `TF_VAR_db_password` | RDS master password |
+| `TF_VAR_mip_bucket_name` | Globally unique S3 bucket |
+| `TF_VAR_ses_sender_email` | Verified SES sender |
+| `TF_VAR_jwt_signing_key` | 32+ char JWT key |
+
+Trigger deploy: **Actions → AWS Deploy → Run workflow** (set `apply_terraform=true` only after reviewing plan).
+
+## Prerequisites (services)
 - Verified SES sender domain or email address
 - SQL Server-compatible RDS instance (or existing SQL Server)
 - Container image built from `Dockerfile.Api` and pushed to ECR

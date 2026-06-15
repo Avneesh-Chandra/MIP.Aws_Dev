@@ -1,0 +1,45 @@
+# Build outputs (largest offenders — often 1GB+)
+**/bin/
+**/obj/
+_publish-check/
+publish/
+out/
+
+# Git / IDE / OS
+.git/
+.gitignore
+.vs/
+.vscode/
+.cursor/
+*.user
+*.suo
+Thumbs.db
+.DS_Store
+
+# Terraform / deploy artifacts
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/.terraform.lock.hcl
+terraform-apply*.log
+build-images*.log
+docker-*.log
+
+# Secrets / local config (never in images)
+**/appsettings.Development.json
+**/terraform.tfvars
+**/deploy.auto.tfvars
+**/*.tfvars.bak
+.env
+.env.*
+
+# Docs / CI (not needed in container)
+docs/
+.github/
+*.md
+!README.md
+
+# Tests (API Dockerfile does not publish tests)
+tests/
+
+# Docker build cache from failed runs
+**/.docker/

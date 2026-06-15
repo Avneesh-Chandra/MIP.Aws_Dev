@@ -1,8 +1,8 @@
 namespace MIP.Aws.Application.Configuration;
 
 /// <summary>
-/// Single source of truth for Polly retry / circuit-breaker / timeout knobs. Specific Azure services
-/// can override the defaults via per-service sub-sections.
+/// Single source of truth for Polly retry / circuit-breaker / timeout knobs. Per-service sub-sections
+/// can override the defaults.
 /// </summary>
 public sealed class ResilienceOptions
 {
@@ -10,7 +10,7 @@ public sealed class ResilienceOptions
 
     public ResiliencePolicy Default { get; set; } = new();
 
-    public ResiliencePolicy AzureOpenAi { get; set; } = new()
+    public ResiliencePolicy BedrockAi { get; set; } = new()
     {
         RetryCount = 5,
         BaseDelayMilliseconds = 800,

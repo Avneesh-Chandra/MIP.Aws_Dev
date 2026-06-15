@@ -6,7 +6,7 @@ using MIP.Aws.Application.Abstractions.Intelligence;
 namespace MIP.Aws.Infrastructure.News.PdfEdition.SelectorSuggestion;
 
 /// <summary>
-/// Removes secrets and sensitive form data before sending page content to Azure OpenAI.
+/// Removes secrets and sensitive form data before sending page content to the AI provider.
 /// </summary>
 public static partial class PdfSelectorSuggestionSanitizer
 {

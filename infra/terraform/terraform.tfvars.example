@@ -1,0 +1,36 @@
+# Copy to terraform.tfvars and fill values locally — NEVER commit terraform.tfvars
+aws_region   = "us-east-1"
+project_name = "mip-aws"
+environment  = "dev"
+
+mip_bucket_name = "your-unique-mip-aws-bucket-name"
+
+db_username = "mipadmin"
+db_password = "CHANGE_ME_STRONG_PASSWORD"
+db_name     = "MIPAws"
+
+jwt_signing_key = "CHANGE_ME_MINIMUM_32_CHARACTER_SIGNING_KEY"
+
+ses_sender_email       = "noreply@your-domain.example"
+status_email_recipient = "ops@your-domain.example"
+admin_portal_url       = "https://api.your-domain.example"
+
+enable_bedrock   = true
+bedrock_region   = "eu-north-1"
+bedrock_model_id = "anthropic.claude-3-5-haiku-20241022-v1:0"
+
+enable_nat_gateway = false
+api_desired_count  = 1
+worker_desired_count = 1
+api_cpu    = 256
+api_memory = 1024
+worker_cpu    = 256
+worker_memory = 512
+
+cloudwatch_retention_days = 14
+db_instance_class         = "db.t3.small"
+db_allocated_storage      = 20
+db_engine                 = "sqlserver-ex"
+
+api_image_tag    = "latest"
+worker_image_tag = "latest"

@@ -6,12 +6,19 @@ namespace MIP.Aws.Infrastructure.Operator;
 
 public static class DownloadMonitorStatusEmailHtmlBuilder
 {
-    public static string Build(DownloadMonitorDto monitor, string portalBaseUrl)
+    public static string Build(DownloadMonitorDto monitor, string portalBaseUrl, string? executiveSummary = null)
     {
         var monitorUrl = $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor";
         var sb = new StringBuilder();
         sb.Append("<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2937;max-width:1100px;\">");
         sb.Append("<h2 style=\"color:#0A2342;margin:0 0 16px;\">GFH Media Intelligence — Download Monitor</h2>");
+
+        if (!string.IsNullOrWhiteSpace(executiveSummary))
+        {
+            sb.Append("<p style=\"margin:0 0 16px;line-height:1.5;\">")
+                .Append(WebUtility.HtmlEncode(executiveSummary))
+                .Append("</p>");
+        }
 
         AppendSummaryCards(sb, monitor);
         AppendAttentionSection(sb, monitor, monitorUrl);

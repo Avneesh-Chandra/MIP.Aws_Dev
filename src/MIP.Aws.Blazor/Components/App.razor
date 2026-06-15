@@ -11,7 +11,7 @@
        an RCL, the keys are:
          - RCL assets:        _content/<RCL>/<path>
          - Host scoped CSS:   <HostProject>.styles.css   (named after the consuming web project,
-                                                          NOT the RCL — see staticwebassets.build.endpoints.json)
+                                                          NOT the RCL ï¿½ see staticwebassets.build.endpoints.json)
        Using the wrong key makes @Assets[...] fall back to the literal key, which then 404s and
        leaves the page completely unstyled (login form, MudBlazor sizing rules, etc). *@
     <link rel="stylesheet" href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" />

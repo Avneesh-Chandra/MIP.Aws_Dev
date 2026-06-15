@@ -28,7 +28,7 @@ public sealed class MarketDataOptions
     /// <summary>When true, fall back to <see cref="MarketDataProviderType.MockProvider"/> if the requested provider is unavailable.</summary>
     public bool AllowMockFallback { get; set; } = true;
 
-    /// <summary>Opt-in AI market commentary toggle. Requires <c>AzureOpenAI:Enabled=true</c>.</summary>
+    /// <summary>Opt-in AI market commentary toggle. Requires <c>Ai:Enabled=true</c> and a configured Bedrock provider.</summary>
     public bool EnableAiCommentary { get; set; } = false;
 
     /// <summary>Bahrain Bourse (BHB) integration settings for API and Playwright providers.</summary>

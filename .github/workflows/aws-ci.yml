@@ -1,4 +1,4 @@
-name: AWS Build
+name: AWS CI
 
 on:
   push:
@@ -7,14 +7,12 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
 
@@ -27,15 +25,26 @@ jobs:
       - name: Test
         run: dotnet test MIP.Aws.slnx --configuration Release --no-build --verbosity normal
 
-      - name: Publish API
+      - name: Publish API artifact
         run: dotnet publish src/MIP.Aws.Api/MIP.Aws.Api.csproj -c Release -o ./artifacts/api
 
-      - name: Publish Worker
+      - name: Publish Worker artifact
         run: dotnet publish src/MIP.Aws.Worker/MIP.Aws.Worker.csproj -c Release -o ./artifacts/worker
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: mip-aws-publish
           path: artifacts/
           retention-days: 7
+
+  validate-terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate

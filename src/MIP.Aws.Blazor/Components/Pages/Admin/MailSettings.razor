@@ -1,0 +1,229 @@
+@page "/admin/mail-settings"
+@attribute [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
+@using MIP.Aws.Application.Configuration
+@using MIP.Aws.Application.Features.Reports
+@using MIP.Aws.Domain.Security
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+@rendermode InteractiveServer
+
+<PageTitle>Mail settings</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Primary" Size="Size.Large" />
+        <MudText Typo="Typo.h4" Style="font-weight:700;">Mail settings</MudText>
+        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">AWS SES</MudChip>
+        <MudSpacer />
+        <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="ReloadAsync">Refresh</MudButton>
+    </MudStack>
+
+    @if (_status?.DevelopmentSafetyEnabled == true)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+            Development safety is active. All outbound mail is redirected to <strong>@(_status.RedirectAllTo ?? "—")</strong>
+            with subject prefix applied.
+        </MudAlert>
+    }
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" lg="6">
+            <MudPaper Class="pa-4" Outlined="true">
+                <MudText Typo="Typo.h6" Class="mb-3">Download monitor status email</MudText>
+                <MudSwitch T="bool" @bind-Value="_statusEmailEnabled" Label="Send daily status email" Color="Color.Primary" />
+                <MudTextField T="string" Label="Status email recipient" @bind-Value="_statusEmailRecipient"
+                              Variant="Variant.Outlined" Class="mt-2" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                    Scheduled at @_statusEmailTimeUtc UTC (also sent after Execute PDF download task completes).
+                </MudText>
+                <MudSwitch T="bool" @bind-Value="_mailAutomationEnabled" Label="Mail automation enabled" Color="Color.Primary" Class="mt-3" />
+                <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSchedulerAsync">
+                    Save scheduler settings
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" lg="6">
+            <MudPaper Class="pa-4" Outlined="true">
+                <MudText Typo="Typo.h6" Class="mb-3">AWS SES provider</MudText>
+                @if (_status is null)
+                {
+                    <MudProgressLinear Indeterminate="true" />
+                }
+                else
+                {
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.body2">Provider: <strong>AWS SES</strong></MudText>
+                        <MudText Typo="Typo.body2">SES enabled: @(_status.SesEnabled ? "Yes" : "No")</MudText>
+                        <MudText Typo="Typo.body2">Sender configured: @(_status.SesSenderConfigured ? "Yes" : "No")</MudText>
+                        <MudText Typo="Typo.body2">From: @(_status.FromEmail ?? "—")</MudText>
+                        <MudText Typo="Typo.body2">Ready: @(_status.IsReady ? "Yes" : "No")</MudText>
+                    </MudStack>
+                    @if (!string.IsNullOrWhiteSpace(_status.ConfigurationMessage))
+                    {
+                        <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">@_status.ConfigurationMessage</MudAlert>
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" lg="6">
+            <MudPaper Class="pa-4" Outlined="true">
+                <MudText Typo="Typo.h6" Class="mb-3">Development safety</MudText>
+                <MudSwitch T="bool" @bind-Value="_developmentSafety" Label="Development safety enabled" Color="Color.Warning" />
+                <MudTextField T="string" Label="Redirect all to" @bind-Value="_redirectTo" Variant="Variant.Outlined" Class="mt-2" />
+                <MudTextField T="string" Label="Subject prefix" @bind-Value="_subjectPrefix" Variant="Variant.Outlined" Class="mt-2" />
+                <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSafetyAsync">
+                    Save safety settings
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="pa-4" Outlined="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Actions</MudText>
+        <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Send"
+                       Disabled="_busy || _status?.IsReady != true" OnClick="SendTestEmailAsync">Send test email</MudButton>
+            <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MonitorHeart"
+                       Disabled="_busy || _status?.IsReady != true" OnClick="SendStatusEmailAsync">Send status email now</MudButton>
+        </MudStack>
+        @if (_lastTest is not null)
+        {
+            <MudAlert Severity="@(_lastTest.Success ? Severity.Success : Severity.Error)" Class="mt-3" Dense="true">
+                Test @(_lastTest.Success ? "sent" : "failed") via @_lastTest.Provider.
+                @if (_lastTest.MessageId is not null) { <text> MessageId: @_lastTest.MessageId</text> }
+                @if (_lastTest.EmailLogId is not null) { <text> · EmailLog: @_lastTest.EmailLogId</text> }
+                @if (_lastTest.Error is not null) { <text> · @_lastTest.Error</text> }
+            </MudAlert>
+        }
+    </MudPaper>
+
+    <MudPaper Class="pa-4" Outlined="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Recent email logs</MudText>
+        <MudTable Items="_logs" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>When</MudTh>
+                <MudTh>Provider</MudTh>
+                <MudTh>To</MudTh>
+                <MudTh>Subject</MudTh>
+                <MudTh>Status</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CreatedAt.ToString("g")</MudTd>
+                <MudTd>@context.Provider</MudTd>
+                <MudTd>@context.To</MudTd>
+                <MudTd>@context.Subject</MudTd>
+                <MudTd>@context.Status</MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private bool _busy;
+    private MailConfigStatusDto? _status;
+    private bool _developmentSafety = true;
+    private string _redirectTo = "avneesh.c@almoayyedcomputers.com";
+    private string _subjectPrefix = "[GFH-MIP-TEST]";
+    private bool _statusEmailEnabled = true;
+    private string _statusEmailRecipient = "Avneesh.c@almoayyedcomputers.com";
+    private bool _mailAutomationEnabled = true;
+    private string _statusEmailTimeUtc = "05:00";
+    private TestEmailResponseDto? _lastTest;
+    private IReadOnlyList<EmailLogListItemDto> _logs = [];
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            _status = await Mediator.Send(new GetMailConfigStatusQuery());
+            var settings = await Mediator.Send(new GetMailSettingsQuery());
+            _developmentSafety = settings.DevelopmentSafetyEnabled;
+            _redirectTo = settings.RedirectAllTo ?? _redirectTo;
+            _subjectPrefix = settings.SubjectPrefix ?? _subjectPrefix;
+            _statusEmailEnabled = settings.StatusEmailEnabled;
+            _statusEmailRecipient = settings.StatusEmailRecipient;
+            _mailAutomationEnabled = settings.MailAutomationEnabled;
+            _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
+            _logs = await Mediator.Send(new GetRecentEmailLogsQuery(25));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveSafetyAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Mediator.Send(new UpdateMailSettingsCommand(
+                MailActiveProvider.AwsSes,
+                _developmentSafety,
+                _redirectTo,
+                _subjectPrefix));
+            Snackbar.Add("Safety settings saved.", Severity.Success);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveSchedulerAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Mediator.Send(new UpdateMailSchedulerSettingsCommand(
+                _statusEmailEnabled,
+                _statusEmailRecipient,
+                _mailAutomationEnabled));
+            Snackbar.Add("Scheduler mail settings saved.", Severity.Success);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SendTestEmailAsync()
+    {
+        _busy = true;
+        try
+        {
+            _lastTest = await Mediator.Send(new SendTestReportEmailCommand(
+                _statusEmailRecipient,
+                "GFH MIP AWS — test email",
+                "<p>This is a test email from <strong>GFH MIP AWS</strong>.</p>"));
+            Snackbar.Add(_lastTest.Success ? "Test email sent." : "Test email failed.", _lastTest.Success ? Severity.Success : Severity.Error);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SendStatusEmailAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(null));
+            Snackbar.Add("Status email sent.", Severity.Success);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

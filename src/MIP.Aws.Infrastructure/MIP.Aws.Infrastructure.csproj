@@ -11,6 +11,7 @@
     <ProjectReference Include="..\MIP.Aws.Persistence\MIP.Aws.Persistence.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="3.7.403.13" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.410.12" />
     <PackageReference Include="AWSSDK.SecretsManager" Version="3.7.400.85" />
     <PackageReference Include="AWSSDK.SimpleEmailV2" Version="3.7.402.34" />

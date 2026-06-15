@@ -3,7 +3,7 @@ using MIP.Aws.Domain.Entities;
 namespace MIP.Aws.Application.Abstractions.Intelligence;
 
 /// <summary>
-/// Azure OpenAI-backed enrichment for a single extracted article (licensed text only).
+/// Bedrock-backed enrichment for a single extracted article (licensed text only).
 /// </summary>
 public interface IAiIntelligenceService
 {
