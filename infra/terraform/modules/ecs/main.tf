@@ -80,9 +80,9 @@ resource "aws_ecs_task_definition" "api" {
 
   container_definitions = jsonencode([
     {
-      name      = "api"
-      image     = "${var.api_repository_url}:${var.api_image_tag}"
-      essential = true
+      name         = "api"
+      image        = "${var.api_repository_url}:${var.api_image_tag}"
+      essential    = true
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       environment = [
         { name = "ASPNETCORE_ENVIRONMENT", value = "Development" },
