@@ -77,6 +77,8 @@ public static class DependencyInjection
         services.Configure<RedisCacheOptions>(configuration.GetSection(RedisCacheOptions.SectionName));
         services.AddSingleton<ICacheService, InMemoryCacheService>();
 
+        services.AddMipAwsCloudServices(configuration);
+
         services.AddHttpClient(nameof(PdfEditionContentFetcher));
         services.AddHttpClient(nameof(ResilientContentDownloader));
 
