@@ -134,9 +134,11 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(IApplicationDbContext d
             var title = a.SelectedOptionIndex >= 0
                 ? options.FirstOrDefault(o => o.OptionIndex == a.SelectedOptionIndex)?.Title
                 : null;
-            var appliedBy = a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
-                ? user.Email ?? user.UserName ?? uid.ToString()
-                : "—";
+            var appliedBy = a.IsAutomatic
+                ? "Automatic AI Recovery"
+                : a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
+                    ? user.Email ?? user.UserName ?? uid.ToString()
+                    : "—";
             return new SourceRecoveryHistoryItemDto(
                 a.Id,
                 a.NewsSourceId,
@@ -150,6 +152,7 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(IApplicationDbContext d
                 a.ResultSummary,
                 a.PredictedSuccessPercent,
                 a.ActualSuccessPercent,
+                a.IsAutomatic,
                 a.CreatedAt,
                 a.CompletedAt);
         }).ToList();

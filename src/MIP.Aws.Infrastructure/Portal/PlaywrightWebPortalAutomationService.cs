@@ -623,7 +623,7 @@ public sealed class PlaywrightWebPortalAutomationService(
             if (!string.IsNullOrWhiteSpace(pwdPayload))
             {
                 return (false,
-                    "Stored credentials cannot be decrypted. Re-enter the portal password in PressReader settings and save again.",
+                    "Stored credentials cannot be decrypted (encryption keys may have changed after a server restart). Re-enter the portal password in source settings and save again.",
                     "CredentialsNeedReEntry",
                     null,
                     null);

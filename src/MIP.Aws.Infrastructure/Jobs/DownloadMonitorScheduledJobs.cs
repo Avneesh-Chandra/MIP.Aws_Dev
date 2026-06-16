@@ -62,7 +62,8 @@ public sealed class DownloadMonitorScheduledJobs(
     /// <summary>
     /// Operator "Execute PDF download task": stagger all monitored sources, wait for completion, send status email.
     /// </summary>
-    [AutomaticRetry(Attempts = 0)]
+    [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
+    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [120, 300], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task ExecuteOperatorPdfBatchAsync(DateTimeOffset batchStartedAt)
     {
         using var scope = scopeFactory.CreateScope();

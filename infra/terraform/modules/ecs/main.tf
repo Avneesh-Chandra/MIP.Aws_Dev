@@ -85,7 +85,7 @@ resource "aws_ecs_task_definition" "api" {
       essential    = true
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       environment = [
-        { name = "ASPNETCORE_ENVIRONMENT", value = "Development" },
+        { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
         { name = "ASPNETCORE_URLS", value = "http://+:8080" },
         { name = "Aws__Region", value = var.aws_region },
         { name = "Aws__S3__Enabled", value = "true" },
@@ -116,6 +116,7 @@ resource "aws_ecs_task_definition" "api" {
         { name = "Aws__Bedrock__TimeoutSeconds", value = "60" },
         { name = "IdentitySeed__DefaultAdminEmail", value = "superadmin@mip.local" },
         { name = "IdentitySeed__DefaultAdminPassword", value = var.identity_default_admin_password },
+        { name = "Application__DisplayTimeZoneId", value = "Asia/Bahrain" },
         { name = "Auth__UseHttpsCookies", value = "false" }
       ]
       secrets = [
@@ -132,9 +133,9 @@ resource "aws_ecs_task_definition" "api" {
       healthCheck = {
         command     = ["CMD-SHELL", "wget --spider -q http://localhost:8080/health/live || exit 1"]
         interval    = 30
-        timeout     = 5
+        timeout     = 10
         retries     = 3
-        startPeriod = 60
+        startPeriod = 120
       }
     }
   ])

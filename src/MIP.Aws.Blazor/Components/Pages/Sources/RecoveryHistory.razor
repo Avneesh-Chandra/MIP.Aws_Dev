@@ -1,0 +1,162 @@
+@page "/sources/recovery-history"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = AuthPolicies.SourceRecoveryView)]
+@using MIP.Aws.Application.Features.Operator
+@using MIP.Aws.Application.Features.SourceRecovery
+@using MIP.Aws.Blazor.Components.Pages.Operator.Dialogs
+@using MIP.Aws.Domain.Enums
+@using static MIP.Aws.Application.Features.Operator.DownloadMonitorStatusLabels
+@inject IMediator Mediator
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Recovery History — GFH MIP AWS</PageTitle>
+
+<MudStack Spacing="4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h4" Style="font-weight:700;">Recovery History</MudText>
+        <MudSpacer />
+        <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Date" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" MaxDate="DateTime.Today" Clearable="true" />
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+            Refresh
+        </MudButton>
+    </MudStack>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_items.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">
+            @(_selectedDate.HasValue
+                ? $"No recovery attempts for {_selectedDate.Value:yyyy-MM-dd}."
+                : "No recovery attempts found.")
+        </MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_items" Dense="true" Hover="true" Bordered="true">
+            <HeaderContent>
+                <MudTh>Date</MudTh>
+                <MudTh>Source</MudTh>
+                <MudTh>Failure</MudTh>
+                <MudTh>AI suggestion</MudTh>
+                <MudTh>Applied by</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Result</MudTh>
+                <MudTh>Success %</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@UserTz.Format(context.CreatedAt, "yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd>@context.SourceName</MudTd>
+                <MudTd>@context.FailureType</MudTd>
+                <MudTd>@(context.SelectedOptionTitle ?? "—")</MudTd>
+                <MudTd>@context.AppliedByLabel</MudTd>
+                <MudTd>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@FormatStatus(context)</MudChip>
+                        @if (IsAiRecoverySuccess(context))
+                        {
+                            <MudTooltip Text="View AI recovery details">
+                                <MudIconButton Icon="@Icons.Material.Filled.Info"
+                                               Size="Size.Small"
+                                               Color="Color.Success"
+                                               aria-label="View AI recovery details"
+                                               OnClick="@(() => ViewAiRecoveryDetailsAsync(context))" />
+                            </MudTooltip>
+                        }
+                    </MudStack>
+                </MudTd>
+                <MudTd>
+                    @if (!string.IsNullOrWhiteSpace(context.ResultSummary))
+                    {
+                        <MudText Typo="Typo.caption">@Truncate(context.ResultSummary, 100)</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Tertiary">—</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.PredictedSuccessPercent is int predicted)
+                    {
+                        <span>@predicted% → @(context.ActualSuccessPercent?.ToString() ?? "—")%</span>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private DateTime? _selectedDate = DateTime.UtcNow.Date;
+    private IReadOnlyList<SourceRecoveryHistoryItemDto> _items = Array.Empty<SourceRecoveryHistoryItemDto>();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnDateChanged(DateTime? value)
+    {
+        _selectedDate = value;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
+            _items = await Mediator.Send(new GetSourceRecoveryHistoryQuery(100, date));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load history: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static bool IsAiRecoverySuccess(SourceRecoveryHistoryItemDto item) =>
+        item.Status == SourceRecoveryAttemptStatus.Succeeded;
+
+    private static string FormatSuccessStatus(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic ? SuccessByAutoAiRecovery : SuccessByAiRecovery;
+
+    private async Task ViewAiRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item)
+    {
+        var parameters = new DialogParameters<OperatorAiRecoverySuccessDialog>
+        {
+            { x => x.AttemptId, item.AttemptId },
+            { x => x.RecoveryDownloadJobId, item.RetryDownloadJobId },
+            { x => x.SourceName, item.SourceName }
+        };
+        await DialogService.ShowAsync<OperatorAiRecoverySuccessDialog>($"AI recovery — {item.SourceName}", parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
+    }
+
+    private static string FormatStatus(SourceRecoveryHistoryItemDto item) =>
+        item.Status == SourceRecoveryAttemptStatus.Succeeded
+            ? FormatSuccessStatus(item)
+            : System.Text.RegularExpressions.Regex.Replace(item.Status.ToString(), "([a-z])([A-Z])", "$1 $2");
+
+    private static Color StatusColor(SourceRecoveryAttemptStatus status) => status switch
+    {
+        SourceRecoveryAttemptStatus.Succeeded => Color.Success,
+        SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack => Color.Error,
+        SourceRecoveryAttemptStatus.PendingAdminApproval => Color.Warning,
+        _ => Color.Info
+    };
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max] + "…";
+}

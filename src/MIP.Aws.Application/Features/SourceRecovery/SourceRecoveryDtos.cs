@@ -72,6 +72,7 @@ public sealed record SourceRecoveryHistoryItemDto(
     string? ResultSummary,
     int? PredictedSuccessPercent,
     int? ActualSuccessPercent,
+    bool IsAutomatic,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt);
 

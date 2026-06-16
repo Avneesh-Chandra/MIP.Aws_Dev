@@ -85,12 +85,12 @@ variable "identity_default_admin_password" {
 
 variable "api_cpu" {
   type    = number
-  default = 256
+  default = 512
 }
 
 variable "api_memory" {
   type    = number
-  default = 1024
+  default = 2048
 }
 
 variable "worker_cpu" {

@@ -228,6 +228,13 @@
             Add("Download Monitor", "/operator/download-monitor", Icons.Material.Filled.MonitorHeart);
         }
 
+        if (user.IsInRole(ApplicationRoles.MIPOperator)
+            || user.IsInRole(ApplicationRoles.SuperAdmin)
+            || user.IsInRole(ApplicationRoles.ContentAdmin))
+        {
+            Add("Recovery history", "/sources/recovery-history", Icons.Material.Filled.History);
+        }
+
         if (user.IsInRole(ApplicationRoles.SuperAdmin) || user.IsInRole(ApplicationRoles.ContentAdmin))
         {
             Add("PDF management", "/admin/pdf-management", Icons.Material.Filled.PictureAsPdf);

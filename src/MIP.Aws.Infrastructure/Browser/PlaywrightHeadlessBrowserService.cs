@@ -17,12 +17,8 @@ public sealed class PlaywrightHeadlessBrowserService(ILogger<PlaywrightHeadlessB
     {
         try
         {
-            using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-            {
-                Headless = true,
-                Args = ["--disable-blink-features=AutomationControlled"]
-            }).ConfigureAwait(false);
+            using var playwright = await PlaywrightBrowserLaunch.CreatePlaywrightAsync().ConfigureAwait(false);
+            await using var browser = await PlaywrightBrowserLaunch.LaunchChromiumAsync(playwright).ConfigureAwait(false);
 
             var locale = ResolveLocale(url);
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
@@ -84,16 +80,34 @@ public sealed class PlaywrightHeadlessBrowserService(ILogger<PlaywrightHeadlessB
 
         if (url.Host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase))
         {
-            try
+            for (var attempt = 0; attempt < Math.Min(45, waitMs / 2000 + 1); attempt++)
             {
-                await page.WaitForSelectorAsync(
-                    "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href$='.pdf']",
-                    new PageWaitForSelectorOptions { Timeout = waitMs, State = WaitForSelectorState.Attached })
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // Fall through with whatever HTML is available.
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    await page.WaitForSelectorAsync(
+                        "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href$='.pdf']",
+                        new PageWaitForSelectorOptions { Timeout = 2_000, State = WaitForSelectorState.Attached })
+                        .ConfigureAwait(false);
+                    return;
+                }
+                catch (TimeoutException)
+                {
+                }
+
+                var html = await page.ContentAsync().ConfigureAwait(false);
+                if (PublisherAccessGuard.LooksLikePublisherEpaper(html))
+                {
+                    return;
+                }
+
+                if (!PublisherAccessGuard.IsAccessBlocked(html))
+                {
+                    return;
+                }
+
+                await Task.Delay(2_000, cancellationToken).ConfigureAwait(false);
             }
 
             return;

@@ -79,6 +79,7 @@ public static class DependencyInjection
         services.AddSingleton<ICacheService, InMemoryCacheService>();
 
         services.AddMipAwsCloudServices(configuration);
+        services.AddMipAwsDataProtection(configuration, environment);
 
         services.AddHttpClient(nameof(PdfEditionContentFetcher));
         services.AddHttpClient(nameof(ResilientContentDownloader));
