@@ -3,7 +3,9 @@
 @using MIP.Aws.Application.Configuration
 @using MIP.Aws.Application.Features.Reports
 @using MIP.Aws.Domain.Security
+@using MIP.Aws.Application.Time
 @inject IMediator Mediator
+@inject IUserTimeZone UserTz
 @inject ISnackbar Snackbar
 @rendermode InteractiveServer
 
@@ -32,9 +34,10 @@
                 <MudText Typo="Typo.h6" Class="mb-3">Download monitor status email</MudText>
                 <MudSwitch T="bool" @bind-Value="_statusEmailEnabled" Label="Send daily status email" Color="Color.Primary" />
                 <MudTextField T="string" Label="Status email recipient" @bind-Value="_statusEmailRecipient"
-                              Variant="Variant.Outlined" Class="mt-2" />
+                              Variant="Variant.Outlined" Class="mt-2"
+                              HelperText="Semicolon-separated recipients for download monitor status email" />
                 <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
-                    Scheduled at @_statusEmailTimeUtc UTC (also sent after Execute PDF download task completes).
+                    Scheduled at @_statusEmailLocalTime @MipDisplayTimeZone.ZoneSuffix() (@_statusEmailTimeUtc UTC; also sent after Execute PDF download task completes).
                 </MudText>
                 <MudSwitch T="bool" @bind-Value="_mailAutomationEnabled" Label="Mail automation enabled" Color="Color.Primary" Class="mt-3" />
                 <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSchedulerAsync">
@@ -71,7 +74,8 @@
             <MudPaper Class="pa-4" Outlined="true">
                 <MudText Typo="Typo.h6" Class="mb-3">Development safety</MudText>
                 <MudSwitch T="bool" @bind-Value="_developmentSafety" Label="Development safety enabled" Color="Color.Warning" />
-                <MudTextField T="string" Label="Redirect all to" @bind-Value="_redirectTo" Variant="Variant.Outlined" Class="mt-2" />
+                <MudTextField T="string" Label="Redirect all to" @bind-Value="_redirectTo" Variant="Variant.Outlined" Class="mt-2"
+                              HelperText="Semicolon-separated addresses for development safety redirect" />
                 <MudTextField T="string" Label="Subject prefix" @bind-Value="_subjectPrefix" Variant="Variant.Outlined" Class="mt-2" />
                 <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSafetyAsync">
                     Save safety settings
@@ -110,7 +114,7 @@
                 <MudTh>Status</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>@context.CreatedAt.ToString("g")</MudTd>
+                <MudTd>@UserTz.Format(context.CreatedAt)</MudTd>
                 <MudTd>@context.Provider</MudTd>
                 <MudTd>@context.To</MudTd>
                 <MudTd>@context.Subject</MudTd>
@@ -124,12 +128,13 @@
     private bool _busy;
     private MailConfigStatusDto? _status;
     private bool _developmentSafety = true;
-    private string _redirectTo = "avneesh.c@almoayyedcomputers.com";
+    private string _redirectTo = "avneesh.c@almoayyedcomputers.com;cavneesh18@gmail.com";
     private string _subjectPrefix = "[GFH-MIP-TEST]";
     private bool _statusEmailEnabled = true;
-    private string _statusEmailRecipient = "Avneesh.c@almoayyedcomputers.com";
+    private string _statusEmailRecipient = "Avneesh.c@almoayyedcomputers.com;cavneesh18@gmail.com";
     private bool _mailAutomationEnabled = true;
     private string _statusEmailTimeUtc = "05:00";
+    private string _statusEmailLocalTime = "08:00";
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
 
@@ -149,6 +154,7 @@
             _statusEmailRecipient = settings.StatusEmailRecipient;
             _mailAutomationEnabled = settings.MailAutomationEnabled;
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
+            _statusEmailLocalTime = MipDisplayTimeZone.FormatUtcTimeOfDay(settings.StatusEmailTimeUtc);
             _logs = await Mediator.Send(new GetRecentEmailLogsQuery(25));
         }
         finally

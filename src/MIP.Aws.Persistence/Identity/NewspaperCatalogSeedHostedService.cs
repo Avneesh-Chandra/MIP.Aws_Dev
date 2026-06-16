@@ -405,6 +405,9 @@ public sealed class NewspaperCatalogSeedHostedService(
             source.DownloadMenuItemSelector ??= "li:has-text('تنزيل'), [role='menuitem']:has-text('تنزيل'), button:has-text('تنزيل')";
             source.ContextMenuSelector ??= "[class*='page-actions'] button, [class*='toolbar'] button[class*='more']";
             source.NewspaperCanvasSelector ??= "[class*='issue-page'], [class*='page-image'], #reader";
+            source.DownloadWaitTimeoutSeconds = Math.Max(
+                source.DownloadWaitTimeoutSeconds,
+                DarAlKhaleejPressReaderBaseline.DownloadWaitTimeoutSeconds);
             source.ModifiedAt = DateTimeOffset.UtcNow;
         }
 

@@ -1,6 +1,7 @@
 @using MIP.Aws.Application.Features.Operator
 @using MIP.Aws.Blazor.Components.Shared
 @inject IMediator Mediator
+@inject IUserTimeZone UserTz
 
 <MudDialog>
     <DialogContent>
@@ -148,8 +149,8 @@
     private static string Display(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "—" : value;
 
-    private static string FormatWhen(DateTimeOffset? value) =>
-        value is null ? "—" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+    private string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "—" : UserTz.Format(value);
 
     private static bool HasFailureArtifacts(AiRecoverySuccessDetailsDto details) =>
         !string.IsNullOrWhiteSpace(details.ScreenshotUrl)

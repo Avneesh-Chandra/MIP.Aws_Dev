@@ -23,17 +23,21 @@ public sealed class OperatorDownloadMonitorService(
     IPdfEditionFailureArtifactService failureArtifacts,
     PortalArtifactUrlBuilder artifactUrls,
     ISourceRecoveryOrchestrator recoveryOrchestrator,
+    IAutoAiDownloadRecoveryEnqueueService autoAiRecoveryEnqueue,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
     IOptions<MailAutomationOptions> mailAutomation,
     ILogger<OperatorDownloadMonitorService> logger) : IOperatorDownloadMonitorService
 {
-    private static readonly TimeSpan StaleRunningJobThreshold = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan RecoveryRunningJobThreshold = TimeSpan.FromMinutes(5);
-
     public async Task<DownloadMonitorDto> GetMonitorAsync(DateOnly? monitorDate, CancellationToken cancellationToken)
     {
         await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
-        await ReconcileStaleDownloadJobsAsync(cancellationToken).ConfigureAwait(false);
+        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                db,
+                recoveryOrchestrator,
+                autoAiRecoveryEnqueue,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var (dayStart, dayEnd) = DayBounds(date);
@@ -754,19 +758,19 @@ public sealed class OperatorDownloadMonitorService(
                 .ToHashSet());
     }
 
-    private async Task<IReadOnlyDictionary<Guid, Guid>> LoadRecoveryRetryJobAttemptIdsAsync(
+    private async Task<IReadOnlyDictionary<Guid, RecoveryRetryJobLink>> LoadRecoveryRetryJobAttemptIdsAsync(
         IReadOnlyList<DownloadJob> jobs,
         CancellationToken cancellationToken)
     {
         var jobIds = jobs.Select(j => j.Id).ToList();
         if (jobIds.Count == 0)
         {
-            return new Dictionary<Guid, Guid>();
+            return new Dictionary<Guid, RecoveryRetryJobLink>();
         }
 
         var rows = await db.SourceRecoveryAttempts.AsNoTracking()
             .Where(a => !a.IsDeleted && a.RetryDownloadJobId != null && jobIds.Contains(a.RetryDownloadJobId.Value))
-            .Select(a => new { JobId = a.RetryDownloadJobId!.Value, a.Id, a.CompletedAt, a.AppliedAt })
+            .Select(a => new { JobId = a.RetryDownloadJobId!.Value, a.Id, a.IsAutomatic, a.CompletedAt, a.AppliedAt })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -774,7 +778,11 @@ public sealed class OperatorDownloadMonitorService(
             .GroupBy(r => r.JobId)
             .ToDictionary(
                 g => g.Key,
-                g => g.OrderByDescending(x => x.CompletedAt ?? x.AppliedAt).First().Id);
+                g =>
+                {
+                    var best = g.OrderByDescending(x => x.CompletedAt ?? x.AppliedAt).First();
+                    return new RecoveryRetryJobLink(best.Id, best.IsAutomatic);
+                });
     }
 
     private async Task<IReadOnlyDictionary<Guid, Guid>> LoadLatestFileIdBySucceededJobIdAsync(
@@ -812,20 +820,31 @@ public sealed class OperatorDownloadMonitorService(
         IReadOnlyList<PdfEditionDownload> allDayPdfs,
         (HashSet<Guid> PendingInterventionJobIds, HashSet<Guid> AcknowledgedInterventionJobIds) interventionJobIds,
         IReadOnlyDictionary<Guid, Guid> fileIdByJobId,
-        IReadOnlyDictionary<Guid, Guid> recoveryRetryJobAttemptIds)
+        IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds)
     {
         var sourceJobs = allDayJobs.Where(j => j.NewsSourceId == source.Id).OrderByDescending(j => j.CreatedAt).ToList();
         var sourcePdfs = allDayPdfs.Where(p => p.NewsSourceId == source.Id).OrderByDescending(p => p.CreatedAt).ToList();
 
-        var latestJob = PickDisplayJob(sourceJobs, recoveryRetryJobAttemptIds);
+        var latestJob = PickDisplayJob(source, sourceJobs, recoveryRetryJobAttemptIds);
         var latestPdf = sourcePdfs.FirstOrDefault();
+        var downloadedForDay = PickDownloadedPdfForDay(sourcePdfs, date, dayStart, dayEnd);
 
-        var lastActivity = PickLatestActivity(latestJob, latestPdf);
+        var lastActivity = PickLatestActivity(latestJob, latestPdf, downloadedForDay);
         var status = ResolveStatus(source, lastActivity.Job, lastActivity.Pdf);
-        var failureReason = lastActivity.Job?.ErrorMessage ?? lastActivity.Pdf?.FailureReason;
-        var failureCode = lastActivity.Job is not null
-            ? ExtractFailureCode(lastActivity.Job.ErrorMessage)
-            : lastActivity.Pdf is not null ? MapPdfFailureCode(lastActivity.Pdf.Status) : null;
+        if (downloadedForDay is not null
+            && status is DownloadMonitorStatusLabels.InProgress or DownloadMonitorStatusLabels.Pending)
+        {
+            status = DownloadMonitorStatusLabels.Success;
+        }
+
+        var failureReason = DownloadMonitorStatusLabels.IsSuccessful(status)
+            ? null
+            : lastActivity.Job?.ErrorMessage ?? lastActivity.Pdf?.FailureReason;
+        var failureCode = DownloadMonitorStatusLabels.IsSuccessful(status)
+            ? null
+            : lastActivity.Job is not null
+                ? ExtractFailureCode(lastActivity.Job.ErrorMessage)
+                : lastActivity.Pdf is not null ? MapPdfFailureCode(lastActivity.Pdf.Status) : null;
 
         var complianceBlocked = status == DownloadMonitorStatusLabels.ComplianceBlocked;
         var manualRequired = ManualInterventionSuggestions.RequiresManualIntervention(
@@ -851,6 +870,13 @@ public sealed class OperatorDownloadMonitorService(
             lastSuccess = dlAt;
         }
 
+        if ((lastSuccess is not null || downloadedForDay is not null)
+            && !DownloadMonitorStatusLabels.IsSuccessful(status)
+            && status != DownloadMonitorStatusLabels.ComplianceBlocked)
+        {
+            status = ResolveDaySuccessStatus(sourceJobs, dayStart, dayEnd, recoveryRetryJobAttemptIds);
+        }
+
         DateTimeOffset? lastFailed = LatestTerminalTimestamp(
             sourceJobs
                 .Where(j => j.Status == DownloadJobStatus.Failed)
@@ -863,12 +889,14 @@ public sealed class OperatorDownloadMonitorService(
             ?? lastActivity.Pdf?.DownloadedAt ?? lastActivity.Pdf?.DiscoveredAt ?? lastActivity.Pdf?.CreatedAt;
 
         Guid? latestFileId = null;
-        Guid? latestJobId = latestJob?.Id ?? latestPdf?.DownloadJobId;
-        if (status == DownloadMonitorStatusLabels.Success)
+        Guid? latestJobId = latestJob?.Id ?? downloadedForDay?.DownloadJobId ?? latestPdf?.DownloadJobId;
+        if (DownloadMonitorStatusLabels.IsSuccessful(status))
         {
-            latestJobId = sourceJobs.FirstOrDefault(j => j.Status == DownloadJobStatus.Succeeded)?.Id
+            latestJobId = downloadedForDay?.DownloadJobId
+                ?? sourceJobs.FirstOrDefault(j => j.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery)?.Id
                 ?? sourcePdfs.FirstOrDefault(p => p.Status == PdfEditionStatus.Downloaded)?.DownloadJobId;
-            latestFileId = sourcePdfs.FirstOrDefault(p => p.Status == PdfEditionStatus.Downloaded)?.DownloadedFileId;
+            latestFileId = downloadedForDay?.DownloadedFileId
+                ?? sourcePdfs.FirstOrDefault(p => p.Status == PdfEditionStatus.Downloaded)?.DownloadedFileId;
 
             if (latestFileId is null
                 && latestJobId is Guid succeededJobId
@@ -877,14 +905,19 @@ public sealed class OperatorDownloadMonitorService(
                 latestFileId = portalFileId;
             }
 
-            if (latestJobId is Guid displayJobId
-                && sourceJobs.FirstOrDefault(j => j.Id == displayJobId)?.Status == DownloadJobStatus.SuccessWithAutoAiRecovery)
+            if (IsAiRecoverySuccess(sourceJobs, latestJobId, recoveryRetryJobAttemptIds)
+                && latestJobId is Guid successJobId
+                && recoveryRetryJobAttemptIds.TryGetValue(successJobId, out var successRecoveryLink))
             {
-                status = DownloadMonitorStatusLabels.SuccessWithAutoAiRecovery;
+                status = successRecoveryLink.IsAutomatic
+                    ? DownloadMonitorStatusLabels.SuccessByAutoAiRecovery
+                    : DownloadMonitorStatusLabels.SuccessByAiRecovery;
             }
-            else if (IsAiRecoverySuccess(sourceJobs, latestJobId, recoveryRetryJobAttemptIds))
+            else if (latestJobId is Guid displayJobId
+                     && sourceJobs.FirstOrDefault(j => j.Id == displayJobId)?.Status
+                         == DownloadJobStatus.SuccessWithAutoAiRecovery)
             {
-                status = DownloadMonitorStatusLabels.SuccessByAiRecovery;
+                status = DownloadMonitorStatusLabels.SuccessByAutoAiRecovery;
             }
         }
         else if (manualRequired)
@@ -905,9 +938,9 @@ public sealed class OperatorDownloadMonitorService(
         if ((status == DownloadMonitorStatusLabels.SuccessByAiRecovery
              || status == DownloadMonitorStatusLabels.SuccessWithAutoAiRecovery)
             && latestJobId is Guid recoveryJobId
-            && recoveryRetryJobAttemptIds.TryGetValue(recoveryJobId, out var attemptId))
+            && recoveryRetryJobAttemptIds.TryGetValue(recoveryJobId, out var recoveryLink))
         {
-            aiRecoveryAttemptId = attemptId;
+            aiRecoveryAttemptId = recoveryLink.AttemptId;
         }
 
         return new DownloadMonitorSourceRowDto(
@@ -950,76 +983,6 @@ public sealed class OperatorDownloadMonitorService(
                ?? sourcePdfs.FirstOrDefault(p => p.Status == PdfEditionStatus.Failed)?.DownloadJobId;
     }
 
-    private async Task ReconcileStaleDownloadJobsAsync(CancellationToken cancellationToken)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var normalCutoff = now.Subtract(StaleRunningJobThreshold);
-        var recoveryCutoff = now.Subtract(RecoveryRunningJobThreshold);
-        var runningJobs = await db.DownloadJobs
-            .Where(j => !j.IsDeleted
-                        && (j.Status == DownloadJobStatus.Running || j.Status == DownloadJobStatus.Pending))
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var staleJobs = runningJobs
-            .Where(j =>
-            {
-                var started = j.StartedAt ?? j.CreatedAt;
-                return IsRecoveryDownloadJob(j)
-                    ? started < recoveryCutoff
-                    : started < normalCutoff;
-            })
-            .ToList();
-
-        if (staleJobs.Count == 0)
-        {
-            return;
-        }
-
-        var staleJobIds = staleJobs.Select(j => j.Id).ToList();
-        var downloadedPdfJobIds = await db.PdfEditionDownloads.AsNoTracking()
-            .Where(p => !p.IsDeleted
-                        && p.DownloadJobId != null
-                        && staleJobIds.Contains(p.DownloadJobId.Value)
-                        && p.Status == PdfEditionStatus.Downloaded)
-            .Select(p => p.DownloadJobId!.Value)
-            .ToHashSetAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var job in staleJobs)
-        {
-            if (downloadedPdfJobIds.Contains(job.Id))
-            {
-                job.Status = DownloadJobStatus.Succeeded;
-                job.ErrorMessage = null;
-            }
-            else
-            {
-                job.Status = DownloadJobStatus.Failed;
-                job.ErrorMessage ??= "Download was interrupted or timed out.";
-            }
-
-            job.CompletedAt ??= DateTimeOffset.UtcNow;
-            job.ModifiedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        logger.LogWarning("Reconciled {Count} stale download job(s) stuck in Running/Pending.", staleJobs.Count);
-
-        foreach (var job in staleJobs.Where(IsRecoveryDownloadJob))
-        {
-            try
-            {
-                await recoveryOrchestrator.FinalizeAttemptAsync(ExtractRecoveryAttemptId(job), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Could not finalize recovery attempt for stale job {JobId}.", job.Id);
-            }
-        }
-    }
-
     private static DateTimeOffset? LatestTerminalTimestamp(
         IEnumerable<DateTimeOffset> timestamps,
         DateTimeOffset dayStart,
@@ -1034,32 +997,19 @@ public sealed class OperatorDownloadMonitorService(
         return latest;
     }
 
-    private static Guid ExtractRecoveryAttemptId(DownloadJob job)
-    {
-        if (string.IsNullOrWhiteSpace(job.CorrelationId)
-            || !job.CorrelationId.StartsWith("recovery:", StringComparison.OrdinalIgnoreCase)
-            || !Guid.TryParse(job.CorrelationId["recovery:".Length..], out var attemptId))
-        {
-            throw new InvalidOperationException("Download job is not linked to a recovery attempt.");
-        }
-
-        return attemptId;
-    }
-
-    /// <summary>
-    /// Prefer the latest terminal job when a newer Running/Pending row is stale (e.g. API restart mid-download).
-    /// </summary>
     private static bool IsRecoveryDownloadJob(DownloadJob job) =>
         !string.IsNullOrWhiteSpace(job.CorrelationId)
         && job.CorrelationId.StartsWith("recovery:", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsRecoveryDownloadJob(DownloadJob job, IReadOnlyDictionary<Guid, Guid> recoveryRetryJobAttemptIds) =>
+    private static bool IsRecoveryDownloadJob(
+        DownloadJob job,
+        IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds) =>
         recoveryRetryJobAttemptIds.ContainsKey(job.Id) || IsRecoveryDownloadJob(job);
 
     private static bool IsAiRecoverySuccess(
         IReadOnlyList<DownloadJob> sourceJobs,
         Guid? succeededJobId,
-        IReadOnlyDictionary<Guid, Guid> recoveryRetryJobAttemptIds)
+        IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds)
     {
         if (succeededJobId is not Guid jobId)
         {
@@ -1078,8 +1028,9 @@ public sealed class OperatorDownloadMonitorService(
     }
 
     private static DownloadJob? PickDisplayJob(
+        NewsSource source,
         IReadOnlyList<DownloadJob> sourceJobs,
-        IReadOnlyDictionary<Guid, Guid> recoveryRetryJobAttemptIds)
+        IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds)
     {
         if (sourceJobs.Count == 0)
         {
@@ -1092,21 +1043,51 @@ public sealed class OperatorDownloadMonitorService(
             return latest;
         }
 
-        var started = latest.StartedAt ?? latest.CreatedAt;
-        var staleThreshold = IsRecoveryDownloadJob(latest, recoveryRetryJobAttemptIds)
-            ? RecoveryRunningJobThreshold
-            : StaleRunningJobThreshold;
-        if (DateTimeOffset.UtcNow - started <= staleThreshold)
+        if (!DownloadJobRunningTiming.IsRunningJobStale(latest, source))
         {
             return latest;
         }
 
-        return sourceJobs.FirstOrDefault(j => j.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.Failed)
+        return sourceJobs.FirstOrDefault(j => j.Status is DownloadJobStatus.Succeeded
+                                                  or DownloadJobStatus.SuccessWithAutoAiRecovery
+                                                  or DownloadJobStatus.Failed)
                ?? latest;
     }
 
-    private static (DownloadJob? Job, PdfEditionDownload? Pdf) PickLatestActivity(DownloadJob? job, PdfEditionDownload? pdf)
+    private static PdfEditionDownload? PickDownloadedPdfForDay(
+        IReadOnlyList<PdfEditionDownload> sourcePdfs,
+        DateOnly date,
+        DateTimeOffset dayStart,
+        DateTimeOffset dayEnd) =>
+        sourcePdfs.FirstOrDefault(p =>
+            p.Status is PdfEditionStatus.Downloaded or PdfEditionStatus.Validated or PdfEditionStatus.SkippedDuplicate
+            && (p.EditionDate == date
+                || (p.DownloadedAt is { } downloadedAt && downloadedAt >= dayStart && downloadedAt < dayEnd)));
+
+    private static (DownloadJob? Job, PdfEditionDownload? Pdf) PickLatestActivity(
+        DownloadJob? job,
+        PdfEditionDownload? pdf,
+        PdfEditionDownload? downloadedForDay)
     {
+        if (job is not null
+            && job.Status is DownloadJobStatus.AutoAiRecoverySkipped
+                or DownloadJobStatus.Failed
+                or DownloadJobStatus.FailedAfterAutoAiRecovery
+                or DownloadJobStatus.Cancelled
+            && pdf is not null
+            && pdf.Status == PdfEditionStatus.Failed)
+        {
+            return (job, pdf);
+        }
+
+        if (downloadedForDay is not null
+            && job is not null
+            && job.Status is DownloadJobStatus.Running or DownloadJobStatus.Pending
+            && downloadedForDay.DownloadJobId != job.Id)
+        {
+            return (null, downloadedForDay);
+        }
+
         if (job is null)
         {
             return (null, pdf);
@@ -1129,6 +1110,46 @@ public sealed class OperatorDownloadMonitorService(
         return jobTime >= pdfTime ? (job, null) : (null, pdf);
     }
 
+    /// <summary>
+    /// When any download succeeded for the monitor day, show that outcome even if a later retry failed.
+    /// </summary>
+    private static string ResolveDaySuccessStatus(
+        IReadOnlyList<DownloadJob> sourceJobs,
+        DateTimeOffset dayStart,
+        DateTimeOffset dayEnd,
+        IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds)
+    {
+        var successJob = sourceJobs
+            .Where(j => j.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery)
+            .Where(j =>
+            {
+                var timestamp = j.CompletedAt ?? j.CreatedAt;
+                return timestamp >= dayStart && timestamp < dayEnd;
+            })
+            .OrderByDescending(j => j.CompletedAt ?? j.CreatedAt)
+            .FirstOrDefault();
+
+        if (successJob is null)
+        {
+            return DownloadMonitorStatusLabels.Success;
+        }
+
+        if (successJob.Status == DownloadJobStatus.SuccessWithAutoAiRecovery)
+        {
+            return DownloadMonitorStatusLabels.SuccessByAutoAiRecovery;
+        }
+
+        if (IsAiRecoverySuccess(sourceJobs, successJob.Id, recoveryRetryJobAttemptIds)
+            && recoveryRetryJobAttemptIds.TryGetValue(successJob.Id, out var recoveryLink))
+        {
+            return recoveryLink.IsAutomatic
+                ? DownloadMonitorStatusLabels.SuccessByAutoAiRecovery
+                : DownloadMonitorStatusLabels.SuccessByAiRecovery;
+        }
+
+        return DownloadMonitorStatusLabels.Success;
+    }
+
     private static string ResolveStatus(NewsSource source, DownloadJob? job, PdfEditionDownload? pdf)
     {
         if (job is not null)
@@ -1139,6 +1160,10 @@ public sealed class OperatorDownloadMonitorService(
                 DownloadJobStatus.SuccessWithAutoAiRecovery => DownloadMonitorStatusLabels.SuccessWithAutoAiRecovery,
                 DownloadJobStatus.Failed => source.RequiresManualAction ? DownloadMonitorStatusLabels.ManualActionRequired : DownloadMonitorStatusLabels.Failed,
                 DownloadJobStatus.FailedAfterAutoAiRecovery => DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery,
+                DownloadJobStatus.AutoAiRecoverySkipped => source.RequiresManualAction
+                    ? DownloadMonitorStatusLabels.ManualActionRequired
+                    : DownloadMonitorStatusLabels.Failed,
+                DownloadJobStatus.Cancelled => DownloadMonitorStatusLabels.Failed,
                 DownloadJobStatus.ManualInterventionRequired => DownloadMonitorStatusLabels.ManualActionRequired,
                 DownloadJobStatus.AutoAiRecoveryAnalyzing
                     or DownloadJobStatus.AutoAiRecoveryApplying
@@ -1168,6 +1193,8 @@ public sealed class OperatorDownloadMonitorService(
         DownloadJobStatus.SuccessWithAutoAiRecovery => DownloadMonitorStatusLabels.SuccessWithAutoAiRecovery,
         DownloadJobStatus.Failed => DownloadMonitorStatusLabels.Failed,
         DownloadJobStatus.FailedAfterAutoAiRecovery => DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery,
+        DownloadJobStatus.AutoAiRecoverySkipped => DownloadMonitorStatusLabels.Failed,
+        DownloadJobStatus.Cancelled => DownloadMonitorStatusLabels.Failed,
         DownloadJobStatus.AutoAiRecoveryAnalyzing
             or DownloadJobStatus.AutoAiRecoveryApplying
             or DownloadJobStatus.AutoAiRecoveryRetrying => DownloadMonitorStatusLabels.AutoAiRecoveryRunning,

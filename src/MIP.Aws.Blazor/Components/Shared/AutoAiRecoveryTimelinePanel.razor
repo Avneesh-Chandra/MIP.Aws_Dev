@@ -1,6 +1,7 @@
 @using MIP.Aws.Application.Features.AutoAiRecovery
 @using MIP.Aws.Domain.Enums
 @inject IMediator Mediator
+@inject IUserTimeZone UserTz
 
 @if (_loading)
 {
@@ -41,7 +42,7 @@ else if (_status is not null)
                     <MudTimelineItem Color="@(step.Succeeded ? Color.Success : Color.Default)" Size="Size.Small">
                         <MudText Typo="Typo.body2" Style="font-weight:600;">@step.Step</MudText>
                         <MudText Typo="Typo.caption" Color="Color.Secondary">
-                            @step.Timestamp.ToString("yyyy-MM-dd HH:mm") UTC
+                            @UserTz.Format(step.Timestamp)
                         </MudText>
                         <MudText Typo="Typo.body2">@step.Detail</MudText>
                     </MudTimelineItem>

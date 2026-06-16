@@ -4,6 +4,7 @@ using MIP.Aws.Application.Abstractions.Downloading;
 using MIP.Aws.Application.Abstractions.Intelligence;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.AutoAiRecovery;
+using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
@@ -201,6 +202,20 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                 new { attemptId = attempt.Id },
                 cancellationToken).ConfigureAwait(false);
 
+            if (DarAlKhaleejPressReaderBaseline.IsPressReaderSource(
+                    source.ConnectorKey,
+                    source.PortalStrategyKey,
+                    source.EditionUrl,
+                    source.BaseUrl))
+            {
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    "PressReader warm-up",
+                    "Waiting for reader UI before download retry.");
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+            }
+
             using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.AutoAiRecovery))
             {
                 await downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken).ConfigureAwait(false);
@@ -239,6 +254,35 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                     "AutoAiRecoveryRun",
                     run.Id.ToString(),
                     new { option.Title, retryJobId },
+                    cancellationToken).ConfigureAwait(false);
+
+                return ToResult(run, true);
+            }
+
+            if (finalize.Status == SourceRecoveryAttemptStatus.Failed
+                && PublisherRecoveryBaseline.ShouldRetainConfigAfterFailedRetry(source, option))
+            {
+                run.Status = AutoAiRecoveryRunStatus.CompletedSuccess;
+                run.SuccessfulOptionIndex = option.OptionIndex;
+                run.SuccessfulOptionTitle = option.Title;
+                run.SuccessfulCandidateVersionId = finalize.CandidateVersionId;
+                run.ResultSummary =
+                    "AI fix applied and kept active for future downloads. "
+                    + (finalize.Message ?? "Immediate retry did not return a PDF; the next scheduled run will use the updated selectors.");
+                run.CompletedAt = DateTimeOffset.UtcNow;
+                job.Status = DownloadJobStatus.AutoAiRecoverySkipped;
+
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    "Config retained",
+                    "Publisher recovery selectors kept active after retry.");
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+                await audit.RecordAdminActionAsync(
+                    AutoAiRecoveryAuditEvents.CompletedSuccess,
+                    "AutoAiRecoveryRun",
+                    run.Id.ToString(),
+                    new { option.Title, retainedConfig = true },
                     cancellationToken).ConfigureAwait(false);
 
                 return ToResult(run, true);

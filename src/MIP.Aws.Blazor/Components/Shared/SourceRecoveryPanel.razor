@@ -14,7 +14,7 @@
     else if (_analysis is null && !_analyzing)
     {
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoFixHigh"
-                   OnClick="AnalyzeAsync" Disabled="!DownloadJobId.HasValue">
+                   OnClick="@AnalyzeAsync" Disabled="!DownloadJobId.HasValue">
             Analyze with AI
         </MudButton>
     }
@@ -176,6 +176,7 @@
         _analyzing = true;
         _applyResult = null;
         ResetRetryOutcome();
+        StateHasChanged();
         try
         {
             _analysis = await Mediator.Send(new AnalyzeSourceRecoveryCommand(DownloadJobId.Value));

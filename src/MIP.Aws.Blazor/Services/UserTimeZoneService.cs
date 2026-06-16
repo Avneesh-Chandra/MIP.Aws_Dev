@@ -1,9 +1,13 @@
 using System.Globalization;
+using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Time;
+using Microsoft.Extensions.Options;
 
 namespace MIP.Aws.Blazor.Services;
 
-public sealed class UserTimeZoneService : IUserTimeZone
+public sealed class UserTimeZoneService(IOptions<ApplicationDisplayOptions> displayOptions) : IUserTimeZone
 {
+    readonly ApplicationDisplayOptions _display = displayOptions.Value;
     TimeZoneInfo? _tz;
     string? _iana;
     bool _resolved;
@@ -11,48 +15,25 @@ public sealed class UserTimeZoneService : IUserTimeZone
     public bool IsResolved => _resolved;
     public string? IanaTimeZoneId => _iana;
 
-    public string DisplayHint
-    {
-        get
-        {
-            if (!_resolved)
-                return "Resolving your time zone…";
-            if (!string.IsNullOrWhiteSpace(_iana))
-                return $"Times: {_iana}";
-            return "Times: UTC (browser zone unavailable)";
-        }
-    }
+    public string DisplayHint =>
+        _resolved
+            ? MipDisplayTimeZone.DisplayHint(_display)
+            : "Resolving time zone…";
 
     public event Action? Changed;
 
     public void SetFromBrowserIana(string? ianaTimeZoneId)
     {
         if (_resolved)
+        {
             return;
-
-        _iana = string.IsNullOrWhiteSpace(ianaTimeZoneId) ? null : ianaTimeZoneId.Trim();
-        if (_iana is null)
-        {
-            _tz = TimeZoneInfo.Utc;
-        }
-        else
-        {
-            try
-            {
-                _tz = TimeZoneInfo.FindSystemTimeZoneById(_iana);
-            }
-            catch (TimeZoneNotFoundException)
-            {
-                _tz = TimeZoneInfo.Utc;
-                _iana = null;
-            }
-            catch (InvalidTimeZoneException)
-            {
-                _tz = TimeZoneInfo.Utc;
-                _iana = null;
-            }
         }
 
+        _ = ianaTimeZoneId;
+        _iana = string.IsNullOrWhiteSpace(_display.DisplayTimeZoneId)
+            ? MipDisplayTimeZone.DefaultIanaId
+            : _display.DisplayTimeZoneId.Trim();
+        _tz = MipDisplayTimeZone.Resolve(_iana);
         _resolved = true;
         Changed?.Invoke();
     }
@@ -60,19 +41,22 @@ public sealed class UserTimeZoneService : IUserTimeZone
     public string Format(DateTimeOffset? value, string format = "yyyy-MM-dd HH:mm")
     {
         if (value is null)
+        {
             return "—";
+        }
+
         return Format(value.Value, format);
     }
 
     public string Format(DateTimeOffset value, string format)
     {
         if (!_resolved || _tz is null)
-            return value.ToUniversalTime().ToString(format, CultureInfo.InvariantCulture) + " UTC";
+        {
+            return MipDisplayTimeZone.Format(value, format, _display.DisplayTimeZoneId);
+        }
 
         var local = TimeZoneInfo.ConvertTime(value, _tz);
         var s = local.ToString(format, CultureInfo.InvariantCulture);
-        if (string.IsNullOrWhiteSpace(_iana))
-            return s + " UTC";
-        return s;
+        return s + $" {MipDisplayTimeZone.ZoneSuffix(_iana)}";
     }
 }

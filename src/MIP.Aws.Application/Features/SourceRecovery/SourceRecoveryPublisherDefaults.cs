@@ -26,6 +26,22 @@ public static class SourceRecoveryPublisherDefaults
             source.UseHeadlessBrowser = true;
             source.IsDownloadAllowed = true;
             source.RequiresManualAction = false;
+            return;
+        }
+
+        if (DarAlKhaleejPressReaderBaseline.IsPressReaderSource(
+                source.ConnectorKey,
+                source.PortalStrategyKey,
+                source.EditionUrl,
+                source.BaseUrl))
+        {
+            source.PortalStrategyKey ??= DarAlKhaleejPressReaderBaseline.PortalStrategyKey;
+            source.UseHeadlessBrowser = true;
+            source.IsDownloadAllowed = true;
+            source.RequiresManualAction = false;
+            source.DownloadWaitTimeoutSeconds = Math.Max(
+                source.DownloadWaitTimeoutSeconds,
+                DarAlKhaleejPressReaderBaseline.DownloadWaitTimeoutSeconds);
         }
     }
 }

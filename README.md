@@ -84,6 +84,8 @@ Target architecture (Terraform in `infra/terraform/`):
 
 | Guide | Purpose |
 |-------|---------|
+| [docs/GFH-MediaIntelligence-Deployment-Requirements.docx](docs/GFH-MediaIntelligence-Deployment-Requirements.docx) | Client deployment brief — infrastructure, hardware & licensing (AWS) |
+| [docs/GFH_MIP_AWS_DEPLOYMENT_REQUIREMENTS.md](docs/GFH_MIP_AWS_DEPLOYMENT_REQUIREMENTS.md) | Technical deployment requirements (AWS) |
 | [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) | Step-by-step deployment |
 | [docs/AWS_DATABASE_MIGRATIONS.md](docs/AWS_DATABASE_MIGRATIONS.md) | EF migrations on RDS |
 | [docs/AWS_COST_CONTROL.md](docs/AWS_COST_CONTROL.md) | Low-cost defaults |

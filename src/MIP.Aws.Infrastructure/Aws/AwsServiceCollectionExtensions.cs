@@ -39,10 +39,10 @@ public static class AwsServiceCollectionExtensions
 
         if (string.Equals(email.Provider, "AwsSes", StringComparison.OrdinalIgnoreCase) && aws.Ses.Enabled)
         {
-            services.AddSingleton<IAmazonSimpleEmailServiceV2>(_ => new AmazonSimpleEmailServiceV2Client(region));
-            services.AddSingleton<AwsSesEmailSender>();
-            services.AddSingleton<IReportEmailTransport>(sp => sp.GetRequiredService<AwsSesEmailSender>());
-            services.AddSingleton<IReportEmailSender, ReportEmailDispatcher>();
+            services.AddSingleton<IAmazonSimpleEmailServiceV2>(_ => AwsClientFactory.CreateSesClient(aws));
+            services.AddScoped<AwsSesEmailSender>();
+            services.AddScoped<IReportEmailTransport, AwsSesEmailSender>();
+            services.AddScoped<IReportEmailSender, ReportEmailDispatcher>();
         }
         else if (string.Equals(email.Provider, "Smtp", StringComparison.OrdinalIgnoreCase))
         {

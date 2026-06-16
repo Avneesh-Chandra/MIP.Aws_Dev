@@ -20,6 +20,11 @@ public static class SourceRecoveryHeuristicBuilder
             return [BuildAawsatHeuristicOption()];
         }
 
+        if (DarAlKhaleejPressReaderBaseline.IsPressReaderAnalysisContext(context))
+        {
+            return [BuildDarAlKhaleejPressReaderHeuristicOption()];
+        }
+
         var current = SourceRecoveryConfigurationSnapshot.FromJson(context.CurrentConfigurationJson)
                       ?? new SourceRecoveryConfigurationSnapshot(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 180, true);
 
@@ -43,7 +48,7 @@ public static class SourceRecoveryHeuristicBuilder
                 DownloadMenuItemSelector = "button:has-text('تنزيل'), button:has-text('Download')",
                 ContextMenuSelector = "[class*='page-actions'] button, [class*='toolbar'] button",
                 NewspaperCanvasSelector = "[class*='issue-page'], [class*='page-image']",
-                DownloadWaitTimeoutSeconds = Math.Max(current.DownloadWaitTimeoutSeconds, 240)
+                DownloadWaitTimeoutSeconds = Math.Max(current.DownloadWaitTimeoutSeconds, 300)
             },
             _ => current.ToPatch() with { DownloadWaitTimeoutSeconds = Math.Max(current.DownloadWaitTimeoutSeconds, 240) }
         };
@@ -77,6 +82,10 @@ public static class SourceRecoveryHeuristicBuilder
         else if (IsAawsatPublicPdf(context))
         {
             publisherOption = BuildAawsatHeuristicOption();
+        }
+        else if (DarAlKhaleejPressReaderBaseline.IsPressReaderAnalysisContext(context))
+        {
+            publisherOption = BuildDarAlKhaleejPressReaderHeuristicOption();
         }
 
         if (publisherOption is null)
@@ -150,5 +159,19 @@ public static class SourceRecoveryHeuristicBuilder
             ["PdfDownloadSelector", "PdfLinkSelector", "BaseUrl", "EditionUrl", "PdfDiscoveryPageUrl"],
             ["discover", "download"],
             AawsatPublicPdfBaseline.RecoveryPatch(),
+            []);
+
+    private static SourceRecoveryOptionDto BuildDarAlKhaleejPressReaderHeuristicOption() =>
+        new(
+            0,
+            "Click newspaper spread to open page actions menu",
+            "The download menu is not open yet. Click the newspaper spread to reveal the page actions panel, then choose تنزيل.",
+            "Sets NewspaperCanvasSelector, ContextMenuSelector, and DownloadMenuItemSelector for the licensed PressReader flow.",
+            92,
+            89,
+            SourceRecoveryRiskLevel.Low,
+            ["NewspaperCanvasSelector", "ContextMenuSelector", "DownloadMenuItemSelector", "DownloadWaitTimeoutSeconds"],
+            ["login", "open reader", "download"],
+            DarAlKhaleejPressReaderBaseline.RecoveryPatch(),
             []);
 }

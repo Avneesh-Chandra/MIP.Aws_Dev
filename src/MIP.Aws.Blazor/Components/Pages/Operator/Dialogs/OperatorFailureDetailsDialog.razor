@@ -2,6 +2,7 @@
 @using MIP.Aws.Blazor.Components.Shared
 @inject IMediator Mediator
 @inject IJSRuntime JS
+@inject IUserTimeZone UserTz
 
 <MudDialog>
     <DialogContent>
@@ -54,7 +55,7 @@
                     @foreach (var note in _details.OperatorNotes)
                     {
                         <MudPaper Outlined="true" Class="pa-2">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">@note.CreatedAt.ToString("yyyy-MM-dd HH:mm") UTC</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@UserTz.Format(note.CreatedAt)</MudText>
                             <MudText Typo="Typo.body2">@note.Note</MudText>
                         </MudPaper>
                     }
@@ -64,7 +65,7 @@
                     <Authorized>
                         <MudDivider Class="my-2" />
                         <MudText Typo="Typo.h6" Style="font-weight:600;">Automatic AI Recovery</MudText>
-                        <AutoAiRecoveryTimelinePanel DownloadJobId="DownloadJobId" />
+                        <AutoAiRecoveryTimelinePanel DownloadJobId="@DownloadJobId" />
                     </Authorized>
                 </AuthorizeView>
 
@@ -72,7 +73,7 @@
                     <Authorized>
                         <MudDivider Class="my-2" />
                         <MudText Typo="Typo.h6" Style="font-weight:600;">Manual AI Recovery Suggestions</MudText>
-                        <SourceRecoveryPanel DownloadJobId="DownloadJobId" OnRecoveryApplied="RefreshDetailsAsync" />
+                        <SourceRecoveryPanel DownloadJobId="@DownloadJobId" OnRecoveryApplied="RefreshDetailsAsync" />
                     </Authorized>
                 </AuthorizeView>
             </MudStack>
@@ -141,10 +142,10 @@
         await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
     }
 
-    private static string FormatWhen(DateTimeOffset? value) =>
-        value is null ? "—" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+    private string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "—" : UserTz.Format(value);
 
-    private static string LastSuccessfulPdfCaption(LatestPdfLinkDto pdf)
+    private string LastSuccessfulPdfCaption(LatestPdfLinkDto pdf)
     {
         var when = FormatWhen(pdf.DownloadedAt);
         return when == "—"

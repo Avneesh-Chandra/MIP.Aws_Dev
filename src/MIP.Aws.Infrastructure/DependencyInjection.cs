@@ -65,6 +65,7 @@ public static class DependencyInjection
         bool enableHangfireProcessing = true)
     {
         services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
+        services.Configure<ApplicationDisplayOptions>(configuration.GetSection(ApplicationDisplayOptions.SectionName));
         services.Configure<PdfEditionSchedulerOptions>(configuration.GetSection(PdfEditionSchedulerOptions.SectionName));
         services.Configure<MailAutomationOptions>(configuration.GetSection(MailAutomationOptions.SectionName));
         services.Configure<MailOptions>(configuration.GetSection(MailOptions.SectionName));

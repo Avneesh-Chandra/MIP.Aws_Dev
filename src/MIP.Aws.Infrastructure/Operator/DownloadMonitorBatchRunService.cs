@@ -125,15 +125,31 @@ public sealed class DownloadMonitorBatchRunService(
         var waitingCount = 0;
         var autoRecoveryCount = 0;
 
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + SchedulerGracePeriod;
+        var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
+
         foreach (var source in sources)
         {
             if (!latestJobBySource.TryGetValue(source.Id, out var job))
             {
-                waitingCount++;
-                activities.Add(new DownloadMonitorBatchActivityResult(
-                    source.Name,
-                    "Waiting for scheduled download slot",
-                    "Waiting"));
+                if (withinStaggerWindow)
+                {
+                    waitingCount++;
+                    activities.Add(new DownloadMonitorBatchActivityResult(
+                        source.Name,
+                        "Waiting for scheduled download slot",
+                        "Waiting"));
+                }
+                else
+                {
+                    failedCount++;
+                    activities.Add(new DownloadMonitorBatchActivityResult(
+                        source.Name,
+                        "Scheduled download did not start",
+                        "Failed"));
+                }
+
                 continue;
             }
 
@@ -156,20 +172,25 @@ public sealed class DownloadMonitorBatchRunService(
                     inProgressCount++;
                     break;
                 default:
-                    waitingCount++;
+                    if (withinStaggerWindow)
+                    {
+                        waitingCount++;
+                    }
+                    else
+                    {
+                        failedCount++;
+                    }
+
                     break;
             }
         }
 
         var completedCount = successCount + failedCount;
-        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + SchedulerGracePeriod;
-        var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
-        var isComplete = inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow);
-        var isActive = !isComplete && (inProgressCount > 0 || (waitingCount > 0 && withinStaggerWindow));
+        var isComplete = inProgressCount == 0 && autoRecoveryCount == 0 && waitingCount == 0;
+        var isActive = !isComplete;
         var percent = total == 0
             ? 100
-            : Math.Round((completedCount + (isComplete && waitingCount > 0 ? waitingCount : 0)) * 100.0 / total, 1);
+            : Math.Round(completedCount * 100.0 / total, 1);
         if (!isComplete && completedCount > 0)
         {
             percent = Math.Min(percent, 99);

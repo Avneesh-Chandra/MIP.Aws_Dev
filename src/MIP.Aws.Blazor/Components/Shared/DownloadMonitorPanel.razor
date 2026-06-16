@@ -9,6 +9,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IUserTimeZone UserTz
 
 <MudStack Spacing="4" Class="@RootClass">
     @if (Embedded)
@@ -64,7 +65,7 @@
                     </MudChip>
                     <MudSpacer />
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
-                        Started @_batchProgress.StartedAt.ToString("yyyy-MM-dd HH:mm") UTC
+                        Started @UserTz.Format(_batchProgress.StartedAt)
                     </MudText>
                 </MudStack>
                 <MudProgressLinear Color="Color.Primary" Rounded="true" Size="Size.Large"
@@ -549,8 +550,8 @@
         _ => Color.Default
     };
 
-    private static string FormatWhen(DateTimeOffset? value) =>
-        value is null ? "never" : value.Value.ToString("yyyy-MM-dd HH:mm") + " UTC";
+    private string FormatWhen(DateTimeOffset? value) =>
+        value is null ? "never" : UserTz.Format(value);
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";

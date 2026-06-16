@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using MIP.Aws.Domain.Entities;
+using MIP.Aws.Infrastructure.Browser;
 using MIP.Aws.Infrastructure.News.EditionDiscovery;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
@@ -19,11 +21,14 @@ public static class AawsatFullPublicationPdf
     private static readonly string[] DownloadTextLabels = ["Download", "تحميل", "تنزيل"];
     private static readonly string[] FullPublicationTextLabels = ["Full Publication", "النسخة الكاملة", "النشرة الكاملة"];
 
+    private static readonly Regex IssueRootPathRegex = new(@"/issue\d+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex IssuePagePathRegex = new(@"/issue\d+/\d+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public static bool IsIssueViewerUrl(Uri url) =>
         url.AbsolutePath.Contains("/files/pdf/issue", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Issue folder URLs (e.g. /files/pdf/issue17362/) must open the viewer page (/2/index.html) for the Download control.
+    /// Issue folder URLs (e.g. /files/pdf/issue17362/) must open the main FlippingBook shell (index.html), not a single page folder.
     /// </summary>
     public static Uri ResolveIssueViewerUri(Uri issueUri)
     {
@@ -35,16 +40,26 @@ public static class AawsatFullPublicationPdf
         var path = issueUri.AbsolutePath.TrimEnd('/');
         if (path.EndsWith("/index.html", StringComparison.OrdinalIgnoreCase))
         {
-            return issueUri;
+            return NormalizeIssueUri(issueUri);
         }
 
-        if (path.EndsWith("/2", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith("/1", StringComparison.OrdinalIgnoreCase))
+        if (IssuePagePathRegex.IsMatch(path))
         {
-            return new UriBuilder(issueUri) { Path = path + "/index.html" }.Uri;
+            return NormalizeIssueUri(new UriBuilder(issueUri) { Path = path + "/index.html" }.Uri);
         }
 
-        return new UriBuilder(issueUri) { Path = path + "/2/index.html" }.Uri;
+        if (IssueRootPathRegex.IsMatch(path))
+        {
+            return NormalizeIssueUri(new UriBuilder(issueUri) { Path = path + "/index.html" }.Uri);
+        }
+
+        return NormalizeIssueUri(issueUri);
+    }
+
+    private static Uri NormalizeIssueUri(Uri uri)
+    {
+        var normalized = uri.ToString().Replace("//index.html", "/index.html", StringComparison.OrdinalIgnoreCase);
+        return Uri.TryCreate(normalized, UriKind.Absolute, out var result) ? result : uri;
     }
 
     public static Uri ResolvePlaywrightStartUri(Uri candidateOrPage, Uri? warmUpUrl)
@@ -71,6 +86,9 @@ public static class AawsatFullPublicationPdf
     public static string ResolveFullPublicationSelector(NewsSource source) =>
         string.IsNullOrWhiteSpace(source.PdfLinkSelector) ? DefaultFullPublicationSelector : source.PdfLinkSelector.Trim();
 
+    public static int ResolveTimeoutMs(NewsSource? source) =>
+        source is null ? 90_000 : Math.Clamp(source.DownloadWaitTimeoutSeconds, 60, 600) * 1000;
+
     public static Task<AawsatFullPublicationResult?> TryDiscoverAsync(
         Uri startPageUrl,
         NewsSource source,
@@ -80,6 +98,7 @@ public static class AawsatFullPublicationPdf
             startPageUrl,
             ResolveDownloadSelector(source),
             ResolveFullPublicationSelector(source),
+            source,
             logger,
             cancellationToken);
 
@@ -93,13 +112,14 @@ public static class AawsatFullPublicationPdf
             startPageUrl,
             source is null ? DefaultDownloadSelector : ResolveDownloadSelector(source),
             source is null ? DefaultFullPublicationSelector : ResolveFullPublicationSelector(source),
+            source,
             logger,
             cancellationToken).ConfigureAwait(false);
         return result?.PdfBytes;
     }
 
     /// <summary>
-    /// Tries the Full Publication click path from multiple entry pages (homepage, warm-up, issue viewer).
+    /// Tries the Full Publication click path from multiple entry pages (issue viewer, warm-up, homepage).
     /// </summary>
     public static async Task<byte[]?> TryDownloadBytesWithFallbacksAsync(
         Uri candidateOrPage,
@@ -108,7 +128,16 @@ public static class AawsatFullPublicationPdf
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var starts = new List<Uri>();
+        var starts = new List<Uri>
+        {
+            ResolvePlaywrightStartUri(candidateOrPage, warmUpUrl)
+        };
+
+        if (warmUpUrl is not null)
+        {
+            starts.Add(ResolvePlaywrightStartUri(warmUpUrl, null));
+        }
+
         if (!string.IsNullOrWhiteSpace(source.PdfDiscoveryPageUrl)
             && Uri.TryCreate(source.PdfDiscoveryPageUrl.Trim(), UriKind.Absolute, out var discoveryPage))
         {
@@ -120,13 +149,6 @@ public static class AawsatFullPublicationPdf
         {
             starts.Add(basePage);
         }
-
-        if (warmUpUrl is not null)
-        {
-            starts.Add(ResolvePlaywrightStartUri(warmUpUrl, null));
-        }
-
-        starts.Add(ResolvePlaywrightStartUri(candidateOrPage, warmUpUrl));
 
         foreach (var start in starts
                      .Where(u => u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
@@ -146,29 +168,31 @@ public static class AawsatFullPublicationPdf
         Uri startPageUrl,
         string downloadSelector,
         string fullPublicationSelector,
+        NewsSource? source,
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        var timeoutMs = ResolveTimeoutMs(source);
         try
         {
-            using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
-            await using var browser = await LaunchBrowserAsync(playwright).ConfigureAwait(false);
+            using var playwright = await PlaywrightBrowserLaunch.CreatePlaywrightAsync().ConfigureAwait(false);
+            await using var browser = await PlaywrightBrowserLaunch.LaunchChromiumAsync(playwright).ConfigureAwait(false);
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 AcceptDownloads = true,
-                Locale = "ar-SA",
+                Locale = "en-US",
                 UserAgent = DesktopChromeUserAgent,
                 ViewportSize = new ViewportSize { Width = 1440, Height = 900 }
             }).ConfigureAwait(false);
 
             var page = await context.NewPageAsync().ConfigureAwait(false);
-            page.SetDefaultTimeout(90_000);
+            page.SetDefaultTimeout(timeoutMs);
             await page.GotoAsync(
                 startPageUrl.ToString(),
-                new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 90_000 }).ConfigureAwait(false);
+                new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs }).ConfigureAwait(false);
             await Task.Delay(1_500, cancellationToken).ConfigureAwait(false);
 
-            var issuePage = await OpenIssuePageAsync(page, startPageUrl, cancellationToken).ConfigureAwait(false);
+            var issuePage = await OpenIssuePageAsync(page, startPageUrl, timeoutMs, cancellationToken).ConfigureAwait(false);
             if (issuePage is null)
             {
                 logger.LogWarning("Aawsat click path: no issue page opened from {Url}", startPageUrl);
@@ -176,7 +200,7 @@ public static class AawsatFullPublicationPdf
             }
 
             await issuePage.WaitForLoadStateAsync(LoadState.DOMContentLoaded).ConfigureAwait(false);
-            await Task.Delay(1_500, cancellationToken).ConfigureAwait(false);
+            await WaitForViewerReadyAsync(issuePage, timeoutMs, cancellationToken).ConfigureAwait(false);
 
             if (!await ClickFirstVisibleInPageOrFramesAsync(
                     issuePage,
@@ -188,28 +212,15 @@ public static class AawsatFullPublicationPdf
                 return null;
             }
 
-            await Task.Delay(750, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(1_000, cancellationToken).ConfigureAwait(false);
 
-            var fullPublicationLink = issuePage.Locator(fullPublicationSelector).First;
-            if (await fullPublicationLink.CountAsync().ConfigureAwait(false) == 0)
+            var download = await TriggerFullPublicationDownloadAsync(issuePage, fullPublicationSelector, timeoutMs, cancellationToken)
+                .ConfigureAwait(false);
+            if (download is null)
             {
-                foreach (var label in FullPublicationTextLabels)
-                {
-                    var byText = issuePage.GetByText(label, new PageGetByTextOptions { Exact = false });
-                    if (await byText.CountAsync().ConfigureAwait(false) > 0)
-                    {
-                        fullPublicationLink = byText.First;
-                        break;
-                    }
-                }
+                logger.LogWarning("Aawsat click path: Full Publication control not found on {Url}", issuePage.Url);
+                return null;
             }
-
-            await fullPublicationLink.WaitForAsync(
-                new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 }).ConfigureAwait(false);
-
-            var downloadTask = issuePage.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 90_000 });
-            await fullPublicationLink.ClickAsync(new LocatorClickOptions { Timeout = 30_000 }).ConfigureAwait(false);
-            var download = await downloadTask.ConfigureAwait(false);
 
             return await ReadDownloadAsync(download, issuePage, startPageUrl, logger, cancellationToken).ConfigureAwait(false);
         }
@@ -222,13 +233,6 @@ public static class AawsatFullPublicationPdf
 
     private const string DesktopChromeUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
-    private static Task<IBrowser> LaunchBrowserAsync(IPlaywright playwright) =>
-        playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-        {
-            Headless = true,
-            Args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-        });
 
     private static async Task<AawsatFullPublicationResult?> ReadDownloadAsync(
         IDownload download,
@@ -280,6 +284,7 @@ public static class AawsatFullPublicationPdf
     private static async Task<IPage?> OpenIssuePageAsync(
         IPage entryPage,
         Uri startPageUrl,
+        int timeoutMs,
         CancellationToken cancellationToken)
     {
         if (startPageUrl.AbsolutePath.Contains("/files/pdf/issue", StringComparison.OrdinalIgnoreCase))
@@ -290,40 +295,217 @@ public static class AawsatFullPublicationPdf
             {
                 await entryPage.GotoAsync(
                     target,
-                    new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60_000 }).ConfigureAwait(false);
+                    new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs }).ConfigureAwait(false);
             }
 
             return entryPage;
         }
 
-        return await OpenLatestIssuePageFromHomeAsync(entryPage, cancellationToken).ConfigureAwait(false);
+        return await OpenLatestIssuePageFromHomeAsync(entryPage, timeoutMs, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<IPage?> OpenLatestIssuePageFromHomeAsync(IPage homePage, CancellationToken cancellationToken)
+    private static async Task<IPage?> OpenLatestIssuePageFromHomeAsync(
+        IPage homePage,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
-        var issueLink = homePage.Locator(HomeIssueLinkSelector).First;
-        if (await issueLink.CountAsync().ConfigureAwait(false) == 0)
+        var viewerUri = await ResolveLatestIssueViewerUriFromHomeAsync(homePage, cancellationToken).ConfigureAwait(false);
+        if (viewerUri is null)
         {
             return null;
         }
-
-        await issueLink.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 }).ConfigureAwait(false);
-        var href = await issueLink.GetAttributeAsync("href").ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(href))
-        {
-            return null;
-        }
-
-        var issueUri = Uri.TryCreate(href, UriKind.Absolute, out var absolute)
-            ? absolute
-            : new Uri(new Uri(homePage.Url), href);
 
         var issuePage = await homePage.Context.NewPageAsync().ConfigureAwait(false);
-        var viewerUri = ResolveIssueViewerUri(issueUri);
         await issuePage.GotoAsync(
             viewerUri.ToString(),
-            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60_000 }).ConfigureAwait(false);
+            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs }).ConfigureAwait(false);
         return issuePage;
+    }
+
+    private static async Task<Uri?> ResolveLatestIssueViewerUriFromHomeAsync(
+        IPage homePage,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var issueLink = homePage.Locator(HomeIssueLinkSelector);
+        var linkCount = await issueLink.CountAsync().ConfigureAwait(false);
+        for (var i = 0; i < linkCount; i++)
+        {
+            var candidate = issueLink.Nth(i);
+            if (!await candidate.IsVisibleAsync().ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            var href = await candidate.GetAttributeAsync("href").ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(href))
+            {
+                continue;
+            }
+
+            var issueUri = Uri.TryCreate(href, UriKind.Absolute, out var absolute)
+                ? absolute
+                : new Uri(new Uri(homePage.Url), href);
+            return ResolveIssueViewerUri(issueUri);
+        }
+
+        var html = await homePage.ContentAsync().ConfigureAwait(false);
+        var issueId = EditionDiscoveryHtmlClient.MaxCapturedGroup(html, @"files/pdf/issue(\d+)/");
+        if (issueId is null)
+        {
+            return null;
+        }
+
+        return ResolveIssueViewerUri(new Uri($"https://aawsat.com/files/pdf/issue{issueId.Value}/"));
+    }
+
+    private static async Task WaitForViewerReadyAsync(IPage page, int timeoutMs, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        const string readySelector =
+            "button[aria-label='Download'], button[title='Download'], [aria-label*='Download'], [title*='Download']";
+        var readyTimeout = Math.Min(timeoutMs, 45_000);
+        try
+        {
+            await page.WaitForSelectorAsync(
+                    readySelector,
+                    new PageWaitForSelectorOptions { Timeout = readyTimeout, State = WaitForSelectorState.Attached })
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            foreach (var frame in page.Frames)
+            {
+                if (frame == page.MainFrame)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await frame.WaitForSelectorAsync(
+                            readySelector,
+                            new FrameWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached })
+                        .ConfigureAwait(false);
+                    break;
+                }
+                catch (TimeoutException)
+                {
+                    // try next frame
+                }
+            }
+        }
+
+        await Task.Delay(2_000, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IDownload?> TriggerFullPublicationDownloadAsync(
+        IPage page,
+        string fullPublicationSelector,
+        int timeoutMs,
+        CancellationToken cancellationToken)
+    {
+        var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = timeoutMs });
+        if (!await ClickFullPublicationInPageOrFramesAsync(page, fullPublicationSelector, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return await downloadTask.ConfigureAwait(false);
+    }
+
+    private static async Task<bool> ClickFullPublicationInPageOrFramesAsync(
+        IPage page,
+        string fullPublicationSelector,
+        CancellationToken cancellationToken)
+    {
+        if (await ClickFullPublicationLocatorsAsync(
+                selector => page.Locator(selector).First,
+                label => page.GetByText(label, new PageGetByTextOptions { Exact = false }),
+                fullPublicationSelector,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        foreach (var frame in page.Frames)
+        {
+            if (frame == page.MainFrame)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (await ClickFullPublicationLocatorsAsync(
+                        selector => frame.Locator(selector).First,
+                        label => frame.GetByText(label, new FrameGetByTextOptions { Exact = false }),
+                        fullPublicationSelector,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+            }
+            catch (PlaywrightException)
+            {
+                // try next frame
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> ClickFullPublicationLocatorsAsync(
+        Func<string, ILocator> locatorFactory,
+        Func<string, ILocator> textLocatorFactory,
+        string fullPublicationSelector,
+        CancellationToken cancellationToken)
+    {
+        foreach (var selector in fullPublicationSelector.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var locator = locatorFactory(selector);
+            if (await locator.CountAsync().ConfigureAwait(false) == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                await locator.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15_000 })
+                    .ConfigureAwait(false);
+                await locator.ClickAsync(new LocatorClickOptions { Timeout = 30_000 }).ConfigureAwait(false);
+                return true;
+            }
+            catch (PlaywrightException)
+            {
+                // try next selector
+            }
+        }
+
+        foreach (var label in FullPublicationTextLabels)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var byText = textLocatorFactory(label);
+            if (await byText.CountAsync().ConfigureAwait(false) == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                await byText.First.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 15_000 })
+                    .ConfigureAwait(false);
+                await byText.First.ClickAsync(new LocatorClickOptions { Timeout = 30_000 }).ConfigureAwait(false);
+                return true;
+            }
+            catch (PlaywrightException)
+            {
+                // try next label
+            }
+        }
+
+        return false;
     }
 
     private static async Task<bool> ClickFirstVisibleInPageOrFramesAsync(

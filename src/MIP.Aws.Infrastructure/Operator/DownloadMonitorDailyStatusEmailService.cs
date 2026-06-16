@@ -46,50 +46,29 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
 
 
-        if (string.IsNullOrWhiteSpace(scheduler.StatusEmailRecipient))
-
+        var recipients = ParseRecipients(scheduler.StatusEmailRecipient);
+        if (recipients.Count == 0)
         {
-
             logger.LogWarning("Download monitor status email skipped: StatusEmailRecipient is not configured.");
-
             return;
-
         }
 
-
-
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
-
         var monitor = await monitorService.GetMonitorAsync(date, cancellationToken).ConfigureAwait(false);
-
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
-
         var summary = await summaryService.BuildSummaryAsync(monitor, cancellationToken).ConfigureAwait(false);
-
         var html = DownloadMonitorStatusEmailHtmlBuilder.Build(monitor, portalBase, summary);
-
         var subject = $"GFH MIP AWS — Download Monitor status ({date:yyyy-MM-dd})";
 
-
-
         var send = await emailSender.SendAsync(
-
-            new ReportEmailMessage([scheduler.StatusEmailRecipient.Trim()], subject, html, []),
-
+            new ReportEmailMessage(recipients, subject, html, []),
             cancellationToken).ConfigureAwait(false);
 
-
-
         if (send.Success)
-
         {
-
             logger.LogInformation(
-
                 "Download monitor status email sent to {Recipient} for {Date}.",
-
-                scheduler.StatusEmailRecipient,
-
+                string.Join(", ", recipients),
                 date);
 
         }
@@ -113,12 +92,14 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
 
     private static string ResolvePortalBaseUrl(string? configured) =>
-
         string.IsNullOrWhiteSpace(configured)
-
             ? string.Empty
-
             : configured.TrimEnd('/');
 
+    private static IReadOnlyList<string> ParseRecipients(string value) =>
+        value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 }
 

@@ -1,14 +1,23 @@
 param(
     [string]$Configuration = "Release",
-    [switch]$ApiOnly
+    [switch]$ApiOnly,
+    [switch]$Slim
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-Write-Host "Building MIP.Aws solution ($Configuration)..."
-dotnet build MIP.Aws.slnx -c $Configuration
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($Slim) {
+    $publishDir = "artifacts/api-publish"
+    Write-Host "Publishing API to $publishDir ($Configuration)..."
+    dotnet publish src/MIP.Aws.Api/MIP.Aws.Api.csproj -c $Configuration -o $publishDir --no-self-contained
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+else {
+    Write-Host "Building MIP.Aws solution ($Configuration)..."
+    dotnet build MIP.Aws.slnx -c $Configuration
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 Write-Host "Building Docker images..."
 if (-not (Test-Path ".dockerignore")) {
@@ -16,7 +25,8 @@ if (-not (Test-Path ".dockerignore")) {
 }
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-docker build -f Dockerfile.Api -t mip-aws-api:local .
+$apiDockerfile = if ($Slim) { "Dockerfile.Api.slim" } else { "Dockerfile.Api" }
+docker build -f $apiDockerfile -t mip-aws-api:local .
 if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = $prevEap; exit $LASTEXITCODE }
 if (-not $ApiOnly) {
     docker build -f Dockerfile.Worker -t mip-aws-worker:local .

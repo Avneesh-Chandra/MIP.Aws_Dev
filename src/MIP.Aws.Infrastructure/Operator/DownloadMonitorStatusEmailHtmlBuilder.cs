@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using MIP.Aws.Application.Features.Operator;
+using MIP.Aws.Application.Time;
 
 namespace MIP.Aws.Infrastructure.Operator;
 
@@ -26,6 +27,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         sb.Append("<p style=\"font-size:12px;color:#6b7280;margin-top:24px;\">")
             .Append("Automated daily status from GFH Media Intelligence. Replies are not monitored.")
+            .Append($" All times are {MipDisplayTimeZone.ZoneSuffix()} ({MipDisplayTimeZone.DefaultIanaId}, UTC+3).")
             .Append("</p></div>");
 
         return sb.ToString();
@@ -114,10 +116,10 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
                 .Append(StatusBadge(row.LastDownloadStatus))
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
-                .Append(FormatUtc(row.LastDownloadTime))
+                .Append(FormatLocal(row.LastDownloadTime))
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
-                .Append(FormatUtc(row.LastSuccessfulDownload))
+                .Append(FormatLocal(row.LastSuccessfulDownload))
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
                 .Append(LatestPdfCell(row, portalBaseUrl))
@@ -180,6 +182,6 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         return $"<a href=\"{WebUtility.HtmlEncode(href)}\" style=\"display:inline-block;padding:6px 12px;border:1px solid {border};border-radius:6px;background:{bg};color:{fg};text-decoration:none;font-size:12px;font-weight:600;\">{WebUtility.HtmlEncode(label)}</a>";
     }
 
-    private static string FormatUtc(DateTimeOffset? value) =>
-        value is null ? "never" : $"{value.Value.UtcDateTime:yyyy-MM-dd HH:mm} UTC";
+    private static string FormatLocal(DateTimeOffset? value) =>
+        value is null ? "never" : MipDisplayTimeZone.Format(value);
 }

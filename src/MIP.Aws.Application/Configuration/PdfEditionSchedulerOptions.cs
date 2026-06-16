@@ -24,7 +24,7 @@ public sealed class PdfEditionSchedulerOptions
     public string ScheduleTime { get; set; } = "07:30";
 
     /// <summary>Legacy IANA timezone for <see cref="ScheduleTime"/>.</summary>
-    public string TimeZone { get; set; } = "Asia/Riyadh";
+    public string TimeZone { get; set; } = "Asia/Bahrain";
 
     /// <summary>Send an immediate email when a batch PDF job requires operator action (superseded by status email when disabled).</summary>
     public bool NotificationEnabled { get; set; }

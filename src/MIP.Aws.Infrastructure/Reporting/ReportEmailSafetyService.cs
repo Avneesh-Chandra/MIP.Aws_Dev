@@ -35,6 +35,12 @@ public sealed class ReportEmailSafetyService(IOptions<EmailSafetyOptions> legacy
             return new EmailSafetyAppliedResult(to, subject, htmlBody, original);
         }
 
+        var redirectRecipients = ParseRecipientList(redirect);
+        if (redirectRecipients.Count == 0)
+        {
+            return new EmailSafetyAppliedResult(to, subject, htmlBody, original);
+        }
+
         var prefix = !string.IsNullOrWhiteSpace(settings.SubjectPrefix)
             ? settings.SubjectPrefix.Trim()
             : legacy.PrefixSubject?.Trim() ?? string.Empty;
@@ -44,8 +50,14 @@ public sealed class ReportEmailSafetyService(IOptions<EmailSafetyOptions> legacy
         var note = $"<p style=\"color:#666;font-size:12px;\"><em>Original recipients: {System.Net.WebUtility.HtmlEncode(original)}</em></p>";
         var safeBody = banner + note + htmlBody;
 
-        return new EmailSafetyAppliedResult([redirect], safeSubject, safeBody, original);
+        return new EmailSafetyAppliedResult(redirectRecipients, safeSubject, safeBody, original);
     }
+
+    private static IReadOnlyList<string> ParseRecipientList(string value) =>
+        value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     public bool IsRecipientAllowed(string email, EffectiveMailSettings settings)
     {
