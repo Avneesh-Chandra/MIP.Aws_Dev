@@ -163,6 +163,11 @@ public static class PressReaderPortalLogin
 
         await DismissCookieBannerAsync(page).ConfigureAwait(false);
 
+        if (await IsBrandedDarAlKhaleejLoggedInAsync(page, source).ConfigureAwait(false))
+        {
+            return (true, "Reusing existing Dar Al Khaleej PressReader subscriber session.", null);
+        }
+
         if (!await IsLoginModalVisibleAsync(page).ConfigureAwait(false))
         {
             if (!await OpenBrandedSignInModalAsync(page, source, cancellationToken).ConfigureAwait(false))

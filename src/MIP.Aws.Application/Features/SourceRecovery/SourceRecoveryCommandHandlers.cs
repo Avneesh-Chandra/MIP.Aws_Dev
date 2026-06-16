@@ -90,7 +90,7 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
         GetSourceRecoveryHistoryQuery request,
         CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
+        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
 
         var attemptsQuery = db.SourceRecoveryAttempts.AsNoTracking()
             .Include(a => a.NewsSource)

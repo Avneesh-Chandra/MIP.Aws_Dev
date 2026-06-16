@@ -29,6 +29,7 @@ public sealed class PlaywrightWebPortalAutomationService(
     IOptions<StorageOptions> storageOptions,
     IOptions<NewsIngestionComplianceOptions> complianceOptions,
     IPortalDownloadStrategyResolver strategyResolver,
+    IDarAlKhaleejPressReaderSessionStore darAlKhaleejSessionStore,
     ILogger<PlaywrightWebPortalAutomationService> logger) : IWebPortalAutomationService
 {
     private readonly StorageOptions _storage = storageOptions.Value;
@@ -52,11 +53,12 @@ public sealed class PlaywrightWebPortalAutomationService(
 
         using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
         await using var browser = await LaunchBrowserAsync(playwright).ConfigureAwait(false);
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            UserAgent = "MIP.Aws/1.0 (licensed-portal; authorized-subscriber-automation)",
-            Locale = source.DefaultLanguage ?? "en-US"
-        }).ConfigureAwait(false);
+        await using var context = await CreateBrowserContextAsync(
+            browser,
+            source,
+            probe.Username,
+            acceptDownloads: false,
+            cancellationToken).ConfigureAwait(false);
 
         var page = await context.NewPageAsync().ConfigureAwait(false);
         page.SetDefaultTimeout(120_000);
@@ -75,6 +77,8 @@ public sealed class PlaywrightWebPortalAutomationService(
                 await HandleLoginFailureAsync(source, null, loginOutcome, shot, html, cancellationToken).ConfigureAwait(false);
                 return new NewsPortalLoginTestResultDto(false, loginOutcome.Message, loginOutcome.FailureCode, shot, html);
             }
+
+            await PersistDarAlKhaleejSessionIfApplicableAsync(context, source, probe.Username!, cancellationToken).ConfigureAwait(false);
 
             if (await PortalChallengeDetector.DetectCaptchaAsync(page).ConfigureAwait(false) || await PortalChallengeDetector.DetectMfaAsync(page).ConfigureAwait(false))
             {
@@ -112,7 +116,12 @@ public sealed class PlaywrightWebPortalAutomationService(
         {
             if (isPressReaderLogin)
             {
-                await TryLogoutAsync(page, source, cancellationToken).ConfigureAwait(false);
+                if (probe.Success && !string.IsNullOrWhiteSpace(probe.Username))
+                {
+                    darAlKhaleejSessionStore.Clear(probe.Username!);
+                }
+
+                await TryLogoutAsync(page, source, cancellationToken, releaseDarAlKhaleejSession: true).ConfigureAwait(false);
             }
         }
     }
@@ -141,12 +150,12 @@ public sealed class PlaywrightWebPortalAutomationService(
 
         using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
         await using var browser = await LaunchBrowserAsync(playwright).ConfigureAwait(false);
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            UserAgent = "MIP.Aws/1.0 (licensed-portal; authorized-subscriber-automation)",
-            Locale = source.DefaultLanguage ?? "en-US",
-            AcceptDownloads = true
-        }).ConfigureAwait(false);
+        await using var context = await CreateBrowserContextAsync(
+            browser,
+            source,
+            probe.Username,
+            acceptDownloads: true,
+            cancellationToken).ConfigureAwait(false);
 
         var page = await context.NewPageAsync().ConfigureAwait(false);
         page.SetDefaultTimeout(120_000);
@@ -161,6 +170,8 @@ public sealed class PlaywrightWebPortalAutomationService(
                 var (shot, html) = await CaptureFailureArtifactsAsync(source, null, page, "download-test", cancellationToken).ConfigureAwait(false);
                 return new NewsPortalDownloadTestResultDto(false, loginOutcome.Message, loginOutcome.FailureCode, null, null, null, shot, html);
             }
+
+            await PersistDarAlKhaleejSessionIfApplicableAsync(context, source, probe.Username!, cancellationToken).ConfigureAwait(false);
 
             if (await PortalChallengeDetector.DetectCaptchaAsync(page).ConfigureAwait(false) || await PortalChallengeDetector.DetectMfaAsync(page).ConfigureAwait(false))
             {
@@ -212,7 +223,12 @@ public sealed class PlaywrightWebPortalAutomationService(
         {
             if (isPressReader)
             {
-                await TryLogoutAsync(page, source, cancellationToken).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(probe.Username))
+                {
+                    darAlKhaleejSessionStore.Clear(probe.Username!);
+                }
+
+                await TryLogoutAsync(page, source, cancellationToken, releaseDarAlKhaleejSession: true).ConfigureAwait(false);
             }
         }
     }
@@ -233,11 +249,12 @@ public sealed class PlaywrightWebPortalAutomationService(
 
         using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
         await using var browser = await LaunchBrowserAsync(playwright).ConfigureAwait(false);
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            UserAgent = "MIP.Aws/1.0 (licensed-portal; authorized-subscriber-automation)",
-            Locale = source.DefaultLanguage ?? "en-US"
-        }).ConfigureAwait(false);
+        await using var context = await CreateBrowserContextAsync(
+            browser,
+            source,
+            probe.Username,
+            acceptDownloads: false,
+            cancellationToken).ConfigureAwait(false);
 
         var page = await context.NewPageAsync().ConfigureAwait(false);
         page.SetDefaultTimeout(120_000);
@@ -311,6 +328,11 @@ public sealed class PlaywrightWebPortalAutomationService(
                     null,
                     cancellationToken).ConfigureAwait(false);
 
+                if (!string.IsNullOrWhiteSpace(probe.Username))
+                {
+                    darAlKhaleejSessionStore.Clear(probe.Username!);
+                }
+
                 return new NewsPortalLogoutTestResultDto(
                     true,
                     "PressReader sign-out completed; concurrent session slot should be released.",
@@ -372,12 +394,12 @@ public sealed class PlaywrightWebPortalAutomationService(
 
         using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
         await using var browser = await LaunchBrowserAsync(playwright).ConfigureAwait(false);
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            UserAgent = "MIP.Aws/1.0 (licensed-portal; authorized-subscriber-automation)",
-            Locale = source.DefaultLanguage ?? "en-US",
-            AcceptDownloads = true
-        }).ConfigureAwait(false);
+        await using var context = await CreateBrowserContextAsync(
+            browser,
+            source,
+            probe.Username,
+            acceptDownloads: true,
+            cancellationToken).ConfigureAwait(false);
 
         var page = await context.NewPageAsync().ConfigureAwait(false);
         page.SetDefaultTimeout(120_000);
@@ -409,11 +431,17 @@ public sealed class PlaywrightWebPortalAutomationService(
                 return;
             }
 
+            await PersistDarAlKhaleejSessionIfApplicableAsync(context, source, probe.Username!, cancellationToken).ConfigureAwait(false);
+
+            var loginAuditMessage = loginOutcome.Message.Contains("Reusing existing", StringComparison.OrdinalIgnoreCase)
+                ? loginOutcome.Message
+                : "Login succeeded.";
+
             await AddAuditAsync(
                 source,
                 job.Id,
                 isPressReader ? PressReaderPortalAuditEvents.LoginCompleted : PortalAuditEventKind.LoginSuccess,
-                "Login succeeded.",
+                loginAuditMessage,
                 null,
                 cancellationToken).ConfigureAwait(false);
 
@@ -499,7 +527,7 @@ public sealed class PlaywrightWebPortalAutomationService(
         {
             if (isPressReaderJob)
             {
-                await TryLogoutAsync(page, source, cancellationToken).ConfigureAwait(false);
+                await PreserveDarAlKhaleejSessionAfterDownloadAsync(context, source, probe.Username!, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -951,12 +979,16 @@ public sealed class PlaywrightWebPortalAutomationService(
         return (shot, html);
     }
 
-    private async Task TryLogoutAsync(IPage page, NewsSource source, CancellationToken cancellationToken)
+    private async Task TryLogoutAsync(
+        IPage page,
+        NewsSource source,
+        CancellationToken cancellationToken,
+        bool releaseDarAlKhaleejSession = true)
     {
         try
         {
             await ThrottleAsync(cancellationToken).ConfigureAwait(false);
-            if (PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source))
+            if (releaseDarAlKhaleejSession && PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source))
             {
                 var released = await PressReaderPortalLogin.TryReleaseDarAlKhaleejSessionAsync(page, source, cancellationToken).ConfigureAwait(false);
                 await AddAuditAsync(
@@ -1054,6 +1086,70 @@ public sealed class PlaywrightWebPortalAutomationService(
         }
 
         return false;
+    }
+
+    private async Task<IBrowserContext> CreateBrowserContextAsync(
+        IBrowser browser,
+        NewsSource source,
+        string? username,
+        bool acceptDownloads,
+        CancellationToken cancellationToken)
+    {
+        var options = new BrowserNewContextOptions
+        {
+            UserAgent = "MIP.Aws/1.0 (licensed-portal; authorized-subscriber-automation)",
+            Locale = source.DefaultLanguage ?? "en-US",
+            AcceptDownloads = acceptDownloads
+        };
+
+        if (PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source)
+            && !string.IsNullOrWhiteSpace(username)
+            && darAlKhaleejSessionStore.TryGetStorageState(username, out var storageStateJson))
+        {
+            options.StorageState = storageStateJson;
+            logger.LogInformation(
+                "Restored cached Dar Al Khaleej PressReader session for subscriber {Username}.",
+                username);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return await browser.NewContextAsync(options).ConfigureAwait(false);
+    }
+
+    private async Task PersistDarAlKhaleejSessionIfApplicableAsync(
+        IBrowserContext context,
+        NewsSource source,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        if (!PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source))
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var storageStateJson = await context.StorageStateAsync().ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(storageStateJson))
+        {
+            darAlKhaleejSessionStore.SaveStorageState(username, storageStateJson);
+        }
+    }
+
+    private async Task PreserveDarAlKhaleejSessionAfterDownloadAsync(
+        IBrowserContext context,
+        NewsSource source,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        if (!PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source))
+        {
+            return;
+        }
+
+        await PersistDarAlKhaleejSessionIfApplicableAsync(context, source, username, cancellationToken).ConfigureAwait(false);
+        logger.LogInformation(
+            "Preserved Dar Al Khaleej PressReader session for subscriber {Username} (skipping sign-out for sibling editions).",
+            username);
     }
 
     private static Task<IBrowser> LaunchBrowserAsync(IPlaywright playwright) =>

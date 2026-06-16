@@ -30,14 +30,7 @@ public sealed class OperatorDownloadMonitorService(
 {
     public async Task<DownloadMonitorDto> GetMonitorAsync(DateOnly? monitorDate, CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
-        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
-                db,
-                recoveryOrchestrator,
-                autoAiRecoveryEnqueue,
-                logger,
-                cancellationToken)
-            .ConfigureAwait(false);
+        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var (dayStart, dayEnd) = DayBounds(date);

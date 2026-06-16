@@ -111,6 +111,7 @@ public static class DependencyInjection
         services.AddSingleton<EditionDiscoveryHtmlClient>();
 
         services.AddScoped<IPublisherComplianceGate, PublisherComplianceGate>();
+        services.AddSingleton<IDarAlKhaleejPressReaderSessionStore, DarAlKhaleejPressReaderSessionStore>();
         services.AddScoped<IWebPortalAutomationService, PlaywrightWebPortalAutomationService>();
         services.AddScoped<PressReaderDownloadStrategy>();
         services.AddScoped<GenericWebPortalDownloadStrategy>();

@@ -20,6 +20,9 @@ public interface ISourceRecoveryOrchestrator
         Guid attemptId,
         CancellationToken cancellationToken);
 
+    /// <summary>Heals stale download jobs, then completes recovery attempts whose retry finished but finalize never persisted.</summary>
+    Task ReconcileAllAsync(CancellationToken cancellationToken);
+
     /// <summary>Completes recovery attempts whose retry job finished but finalize never persisted.</summary>
     Task ReconcileUnfinalizedAttemptsAsync(CancellationToken cancellationToken);
 

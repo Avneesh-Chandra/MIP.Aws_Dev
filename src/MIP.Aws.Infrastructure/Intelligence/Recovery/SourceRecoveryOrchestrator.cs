@@ -7,6 +7,7 @@ using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
+using MIP.Aws.Infrastructure.Operator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,9 +18,22 @@ public sealed class SourceRecoveryOrchestrator(
     IApplicationDbContext db,
     INewsDownloadJobScheduler scheduler,
     IAuditService audit,
+    IAutoAiDownloadRecoveryEnqueueService autoAiRecoveryEnqueue,
     IOptions<AiSourceRecoveryOptions> recoveryOptions,
     ILogger<SourceRecoveryOrchestrator> logger) : ISourceRecoveryOrchestrator
 {
+    public async Task ReconcileAllAsync(CancellationToken cancellationToken)
+    {
+        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                db,
+                this,
+                autoAiRecoveryEnqueue,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
+        await ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<SourceRecoveryPreviewDto> PreviewChangesAsync(
         Guid attemptId,
         int optionIndex,
@@ -222,7 +236,7 @@ public sealed class SourceRecoveryOrchestrator(
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        if (job is null || job.Status == DownloadJobStatus.Running || job.Status == DownloadJobStatus.Pending)
+        if (job is null || IsRetryStillInProgress(job.Status))
         {
             return new SourceRecoveryApplyResultDto(
                 attempt.Id,
@@ -234,7 +248,7 @@ public sealed class SourceRecoveryOrchestrator(
 
         attempt.NewsSource = await ReloadMutableSourceAsync(attempt.NewsSourceId, cancellationToken).ConfigureAwait(false);
 
-        if (job.Status == DownloadJobStatus.Succeeded)
+        if (IsRetrySuccessful(job.Status))
         {
             await ActivateCandidateAsync(attempt, cancellationToken).ConfigureAwait(false);
             await TryRecordKnowledgeAsync(attempt, success: true, cancellationToken).ConfigureAwait(false);
@@ -315,7 +329,13 @@ public sealed class SourceRecoveryOrchestrator(
             var retryJobIds = pending.Select(p => p.RetryJobId).ToList();
             var terminalJobs = await db.DownloadJobs.AsNoTracking()
                 .Where(j => retryJobIds.Contains(j.Id)
-                            && (j.Status == DownloadJobStatus.Succeeded || j.Status == DownloadJobStatus.Failed))
+                            && (j.Status == DownloadJobStatus.Succeeded
+                                || j.Status == DownloadJobStatus.Failed
+                                || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery
+                                || j.Status == DownloadJobStatus.FailedAfterAutoAiRecovery
+                                || j.Status == DownloadJobStatus.Cancelled
+                                || j.Status == DownloadJobStatus.ManualInterventionRequired
+                                || j.Status == DownloadJobStatus.AutoAiRecoverySkipped))
                 .Select(j => j.Id)
                 .ToHashSetAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -329,7 +349,13 @@ public sealed class SourceRecoveryOrchestrator(
         var orphanedJobs = await db.DownloadJobs.AsNoTracking()
             .Where(j => !j.IsDeleted
                         && j.CorrelationId.StartsWith("recovery:")
-                        && (j.Status == DownloadJobStatus.Succeeded || j.Status == DownloadJobStatus.Failed))
+                        && (j.Status == DownloadJobStatus.Succeeded
+                            || j.Status == DownloadJobStatus.Failed
+                            || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery
+                            || j.Status == DownloadJobStatus.FailedAfterAutoAiRecovery
+                            || j.Status == DownloadJobStatus.Cancelled
+                            || j.Status == DownloadJobStatus.ManualInterventionRequired
+                            || j.Status == DownloadJobStatus.AutoAiRecoverySkipped))
             .Select(j => new { j.CorrelationId, j.CreatedAt })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -743,6 +769,25 @@ public sealed class SourceRecoveryOrchestrator(
         Guid CandidateVersionId,
         Guid RollbackVersionId,
         Guid RetryJobId);
+
+    private static bool IsRetryStillInProgress(DownloadJobStatus status) =>
+        status is DownloadJobStatus.Running
+            or DownloadJobStatus.Pending
+            or DownloadJobStatus.AutoAiRecoveryAnalyzing
+            or DownloadJobStatus.AutoAiRecoveryApplying
+            or DownloadJobStatus.AutoAiRecoveryRetrying;
+
+    private static bool IsRetrySuccessful(DownloadJobStatus status) =>
+        status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery;
+
+    private static bool IsRetryTerminal(DownloadJobStatus status) =>
+        status is DownloadJobStatus.Succeeded
+            or DownloadJobStatus.Failed
+            or DownloadJobStatus.SuccessWithAutoAiRecovery
+            or DownloadJobStatus.FailedAfterAutoAiRecovery
+            or DownloadJobStatus.Cancelled
+            or DownloadJobStatus.ManualInterventionRequired
+            or DownloadJobStatus.AutoAiRecoverySkipped;
 
     private static SourceRecoveryApplyResultDto ToApplyResult(SourceRecoveryAttempt attempt) =>
         new(

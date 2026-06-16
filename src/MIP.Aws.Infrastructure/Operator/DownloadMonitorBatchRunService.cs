@@ -113,14 +113,7 @@ public sealed class DownloadMonitorBatchRunService(
         BatchCacheEntry entry,
         CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
-        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
-                db,
-                recoveryOrchestrator,
-                autoAiEnqueue,
-                logger,
-                cancellationToken)
-            .ConfigureAwait(false);
+        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
