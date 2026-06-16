@@ -81,13 +81,17 @@ public sealed class RollbackSourceRecoveryCommandHandler(
     }
 }
 
-public sealed class GetSourceRecoveryHistoryQueryHandler(IApplicationDbContext db)
+public sealed class GetSourceRecoveryHistoryQueryHandler(
+    IApplicationDbContext db,
+    ISourceRecoveryOrchestrator recoveryOrchestrator)
     : IRequestHandler<GetSourceRecoveryHistoryQuery, IReadOnlyList<SourceRecoveryHistoryItemDto>>
 {
     public async Task<IReadOnlyList<SourceRecoveryHistoryItemDto>> Handle(
         GetSourceRecoveryHistoryQuery request,
         CancellationToken cancellationToken)
     {
+        await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
+
         var attemptsQuery = db.SourceRecoveryAttempts.AsNoTracking()
             .Include(a => a.NewsSource)
             .Where(a => !a.IsDeleted);
@@ -134,6 +138,8 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(IApplicationDbContext d
             var title = a.SelectedOptionIndex >= 0
                 ? options.FirstOrDefault(o => o.OptionIndex == a.SelectedOptionIndex)?.Title
                 : null;
+            title ??= options.FirstOrDefault()?.Title;
+
             var appliedBy = a.IsAutomatic
                 ? "Automatic AI Recovery"
                 : a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
