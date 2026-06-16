@@ -1,4 +1,5 @@
 using MIP.Aws.Application.Abstractions;
+using MIP.Aws.Application.Abstractions.Intelligence;
 using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.NewsSources;
@@ -22,17 +23,25 @@ public sealed class DownloadMonitorBatchRunService(
 {
     private const string ActiveBatchCacheKey = "download-monitor-batch:active";
     private static readonly TimeSpan BatchCacheTtl = TimeSpan.FromHours(8);
-    private static readonly TimeSpan SchedulerGracePeriod = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan BatchWaitGracePeriod = TimeSpan.FromMinutes(50);
 
     public async Task<DownloadMonitorBatchRunResult> StartBatchAsync(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var recoveryOrchestrator = scope.ServiceProvider.GetRequiredService<ISourceRecoveryOrchestrator>();
 
         var existing = cache.Get<BatchCacheEntry>(ActiveBatchCacheKey);
         if (existing is not null)
         {
-            var existingProgress = await BuildProgressAsync(db, existing, cancellationToken).ConfigureAwait(false);
+            var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
+            var existingProgress = await BuildProgressAsync(
+                    db,
+                    recoveryOrchestrator,
+                    autoAiEnqueue,
+                    existing,
+                    cancellationToken)
+                .ConfigureAwait(false);
             if (existingProgress.IsActive)
             {
                 throw new InvalidOperationException(
@@ -68,6 +77,7 @@ public sealed class DownloadMonitorBatchRunService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var recoveryOrchestrator = scope.ServiceProvider.GetRequiredService<ISourceRecoveryOrchestrator>();
 
         var entry = ResolveBatchEntry(batchStartedAt);
         if (entry is null)
@@ -75,7 +85,9 @@ public sealed class DownloadMonitorBatchRunService(
             return null;
         }
 
-        return await BuildProgressAsync(db, entry, cancellationToken).ConfigureAwait(false);
+        var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
+        return await BuildProgressAsync(db, recoveryOrchestrator, autoAiEnqueue, entry, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private BatchCacheEntry? ResolveBatchEntry(DateTimeOffset? batchStartedAt)
@@ -96,17 +108,27 @@ public sealed class DownloadMonitorBatchRunService(
 
     private async Task<DownloadMonitorBatchProgressResult> BuildProgressAsync(
         IApplicationDbContext db,
+        ISourceRecoveryOrchestrator recoveryOrchestrator,
+        IAutoAiDownloadRecoveryEnqueueService autoAiEnqueue,
         BatchCacheEntry entry,
         CancellationToken cancellationToken)
     {
+        await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
+        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                db,
+                recoveryOrchestrator,
+                autoAiEnqueue,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
+
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
         var sourceIds = sources.Select(s => s.Id).ToHashSet();
 
         var jobs = await db.DownloadJobs.AsNoTracking()
             .Where(j => !j.IsDeleted
-                        && j.Trigger == DownloadJobTrigger.Scheduled
-                        && j.CreatedAt >= entry.StartedAt
+                        && j.CreatedAt >= entry.StartedAt.AddMinutes(-1)
                         && sourceIds.Contains(j.NewsSourceId))
             .OrderByDescending(j => j.CreatedAt)
             .ToListAsync(cancellationToken)
@@ -125,35 +147,35 @@ public sealed class DownloadMonitorBatchRunService(
         var waitingCount = 0;
         var autoRecoveryCount = 0;
 
-        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + SchedulerGracePeriod;
-        var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
-
         foreach (var source in sources)
         {
-            if (!latestJobBySource.TryGetValue(source.Id, out var job))
-            {
-                if (withinStaggerWindow)
-                {
-                    waitingCount++;
-                    activities.Add(new DownloadMonitorBatchActivityResult(
-                        source.Name,
-                        "Waiting for scheduled download slot",
-                        "Waiting"));
-                }
-                else
-                {
-                    failedCount++;
-                    activities.Add(new DownloadMonitorBatchActivityResult(
-                        source.Name,
-                        "Scheduled download did not start",
-                        "Failed"));
-                }
+            string state;
+            string activity;
 
+            if (latestJobBySource.TryGetValue(source.Id, out var job))
+            {
+                (state, activity) = DescribeJob(job);
+            }
+            else if (await DownloadMonitorBatchOutcomeHelper.HasSuccessfulPdfEditionSinceBatchAsync(
+                             db,
+                             source.Id,
+                             entry.StartedAt,
+                             cancellationToken)
+                         .ConfigureAwait(false))
+            {
+                state = "Success";
+                activity = "Today's edition already downloaded";
+            }
+            else
+            {
+                waitingCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    "Waiting for scheduled download slot",
+                    "Waiting"));
                 continue;
             }
 
-            var (state, activity) = DescribeJob(job);
             activities.Add(new DownloadMonitorBatchActivityResult(source.Name, activity, state));
 
             switch (state)
@@ -172,25 +194,20 @@ public sealed class DownloadMonitorBatchRunService(
                     inProgressCount++;
                     break;
                 default:
-                    if (withinStaggerWindow)
-                    {
-                        waitingCount++;
-                    }
-                    else
-                    {
-                        failedCount++;
-                    }
-
+                    waitingCount++;
                     break;
             }
         }
 
         var completedCount = successCount + failedCount;
-        var isComplete = inProgressCount == 0 && autoRecoveryCount == 0 && waitingCount == 0;
-        var isActive = !isComplete;
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
+        var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
+        var isComplete = inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow);
+        var isActive = !isComplete && (inProgressCount > 0 || (waitingCount > 0 && withinStaggerWindow));
         var percent = total == 0
             ? 100
-            : Math.Round(completedCount * 100.0 / total, 1);
+            : Math.Round((completedCount + (isComplete && waitingCount > 0 ? waitingCount : 0)) * 100.0 / total, 1);
         if (!isComplete && completedCount > 0)
         {
             percent = Math.Min(percent, 99);

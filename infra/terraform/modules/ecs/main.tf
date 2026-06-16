@@ -86,6 +86,7 @@ resource "aws_ecs_task_definition" "api" {
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       environment = [
         { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
+        { name = "Hangfire__EnableJobServer", value = "false" },
         { name = "ASPNETCORE_URLS", value = "http://+:8080" },
         { name = "Aws__Region", value = var.aws_region },
         { name = "Aws__S3__Enabled", value = "true" },
@@ -158,7 +159,36 @@ resource "aws_ecs_task_definition" "worker" {
       essential = true
       environment = [
         { name = "DOTNET_ENVIRONMENT", value = "Production" },
-        { name = "Aws__Region", value = var.aws_region }
+        { name = "Hangfire__EnableJobServer", value = "true" },
+        { name = "Aws__Region", value = var.aws_region },
+        { name = "Aws__S3__Enabled", value = "true" },
+        { name = "Aws__S3__BucketName", value = var.s3_bucket_name },
+        { name = "Aws__S3__Prefix", value = "mip/" },
+        { name = "Aws__Ses__Enabled", value = "true" },
+        { name = "Aws__Ses__SenderEmail", value = var.ses_sender_email },
+        { name = "Aws__SecretsManager__Enabled", value = "true" },
+        { name = "Aws__SecretsManager__Prefix", value = "mip/" },
+        { name = "Storage__Provider", value = "S3" },
+        { name = "Email__Provider", value = "AwsSes" },
+        { name = "Email__FromEmail", value = var.ses_sender_email },
+        { name = "MailAutomation__Enabled", value = "true" },
+        { name = "ConnectionStrings__DefaultConnection", value = local.default_conn },
+        { name = "ConnectionStrings__Hangfire", value = local.hangfire_conn },
+        { name = "Database__AutoMigrateOnStartup", value = "false" },
+        { name = "PdfEditionScheduler__StatusEmailRecipient", value = var.status_email_recipient },
+        { name = "PdfEditionScheduler__AdminPortalUrl", value = var.admin_portal_url },
+        { name = "Ai__Provider", value = "AwsBedrock" },
+        { name = "Ai__Enabled", value = "true" },
+        { name = "Ai__MockMode", value = "false" },
+        { name = "Aws__Bedrock__Enabled", value = tostring(var.enable_bedrock) },
+        { name = "Aws__Bedrock__Region", value = var.bedrock_region },
+        { name = "Aws__Bedrock__ModelId", value = var.bedrock_model_id },
+        { name = "Aws__Bedrock__MaxTokens", value = "1200" },
+        { name = "Aws__Bedrock__Temperature", value = "0.2" },
+        { name = "Aws__Bedrock__TopP", value = "0.9" },
+        { name = "Aws__Bedrock__TimeoutSeconds", value = "60" },
+        { name = "Application__DisplayTimeZoneId", value = "Asia/Bahrain" },
+        { name = "HangfireQueues__WorkerCount", value = "2" }
       ]
       logConfiguration = {
         logDriver = "awslogs"
