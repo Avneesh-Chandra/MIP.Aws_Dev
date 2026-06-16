@@ -830,19 +830,6 @@ public sealed class OperatorDownloadMonitorService(
             status = DownloadMonitorStatusLabels.Success;
         }
 
-        var failureReason = DownloadMonitorStatusLabels.IsSuccessful(status)
-            ? null
-            : lastActivity.Job?.ErrorMessage ?? lastActivity.Pdf?.FailureReason;
-        var failureCode = DownloadMonitorStatusLabels.IsSuccessful(status)
-            ? null
-            : lastActivity.Job is not null
-                ? ExtractFailureCode(lastActivity.Job.ErrorMessage)
-                : lastActivity.Pdf is not null ? MapPdfFailureCode(lastActivity.Pdf.Status) : null;
-
-        var complianceBlocked = status == DownloadMonitorStatusLabels.ComplianceBlocked;
-        var manualRequired = ManualInterventionSuggestions.RequiresManualIntervention(
-            status, failureCode, source.RequiresManualAction, complianceBlocked);
-
         DateTimeOffset? lastSuccess = LatestTerminalTimestamp(
             sourceJobs
                 .Where(j => j.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery)
@@ -863,20 +850,55 @@ public sealed class OperatorDownloadMonitorService(
             lastSuccess = dlAt;
         }
 
-        if ((lastSuccess is not null || downloadedForDay is not null)
+        DateTimeOffset? lastFailed = LatestTerminalTimestamp(
+            sourceJobs
+                .Where(j => j.Status is DownloadJobStatus.Failed
+                    or DownloadJobStatus.FailedAfterAutoAiRecovery
+                    or DownloadJobStatus.AutoAiRecoverySkipped
+                    or DownloadJobStatus.Cancelled)
+                .Select(j => j.CompletedAt ?? j.CreatedAt)
+                .Concat(sourcePdfs.Where(p => p.Status == PdfEditionStatus.Failed).Select(p => p.DownloadedAt ?? p.DiscoveredAt ?? p.CreatedAt)),
+            dayStart,
+            dayEnd);
+
+        var hasPdfForDay = downloadedForDay is not null
+                           || (lastSuccess is not null
+                               && source.LastPdfDownloadedAt is { } storedPdfAt
+                               && storedPdfAt >= dayStart
+                               && storedPdfAt < dayEnd);
+
+        var laterFailureAfterSuccess = lastFailed is not null
+                                     && lastSuccess is not null
+                                     && lastFailed > lastSuccess;
+
+        if (hasPdfForDay
             && !DownloadMonitorStatusLabels.IsSuccessful(status)
             && status != DownloadMonitorStatusLabels.ComplianceBlocked)
         {
             status = ResolveDaySuccessStatus(sourceJobs, dayStart, dayEnd, recoveryRetryJobAttemptIds);
         }
+        else if (!laterFailureAfterSuccess
+                 && lastSuccess is not null
+                 && !DownloadMonitorStatusLabels.IsSuccessful(status)
+                 && status != DownloadMonitorStatusLabels.ComplianceBlocked)
+        {
+            status = ResolveDaySuccessStatus(sourceJobs, dayStart, dayEnd, recoveryRetryJobAttemptIds);
+        }
 
-        DateTimeOffset? lastFailed = LatestTerminalTimestamp(
-            sourceJobs
-                .Where(j => j.Status == DownloadJobStatus.Failed)
-                .Select(j => j.CompletedAt ?? j.CreatedAt)
-                .Concat(sourcePdfs.Where(p => p.Status == PdfEditionStatus.Failed).Select(p => p.DownloadedAt ?? p.DiscoveredAt ?? p.CreatedAt)),
-            dayStart,
-            dayEnd);
+        var failureReason = DownloadMonitorStatusLabels.IsSuccessful(status)
+            ? null
+            : lastActivity.Job?.ErrorMessage ?? lastActivity.Pdf?.FailureReason;
+        var failureCode = DownloadMonitorStatusLabels.IsSuccessful(status)
+            ? null
+            : lastActivity.Job is not null
+                ? ExtractFailureCode(lastActivity.Job.ErrorMessage)
+                : lastActivity.Pdf is not null ? MapPdfFailureCode(lastActivity.Pdf.Status) : null;
+
+        var complianceBlocked = status == DownloadMonitorStatusLabels.ComplianceBlocked;
+        var manualRequired = DownloadMonitorStatusLabels.IsSuccessful(status)
+            ? source.RequiresManualAction || complianceBlocked
+            : ManualInterventionSuggestions.RequiresManualIntervention(
+                status, failureCode, source.RequiresManualAction, complianceBlocked);
 
         var lastTime = lastActivity.Job?.CompletedAt ?? lastActivity.Job?.StartedAt ?? lastActivity.Job?.CreatedAt
             ?? lastActivity.Pdf?.DownloadedAt ?? lastActivity.Pdf?.DiscoveredAt ?? lastActivity.Pdf?.CreatedAt;
@@ -918,8 +940,10 @@ public sealed class OperatorDownloadMonitorService(
             latestJobId = ResolveInterventionJobId(lastActivity, sourceJobs, sourcePdfs);
         }
 
-        var suggested = ManualInterventionSuggestions.GetSuggestion(
-            failureCode, failureReason, source.RequiresManualAction, complianceBlocked);
+        var suggested = manualRequired
+            ? ManualInterventionSuggestions.GetSuggestion(
+                failureCode, failureReason, source.RequiresManualAction, complianceBlocked)
+            : null;
 
         var adminInformed = latestJobId is Guid informedJobId
                             && (interventionJobIds.PendingInterventionJobIds.Contains(informedJobId)

@@ -381,6 +381,19 @@ public sealed class SourceRecoveryOrchestrator(
             }
         }
 
+        var retryEnqueuedWithoutAppliedAt = await db.SourceRecoveryAttempts.AsNoTracking()
+            .Where(a => !a.IsDeleted
+                        && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
+                        && a.AppliedAt == null)
+            .Select(a => a.Id)
+            .Take(50)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var attemptId in retryEnqueuedWithoutAppliedAt)
+        {
+            attemptIds.Add(attemptId);
+        }
+
         foreach (var attemptId in attemptIds)
         {
             try
