@@ -117,6 +117,38 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
+    public void ShouldRunForTrigger_allows_scheduled_when_RunAfterScheduledFailure_enabled()
+    {
+        var settings = new AutoAiDownloadRecoveryOptions { RunAfterScheduledFailure = true };
+
+        Assert.True(AutoAiRecoveryEligibility.ShouldRunForTrigger(DownloadJobTrigger.Scheduled, settings));
+        Assert.False(AutoAiRecoveryEligibility.ShouldRunForTrigger(DownloadJobTrigger.Manual, settings));
+    }
+
+    [Fact]
+    public void IsJobEligibleForAutoRecovery_requires_failed_status_and_non_recovery_trigger()
+    {
+        var eligible = new DownloadJob
+        {
+            Status = DownloadJobStatus.Failed,
+            Trigger = DownloadJobTrigger.Scheduled,
+            CorrelationId = Guid.NewGuid().ToString("N")
+        };
+
+        Assert.True(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
+
+        eligible.Trigger = DownloadJobTrigger.Manual;
+        Assert.True(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
+
+        eligible.Trigger = DownloadJobTrigger.AutoAiRecovery;
+        Assert.False(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
+
+        eligible.Trigger = DownloadJobTrigger.Scheduled;
+        eligible.CorrelationId = "recovery:abc";
+        Assert.False(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
+    }
+
+    [Fact]
     public void Ranker_prefers_low_risk_pressreader_fix()
     {
         var settings = new AutoAiDownloadRecoveryOptions

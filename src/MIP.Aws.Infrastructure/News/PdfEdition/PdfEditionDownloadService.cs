@@ -35,6 +35,10 @@ public sealed class PdfEditionDownloadService(
 {
     private readonly StorageOptions _storage = storageOptions.Value;
     private Guid? _boundDownloadJobId;
+    private DownloadJobTrigger? _downloadJobTrigger;
+
+    private DownloadJobTrigger EffectiveDownloadJobTrigger =>
+        _downloadJobTrigger ?? DownloadExecutionContext.CurrentTrigger;
 
     public Task<PdfEditionDownloadOutcome> DiscoverOnlyAsync(Guid newsSourceId, CancellationToken cancellationToken) =>
         RunAsync(newsSourceId, download: false, enqueueOcr: false, cancellationToken);
@@ -71,6 +75,7 @@ public sealed class PdfEditionDownloadService(
         }
 
         _boundDownloadJobId = downloadJobId;
+        _downloadJobTrigger = job.Trigger;
         try
         {
             return await RunAsync(job.NewsSourceId, download: true, enqueueOcr: true, cancellationToken).ConfigureAwait(false);
@@ -83,6 +88,7 @@ public sealed class PdfEditionDownloadService(
         finally
         {
             _boundDownloadJobId = null;
+            _downloadJobTrigger = null;
         }
     }
 
@@ -112,6 +118,29 @@ public sealed class PdfEditionDownloadService(
             throw new InvalidOperationException("A valid http(s) PDF or issue-viewer URL is required.");
         }
 
+        _downloadJobTrigger = DownloadJobTrigger.Manual;
+        try
+        {
+            return await RunManualCoreAsync(
+                newsSourceId,
+                manualUri,
+                saveAsDiscoveryPageUrl,
+                enqueueOcr,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _downloadJobTrigger = null;
+        }
+    }
+
+    private async Task<PdfEditionDownloadOutcome> RunManualCoreAsync(
+        Guid newsSourceId,
+        Uri manualUri,
+        bool saveAsDiscoveryPageUrl,
+        bool enqueueOcr,
+        CancellationToken cancellationToken)
+    {
         progress.Clear(newsSourceId);
         progress.Report(newsSourceId, 2, "Starting manual override…");
 
@@ -210,19 +239,24 @@ public sealed class PdfEditionDownloadService(
         bool enqueueOcr,
         CancellationToken cancellationToken)
     {
-        if (download)
-        {
-            progress.Clear(newsSourceId);
-            progress.Report(newsSourceId, 2, "Starting…");
-        }
+        var ownedTriggerCapture = _downloadJobTrigger is null;
+        _downloadJobTrigger ??= DownloadExecutionContext.CurrentTrigger;
 
-        if (download)
+        try
         {
-            progress.Report(newsSourceId, 8, "Loading source…");
-        }
+            if (download)
+            {
+                progress.Clear(newsSourceId);
+                progress.Report(newsSourceId, 2, "Starting…");
+            }
 
-        var source = await LoadSourceAsync(newsSourceId, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidOperationException("News source not found.");
+            if (download)
+            {
+                progress.Report(newsSourceId, 8, "Loading source…");
+            }
+
+            var source = await LoadSourceAsync(newsSourceId, cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("News source not found.");
 
             if (!source.IsEnabled)
             {
@@ -357,6 +391,14 @@ public sealed class PdfEditionDownloadService(
             enqueueOcr,
             cancellationToken,
             validation).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (ownedTriggerCapture)
+            {
+                _downloadJobTrigger = null;
+            }
+        }
     }
 
     private async Task<PdfEditionDownloadOutcome> DownloadValidatedCandidateAsync(
@@ -711,6 +753,7 @@ public sealed class PdfEditionDownloadService(
                     failureJob.ErrorMessage = failureReason ?? "PDF edition download failed.";
                     failureJob.StartedAt ??= DateTimeOffset.UtcNow;
                     failureJob.CompletedAt = DateTimeOffset.UtcNow;
+                    failureJob.Trigger = EffectiveDownloadJobTrigger;
                 }
                 else
                 {
@@ -723,7 +766,7 @@ public sealed class PdfEditionDownloadService(
                         StartedAt = DateTimeOffset.UtcNow,
                         CompletedAt = DateTimeOffset.UtcNow,
                         CorrelationId = Guid.NewGuid().ToString("N"),
-                        Trigger = DownloadExecutionContext.CurrentTrigger,
+                        Trigger = EffectiveDownloadJobTrigger,
                         CreatedAt = DateTimeOffset.UtcNow,
                         RobotsTxtAllowed = true
                     };
@@ -798,7 +841,7 @@ public sealed class PdfEditionDownloadService(
                     StartedAt = DateTimeOffset.UtcNow,
                     CompletedAt = DateTimeOffset.UtcNow,
                     CorrelationId = Guid.NewGuid().ToString("N"),
-                    Trigger = DownloadExecutionContext.CurrentTrigger,
+                    Trigger = EffectiveDownloadJobTrigger,
                     CreatedAt = DateTimeOffset.UtcNow,
                     RobotsTxtAllowed = true
                 };

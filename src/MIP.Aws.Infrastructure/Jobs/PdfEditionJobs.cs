@@ -62,16 +62,19 @@ public sealed class PdfEditionJobs(IServiceScopeFactory scopeFactory, ILogger<Pd
         {
             try
             {
-                var result = await service.DownloadTodayAsync(source.Id, enqueueOcr: true, CancellationToken.None)
-                    .ConfigureAwait(false);
-                logger.LogInformation(
-                    "PDF edition daily job for {Source}: {Status}",
-                    source.Name,
-                    result.Status);
-
-                if (RequiresManualAction(result.Status))
+                using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
                 {
-                    needsManualAction.Add(ToJobResult(source, result));
+                    var result = await service.DownloadTodayAsync(source.Id, enqueueOcr: true, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    logger.LogInformation(
+                        "PDF edition daily job for {Source}: {Status}",
+                        source.Name,
+                        result.Status);
+
+                    if (RequiresManualAction(result.Status))
+                    {
+                        needsManualAction.Add(ToJobResult(source, result));
+                    }
                 }
             }
             catch (Exception ex)
