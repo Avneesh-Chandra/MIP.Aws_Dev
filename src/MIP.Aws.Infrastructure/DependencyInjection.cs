@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.Configure<AiSourceRecoveryOptions>(configuration.GetSection(AiSourceRecoveryOptions.SectionName));
         services.Configure<NewsIngestionComplianceOptions>(configuration.GetSection(NewsIngestionComplianceOptions.SectionName));
         services.Configure<HangfireQueueOptions>(configuration.GetSection(HangfireQueueOptions.SectionName));
+        services.Configure<HangfireHostOptions>(configuration.GetSection(HangfireHostOptions.SectionName));
         services.Configure<AiSelectorSuggestionOptions>(configuration.GetSection(AiSelectorSuggestionOptions.SectionName));
         services.Configure<RedisCacheOptions>(configuration.GetSection(RedisCacheOptions.SectionName));
         services.AddSingleton<ICacheService, InMemoryCacheService>();
@@ -162,6 +163,7 @@ public static class DependencyInjection
                 ?? throw new InvalidOperationException("Hangfire requires a SQL connection string.");
 
             var queueOptions = configuration.GetSection(HangfireQueueOptions.SectionName).Get<HangfireQueueOptions>() ?? new HangfireQueueOptions();
+            var hangfireHost = configuration.GetSection(HangfireHostOptions.SectionName).Get<HangfireHostOptions>() ?? new HangfireHostOptions();
             services.AddHangfire(cfg => cfg
                 .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
                 .UseSimpleAssemblyNameTypeSerializer()
@@ -172,14 +174,17 @@ public static class DependencyInjection
                     QueuePollInterval = TimeSpan.FromSeconds(5)
                 }));
 
-            services.AddHangfireServer(o =>
+            if (hangfireHost.EnableJobServer)
             {
-                o.Queues = queueOptions.Queues;
-                if (queueOptions.WorkerCount is > 0)
+                services.AddHangfireServer(o =>
                 {
-                    o.WorkerCount = queueOptions.WorkerCount.Value;
-                }
-            });
+                    o.Queues = queueOptions.Queues;
+                    if (queueOptions.WorkerCount is > 0)
+                    {
+                        o.WorkerCount = queueOptions.WorkerCount.Value;
+                    }
+                });
+            }
         }
 
         return services;

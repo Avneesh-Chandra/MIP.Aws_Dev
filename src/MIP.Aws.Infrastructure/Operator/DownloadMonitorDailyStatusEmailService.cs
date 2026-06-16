@@ -98,6 +98,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
     private static IReadOnlyList<string> ParseRecipients(string value) =>
         value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => x.Trim().ToLowerInvariant())
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
