@@ -282,13 +282,13 @@ public sealed class NewspaperCatalogSeedHostedService(
         logger.LogInformation("Seeded PressReader source {Name} ({SourceId}).", name, source.Id);
     }
 
-    private static async Task EnsureAlQabasPublicPdfDiscoveryAsync(IApplicationDbContext db, CancellationToken cancellationToken)
+    private async Task EnsureAlQabasPublicPdfDiscoveryAsync(IApplicationDbContext db, CancellationToken cancellationToken)
     {
         var matches = await db.NewsSources
             .Where(s => !s.IsDeleted
                         && (s.ConnectorKey == "news.alqabas"
-                            || s.BaseUrl.Contains("alqabas.com", StringComparison.OrdinalIgnoreCase)
-                            || s.Name.Contains("Al Qabas", StringComparison.OrdinalIgnoreCase)))
+                            || s.BaseUrl.Contains("alqabas.com")
+                            || s.Name.Contains("Al Qabas")))
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -341,6 +341,9 @@ public sealed class NewspaperCatalogSeedHostedService(
         ApplyAlQabasPublicPdfSettings(source);
         source.ModifiedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogInformation(
+            "Ensured Kuwait - Al Qabas public PDF discovery settings (PdfDiscoveryEnabled=true, sourceId={SourceId}).",
+            source.Id);
     }
 
     private static void ApplyAlQabasPublicPdfSettings(NewsSource source)
