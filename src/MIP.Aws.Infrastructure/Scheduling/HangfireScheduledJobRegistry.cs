@@ -44,14 +44,21 @@ public sealed class HangfireScheduledJobRegistry(
             staggerCron);
         recurringJobs.RemoveIfExists("pdf-edition-daily");
 
-        var statusEmailCron = ToUtcCronDirect(
-            pdfEdition.StatusEmailTimeUtc,
-            fallbackUtcHour: 4,
-            fallbackUtcMinute: 30);
-        recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
-            "download-monitor-daily-status-email",
-            job => job.SendDailyStatusEmailAsync(),
-            statusEmailCron);
+        if (pdfEdition.StatusEmailEnabled && !pdfEdition.StatusEmailAfterBatchOnly)
+        {
+            var statusEmailCron = ToUtcCronDirect(
+                pdfEdition.StatusEmailTimeUtc,
+                fallbackUtcHour: 4,
+                fallbackUtcMinute: 30);
+            recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
+                "download-monitor-daily-status-email",
+                job => job.SendDailyStatusEmailAsync(),
+                statusEmailCron);
+        }
+        else
+        {
+            recurringJobs.RemoveIfExists("download-monitor-daily-status-email");
+        }
     }
 
     private static string ToUtcCronDirect(string utcTime, int fallbackUtcHour, int fallbackUtcMinute = 0) =>

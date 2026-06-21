@@ -11,10 +11,19 @@ public sealed class PdfEditionSchedulerOptions
     /// <summary>Minutes between each monitored source download (e.g. 5 → five sources finish by 04:55 when starting 04:30).</summary>
     public int StaggerIntervalMinutes { get; set; } = 5;
 
-    /// <summary>UTC time to send the daily download-monitor status email (24h, e.g. 05:00).</summary>
+    /// <summary>
+    /// UTC time for the legacy fixed-time status email cron (24h, e.g. 05:00).
+    /// Used only when <see cref="StatusEmailAfterBatchOnly"/> is false.
+    /// </summary>
     public string StatusEmailTimeUtc { get; set; } = "05:00";
 
-    /// <summary>Send the daily download-monitor summary email after staggered downloads complete.</summary>
+    /// <summary>
+    /// When true (default), the status email is sent only after a download batch finishes
+    /// (scheduled daily batch or operator "Execute PDF download task"), not on a fixed clock time.
+    /// </summary>
+    public bool StatusEmailAfterBatchOnly { get; set; } = true;
+
+    /// <summary>Enable download-monitor status emails (after batch completion, or on <see cref="StatusEmailTimeUtc"/> when legacy mode).</summary>
     public bool StatusEmailEnabled { get; set; } = true;
 
     /// <summary>Recipient for the daily download-monitor status email.</summary>

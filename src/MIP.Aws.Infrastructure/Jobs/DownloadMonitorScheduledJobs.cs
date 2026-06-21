@@ -28,8 +28,10 @@ public sealed class DownloadMonitorScheduledJobs(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
         var opt = schedulerOptions.Value;
         var interval = Math.Clamp(opt.StaggerIntervalMinutes, 1, 60);
+        var batchStartedAt = DateTimeOffset.UtcNow;
 
         var sources = (await db.NewsSources.AsNoTracking()
                 .Where(s => !s.IsDeleted && s.IsEnabled)
@@ -39,15 +41,62 @@ public sealed class DownloadMonitorScheduledJobs(
             .Where(PdfManagementSourceRules.IsPdfDownloadMonitoredSource)
             .ToList();
 
+        if (sources.Count == 0)
+        {
+            logger.LogWarning("Daily download monitor batch skipped: no enabled monitored sources found.");
+            return;
+        }
+
         logger.LogInformation(
             "Scheduling {Count} monitored source download(s) starting now with {Interval} minute stagger.",
             sources.Count,
             interval);
 
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         for (var index = 0; index < sources.Count; index++)
         {
             var delay = TimeSpan.FromMinutes(index * interval);
             ScheduleSourceDownload(sources[index], delay);
+        }
+
+        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, sources.Count - 1) * interval);
+        var waitTimeout = staggerWindow + TimeSpan.FromMinutes(50);
+
+        await DownloadMonitorBatchOutcomeHelper.WaitForSourcesSettledAsync(
+                db,
+                sources.Select(s => s.Id).ToList(),
+                batchStartedAt,
+                waitTimeout,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        var successCount = 0;
+        foreach (var source in sources)
+        {
+            if (await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
+                    db,
+                    source.Id,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false))
+            {
+                successCount++;
+            }
+        }
+
+        logger.LogInformation(
+            "Daily download monitor batch finished waiting for {Count} source(s): {SuccessCount} succeeded.",
+            sources.Count,
+            successCount);
+
+        if (opt.StatusEmailEnabled)
+        {
+            await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
+            logger.LogInformation(
+                "Daily download monitor batch sent status email for {MonitorDate} ({SuccessCount}/{Total} succeeded).",
+                monitorDate,
+                successCount,
+                sources.Count);
         }
     }
 
@@ -84,6 +133,7 @@ public sealed class DownloadMonitorScheduledJobs(
             sources.Count,
             batchStartedAt);
 
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         for (var index = 0; index < sources.Count; index++)
         {
             var delay = TimeSpan.FromMinutes(index * interval);
@@ -120,7 +170,7 @@ public sealed class DownloadMonitorScheduledJobs(
             sources.Count,
             successCount);
 
-        await email.SendDailyStatusEmailAsync(null, CancellationToken.None).ConfigureAwait(false);
+        await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
         logger.LogInformation(
             "Operator PDF batch sent download monitor status email after batch completion ({SuccessCount}/{Total} succeeded).",
             successCount,
