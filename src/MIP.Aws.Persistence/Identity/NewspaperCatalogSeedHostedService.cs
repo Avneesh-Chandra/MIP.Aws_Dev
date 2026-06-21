@@ -24,17 +24,25 @@ public sealed class NewspaperCatalogSeedHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!catalogOptions.Value.SeedOnStartup)
-        {
-            return;
-        }
-
         try
         {
             using var scope = serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
             var protector = scope.ServiceProvider.GetRequiredService<INewsCredentialProtector>();
             var options = catalogOptions.Value;
+
+            // Idempotent patches run on every startup so production (SeedOnStartup=false) still gains new catalog sources.
+            await EnsureAlQabasPublicPdfDiscoveryAsync(db, cancellationToken).ConfigureAwait(false);
+            await EnsureAkhbarPdfDiscoverySettingsAsync(db, cancellationToken).ConfigureAwait(false);
+            await EnsureAawsatPublicPdfDiscoveryAsync(db, cancellationToken).ConfigureAwait(false);
+            await EnsureAlAyamPublicPdfSettingsAsync(db, options.AlAyamRecoveryTestBreak, cancellationToken).ConfigureAwait(false);
+            await EnsureDarAlKhaleejPressReaderSourcesAsync(db, cancellationToken).ConfigureAwait(false);
+            await EnsureDarAlKhaleejPressReaderLoginSelectorsAsync(db, cancellationToken).ConfigureAwait(false);
+
+            if (!options.SeedOnStartup)
+            {
+                return;
+            }
 
             await SeedPublicSourceAsync(
                 db,
@@ -49,11 +57,6 @@ public sealed class NewspaperCatalogSeedHostedService(
                 pdfDiscovery: true,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            // Idempotent patch so Azure/production matches local Public PDF discovery catalog.
-            await EnsureAkhbarPdfDiscoverySettingsAsync(db, cancellationToken).ConfigureAwait(false);
-            await EnsureAawsatPublicPdfDiscoveryAsync(db, cancellationToken).ConfigureAwait(false);
-            await EnsureAlAyamPublicPdfSettingsAsync(db, options.AlAyamRecoveryTestBreak, cancellationToken).ConfigureAwait(false);
-
             await SeedPublicSourceAsync(
                 db,
                 name: "Kuwait - Al Qabas",
@@ -64,6 +67,7 @@ public sealed class NewspaperCatalogSeedHostedService(
                 acquisitionMode: ContentAcquisitionMode.PublicWebWithRobotsRespect,
                 country: "KW",
                 language: "ar",
+                pdfDiscovery: true,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             await SeedPublicSourceAsync(
@@ -276,6 +280,95 @@ public sealed class NewspaperCatalogSeedHostedService(
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         logger.LogInformation("Seeded PressReader source {Name} ({SourceId}).", name, source.Id);
+    }
+
+    private static async Task EnsureAlQabasPublicPdfDiscoveryAsync(IApplicationDbContext db, CancellationToken cancellationToken)
+    {
+        var matches = await db.NewsSources
+            .Where(s => !s.IsDeleted
+                        && (s.ConnectorKey == "news.alqabas"
+                            || s.BaseUrl.Contains("alqabas.com", StringComparison.OrdinalIgnoreCase)
+                            || s.Name.Contains("Al Qabas", StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(s => s.CreatedAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        NewsSource source;
+        if (matches.Count == 0)
+        {
+            var now = DateTimeOffset.UtcNow;
+            source = new NewsSource
+            {
+                Id = Guid.NewGuid(),
+                Name = "Kuwait - Al Qabas",
+                BaseUrl = "https://alqabas.com/",
+                EditionUrl = "https://d.alqabas.com/archive",
+                SourceType = NewsSourceType.PublicPdf,
+                ConnectorKey = "news.alqabas",
+                AcquisitionMode = ContentAcquisitionMode.PublicWebWithRobotsRespect,
+                SourceAccessMode = NewsSourceAccessMode.PublicWeb,
+                RequiresLogin = false,
+                RequiresAuthentication = false,
+                IsDownloadAllowed = true,
+                DefaultLanguage = "ar",
+                Country = "KW",
+                IsEnabled = true,
+                DownloadFrequencyMinutes = 360,
+                Notes = "GFH newspaper catalog (public edition discovery).",
+                CreatedAt = now
+            };
+            db.NewsSources.Add(source);
+            db.DownloadSchedules.Add(new DownloadSchedule
+            {
+                Id = Guid.NewGuid(),
+                NewsSourceId = source.Id,
+                CronExpression = "0 6 * * *",
+                TimeZoneId = "Asia/Bahrain",
+                IsEnabled = true,
+                CreatedAt = now
+            });
+        }
+        else
+        {
+            source = matches[0];
+            foreach (var duplicate in matches.Skip(1))
+            {
+                duplicate.IsDeleted = true;
+                duplicate.ModifiedAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        ApplyAlQabasPublicPdfSettings(source);
+        source.ModifiedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void ApplyAlQabasPublicPdfSettings(NewsSource source)
+    {
+        source.Name = "Kuwait - Al Qabas";
+        source.BaseUrl = "https://alqabas.com/";
+        source.EditionUrl = "https://d.alqabas.com/archive";
+        source.SourceType = NewsSourceType.PublicPdf;
+        source.ConnectorKey = "news.alqabas";
+        source.AcquisitionMode = ContentAcquisitionMode.PublicWebWithRobotsRespect;
+        source.SourceAccessMode = NewsSourceAccessMode.PublicWeb;
+        source.RequiresLogin = false;
+        source.RequiresManualAction = false;
+        source.IsDownloadAllowed = true;
+        source.IsEnabled = true;
+        source.Country = "KW";
+        source.DefaultLanguage = "ar";
+        source.PdfDiscoveryEnabled = true;
+        source.PdfDiscoveryMode = PdfDiscoveryMode.Hybrid;
+        source.PdfDiscoveryPageUrl = "https://alqabas.com/";
+        source.PdfLinkSelector = "a[href*='d.alqabas.com/archive']";
+        source.PdfLinkKeywords =
+            "pdf,download,edition,e-paper,archive,تحميل,آخر عدد,PDF,العدد,d.alqabas.com";
+        source.PreferTodayEdition = true;
+        source.PreferLatestEdition = true;
+        source.RequirePdfContentType = true;
+        source.MinimumPdfSizeKb = Math.Max(source.MinimumPdfSizeKb, 100);
+        source.UseHeadlessBrowser = false;
     }
 
     private static async Task EnsureAkhbarPdfDiscoverySettingsAsync(IApplicationDbContext db, CancellationToken cancellationToken)
