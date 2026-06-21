@@ -339,6 +339,7 @@ public sealed class NewspaperCatalogSeedHostedService(
         }
 
         ApplyAlQabasPublicPdfSettings(source);
+        await EnsureDailyDownloadScheduleAsync(db, source.Id, cancellationToken).ConfigureAwait(false);
         source.ModifiedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         logger.LogInformation(
@@ -348,11 +349,11 @@ public sealed class NewspaperCatalogSeedHostedService(
 
     private static void ApplyAlQabasPublicPdfSettings(NewsSource source)
     {
-        source.Name = "Kuwait - Al Qabas";
-        source.BaseUrl = "https://alqabas.com/";
-        source.EditionUrl = "https://d.alqabas.com/archive";
+        source.Name = AlQabasPublicPdfBaseline.SourceName;
+        source.BaseUrl = AlQabasPublicPdfBaseline.BaseUrl;
+        source.EditionUrl = AlQabasPublicPdfBaseline.EditionUrl;
         source.SourceType = NewsSourceType.PublicPdf;
-        source.ConnectorKey = "news.alqabas";
+        source.ConnectorKey = AlQabasPublicPdfBaseline.ConnectorKey;
         source.AcquisitionMode = ContentAcquisitionMode.PublicWebWithRobotsRespect;
         source.SourceAccessMode = NewsSourceAccessMode.PublicWeb;
         source.RequiresLogin = false;
@@ -363,15 +364,39 @@ public sealed class NewspaperCatalogSeedHostedService(
         source.DefaultLanguage = "ar";
         source.PdfDiscoveryEnabled = true;
         source.PdfDiscoveryMode = PdfDiscoveryMode.Hybrid;
-        source.PdfDiscoveryPageUrl = "https://alqabas.com/";
-        source.PdfLinkSelector = "a[href*='d.alqabas.com/archive']";
-        source.PdfLinkKeywords =
-            "pdf,download,edition,e-paper,archive,تحميل,آخر عدد,PDF,العدد,d.alqabas.com";
+        source.PdfDiscoveryPageUrl = AlQabasPublicPdfBaseline.PdfDiscoveryPageUrl;
+        source.PdfLinkSelector = AlQabasPublicPdfBaseline.PdfLinkSelector;
+        source.PdfLinkKeywords = AlQabasPublicPdfBaseline.PdfLinkKeywords;
         source.PreferTodayEdition = true;
         source.PreferLatestEdition = true;
         source.RequirePdfContentType = true;
         source.MinimumPdfSizeKb = Math.Max(source.MinimumPdfSizeKb, 100);
         source.UseHeadlessBrowser = false;
+    }
+
+    private static async Task EnsureDailyDownloadScheduleAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        CancellationToken cancellationToken)
+    {
+        var hasSchedule = await db.DownloadSchedules.AsNoTracking()
+            .AnyAsync(s => !s.IsDeleted && s.NewsSourceId == sourceId && s.IsEnabled, cancellationToken)
+            .ConfigureAwait(false);
+        if (hasSchedule)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        db.DownloadSchedules.Add(new DownloadSchedule
+        {
+            Id = Guid.NewGuid(),
+            NewsSourceId = sourceId,
+            CronExpression = "0 6 * * *",
+            TimeZoneId = "Asia/Bahrain",
+            IsEnabled = true,
+            CreatedAt = now
+        });
     }
 
     private static async Task EnsureAkhbarPdfDiscoverySettingsAsync(IApplicationDbContext db, CancellationToken cancellationToken)
