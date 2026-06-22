@@ -198,20 +198,18 @@ public sealed class DownloadMonitorBatchRunService(
         bool skipReconciliation,
         CancellationToken cancellationToken)
     {
-        if (skipReconciliation)
+        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                db,
+                recoveryOrchestrator,
+                autoAiEnqueue,
+                logger,
+                cancellationToken,
+                requeueDownloads: false)
+            .ConfigureAwait(false);
+
+        if (!skipReconciliation)
         {
-            await DownloadJobReconciliation.ReconcileStaleJobsAsync(
-                    db,
-                    recoveryOrchestrator,
-                    autoAiEnqueue,
-                    logger,
-                    cancellationToken,
-                    requeueDownloads: false)
-                .ConfigureAwait(false);
-        }
-        else
-        {
-            await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+            await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
@@ -219,9 +217,18 @@ public sealed class DownloadMonitorBatchRunService(
         var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
         var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
         var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
-        if (elapsed > staggerWindow + TimeSpan.FromMinutes(30))
+        var batchExpired = elapsed > staggerWindow + TimeSpan.FromMinutes(30);
+
+        if (batchExpired)
         {
             HangfireExpiredBatchJobCleanup.TryCancelExpiredOperatorBatchJobs(logger);
+            await FailExpiredBatchActiveJobsAsync(
+                    db,
+                    entry.StartedAt,
+                    sources.Select(s => s.Id).ToList(),
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var sourceIds = sources.Select(s => s.Id).ToHashSet();
@@ -303,7 +310,6 @@ public sealed class DownloadMonitorBatchRunService(
 
         var completedCount = successCount + failedCount;
         var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
-        var batchExpired = elapsed > staggerWindow + TimeSpan.FromMinutes(30) && autoRecoveryCount == 0;
         var isComplete = completedCount >= total
                          || (inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow))
                          || batchExpired;
@@ -527,6 +533,45 @@ public sealed class DownloadMonitorBatchRunService(
             .ConfigureAwait(false);
 
         return all.Where(PdfManagementSourceRules.IsPdfDownloadMonitoredSource).ToList();
+    }
+
+    private static async Task FailExpiredBatchActiveJobsAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        IReadOnlyList<Guid> sourceIds,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var activeJobs = await db.DownloadJobs
+            .Where(j => !j.IsDeleted
+                        && sourceIds.Contains(j.NewsSourceId)
+                        && j.CreatedAt >= batchStartedAt.AddMinutes(-1)
+                        && (j.Status == DownloadJobStatus.Running
+                            || j.Status == DownloadJobStatus.Pending
+                            || j.Status == DownloadJobStatus.AutoAiRecoveryAnalyzing
+                            || j.Status == DownloadJobStatus.AutoAiRecoveryApplying
+                            || j.Status == DownloadJobStatus.AutoAiRecoveryRetrying))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (activeJobs.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var job in activeJobs)
+        {
+            job.Status = DownloadJobStatus.Failed;
+            job.ErrorMessage ??= "Batch window expired before this download finished.";
+            job.CompletedAt ??= DateTimeOffset.UtcNow;
+            job.ModifiedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogWarning(
+            "Marked {Count} active download job(s) failed after batch expiry (started {BatchStartedAt:u}).",
+            activeJobs.Count,
+            batchStartedAt);
     }
 
     private sealed record BatchEntry(DateTimeOffset StartedAt, int TotalSources, string HangfireJobId);
