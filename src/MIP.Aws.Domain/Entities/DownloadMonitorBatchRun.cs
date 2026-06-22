@@ -12,4 +12,7 @@ public sealed class DownloadMonitorBatchRun : AuditableEntity
     public int TotalSources { get; set; }
 
     public string HangfireJobId { get; set; } = string.Empty;
+
+    /// <summary>When the post-batch download monitor status email was sent (null = not yet sent).</summary>
+    public DateTimeOffset? StatusEmailSentAt { get; set; }
 }

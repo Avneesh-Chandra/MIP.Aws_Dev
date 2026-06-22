@@ -341,6 +341,14 @@ public sealed class DownloadMonitorBatchRunService(
             isComplete,
             batchExpired);
 
+        await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueCompletedBatchStatusEmailAsync(
+                db,
+                entry.StartedAt,
+                isComplete,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
+
         return new DownloadMonitorBatchProgressResult(
             entry.StartedAt,
             entry.HangfireJobId,

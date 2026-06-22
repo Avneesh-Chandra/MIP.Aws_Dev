@@ -1,6 +1,8 @@
 using Hangfire;
 using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
+using MIP.Aws.Application.Configuration;
+using MIP.Aws.Infrastructure.Jobs;
 using Microsoft.Extensions.Logging;
 
 namespace MIP.Aws.Infrastructure.Operator;
@@ -55,12 +57,20 @@ internal static class HangfireExpiredBatchJobCleanup
 
             try
             {
+                var batchStartedAt = TryGetBatchStartedAt(dto);
                 if (BackgroundJob.Delete(jobId))
                 {
                     logger.LogWarning(
                         "Deleted expired operator PDF batch Hangfire job {JobId} (processing {AgeMinutes:F0} min).",
                         jobId,
                         age.TotalMinutes);
+
+                    if (batchStartedAt is not null)
+                    {
+                        BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                            HangfireQueueOptions.Names.Email,
+                            j => j.SendCompletedBatchStatusEmailAsync(batchStartedAt.Value));
+                    }
                 }
                 else
                 {
@@ -86,5 +96,22 @@ internal static class HangfireExpiredBatchJobCleanup
         var methodName = dto.Job?.Method?.Name ?? string.Empty;
         return typeName.Contains("DownloadMonitorScheduledJobs", StringComparison.Ordinal)
                && methodName.Contains("ExecuteOperatorPdfBatch", StringComparison.Ordinal);
+    }
+
+    private static DateTimeOffset? TryGetBatchStartedAt(ProcessingJobDto dto)
+    {
+        var args = dto.Job?.Args;
+        if (args is null || args.Count == 0)
+        {
+            return null;
+        }
+
+        return args[0] switch
+        {
+            DateTimeOffset batchStart => batchStart,
+            DateTime dt => new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc)),
+            string s when DateTimeOffset.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
     }
 }

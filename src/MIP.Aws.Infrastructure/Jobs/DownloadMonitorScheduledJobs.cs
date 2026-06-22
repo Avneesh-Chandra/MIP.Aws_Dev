@@ -133,7 +133,6 @@ public sealed class DownloadMonitorScheduledJobs(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
         var opt = schedulerOptions.Value;
         var interval = Math.Clamp(opt.StaggerIntervalMinutes, 1, 60);
 
@@ -149,7 +148,6 @@ public sealed class DownloadMonitorScheduledJobs(
             sources.Count,
             batchStartedAt);
 
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         for (var index = 0; index < sources.Count; index++)
         {
             var delay = TimeSpan.FromMinutes(index * interval);
@@ -186,21 +184,50 @@ public sealed class DownloadMonitorScheduledJobs(
             sources.Count,
             successCount);
 
+        await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+    }
+
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task SendCompletedBatchStatusEmailAsync(DateTimeOffset batchStartedAt)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+
+        if (!await DownloadMonitorBatchStatusEmailCoordinator.ShouldSendStatusEmailAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor status email already sent for batch started at {BatchStartedAt:u}; skipping.",
+                batchStartedAt);
+            return;
+        }
+
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+
         try
         {
             await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
+            await DownloadMonitorBatchStatusEmailCoordinator.MarkStatusEmailSentAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             logger.LogInformation(
-                "Operator PDF batch sent download monitor status email after batch completion ({SuccessCount}/{Total} succeeded).",
-                successCount,
-                sources.Count);
+                "Download monitor status email sent for completed batch started at {BatchStartedAt:u}.",
+                batchStartedAt);
         }
         catch (Exception ex)
         {
             logger.LogError(
                 ex,
-                "Operator PDF batch completed ({SuccessCount}/{Total} succeeded) but status email failed.",
-                successCount,
-                sources.Count);
+                "Download monitor status email failed for batch started at {BatchStartedAt:u}.",
+                batchStartedAt);
+            throw;
         }
     }
 
