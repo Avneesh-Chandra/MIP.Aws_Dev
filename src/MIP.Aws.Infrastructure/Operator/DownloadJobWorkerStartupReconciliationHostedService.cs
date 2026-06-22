@@ -29,6 +29,8 @@ public sealed class DownloadJobWorkerStartupReconciliationHostedService(
         var recoveryOrchestrator = scope.ServiceProvider.GetRequiredService<ISourceRecoveryOrchestrator>();
         var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
 
+        HangfireExpiredBatchJobCleanup.TryCancelExpiredOperatorBatchJobs(logger);
+
         await DownloadJobReconciliation.ReconcileWorkerRestartOrphansAsync(
                 db,
                 workerStartedAt,

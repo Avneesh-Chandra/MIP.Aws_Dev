@@ -7,6 +7,7 @@ namespace MIP.Aws.Infrastructure.Operator;
 internal static class DownloadJobRunningTiming
 {
     private static readonly TimeSpan StaleRunningJobThreshold = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan StalePendingJobThreshold = TimeSpan.FromMinutes(20);
     private static readonly TimeSpan PlaywrightPdfRunningJobThreshold = TimeSpan.FromMinutes(35);
     private static readonly TimeSpan RecoveryRunningJobThreshold = TimeSpan.FromMinutes(5);
 
@@ -29,9 +30,21 @@ internal static class DownloadJobRunningTiming
                 ? PlaywrightPdfRunningJobThreshold
                 : StaleRunningJobThreshold;
 
-    public static bool IsRunningJobStale(DownloadJob job, NewsSource? source) =>
-        job.Status is DownloadJobStatus.Running or DownloadJobStatus.Pending
-        && GetRunningJobAge(job) > ResolveRunningStaleThreshold(job, source);
+    public static bool IsRunningJobStale(DownloadJob job, NewsSource? source)
+    {
+        if (job.Status is not (DownloadJobStatus.Running or DownloadJobStatus.Pending))
+        {
+            return false;
+        }
+
+        var age = GetRunningJobAge(job);
+        if (job.Status == DownloadJobStatus.Pending && age > StalePendingJobThreshold)
+        {
+            return true;
+        }
+
+        return age > ResolveRunningStaleThreshold(job, source);
+    }
 
     private static bool IsRecoveryDownloadJob(DownloadJob job) =>
         !string.IsNullOrWhiteSpace(job.CorrelationId)

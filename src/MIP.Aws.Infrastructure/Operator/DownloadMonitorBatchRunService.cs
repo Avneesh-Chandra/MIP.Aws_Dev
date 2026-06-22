@@ -216,6 +216,14 @@ public sealed class DownloadMonitorBatchRunService(
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
+        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
+        if (elapsed > staggerWindow + TimeSpan.FromMinutes(30))
+        {
+            HangfireExpiredBatchJobCleanup.TryCancelExpiredOperatorBatchJobs(logger);
+        }
+
         var sourceIds = sources.Select(s => s.Id).ToHashSet();
 
         var jobs = await db.DownloadJobs.AsNoTracking()
@@ -238,8 +246,6 @@ public sealed class DownloadMonitorBatchRunService(
         var inProgressCount = 0;
         var waitingCount = 0;
         var autoRecoveryCount = 0;
-        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
-        var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
         var anyJobCreated = latestJobBySource.Count > 0;
 
         for (var sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
@@ -296,16 +302,23 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         var completedCount = successCount + failedCount;
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
         var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
-        var isComplete = inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow);
+        var batchExpired = elapsed > staggerWindow + TimeSpan.FromMinutes(30) && autoRecoveryCount == 0;
+        var isComplete = completedCount >= total
+                         || (inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow))
+                         || batchExpired;
         var isActive = !isComplete && (inProgressCount > 0 || (waitingCount > 0 && withinStaggerWindow));
         var percent = total == 0
             ? 100
             : Math.Round((completedCount + (isComplete && waitingCount > 0 ? waitingCount : 0)) * 100.0 / total, 1);
-        if (!isComplete && completedCount > 0)
+        if (!isComplete && completedCount > 0 && !batchExpired)
         {
             percent = Math.Min(percent, 99);
+        }
+
+        if (batchExpired && isComplete)
+        {
+            percent = Math.Round((completedCount + waitingCount) * 100.0 / total, 1);
         }
 
         var currentPhase = ResolvePhase(
@@ -325,7 +338,8 @@ public sealed class DownloadMonitorBatchRunService(
             inProgressCount,
             autoRecoveryCount,
             waitingCount,
-            isComplete);
+            isComplete,
+            batchExpired);
 
         return new DownloadMonitorBatchProgressResult(
             entry.StartedAt,
@@ -430,10 +444,16 @@ public sealed class DownloadMonitorBatchRunService(
         int inProgress,
         int autoRecovery,
         int waiting,
-        bool isComplete)
+        bool isComplete,
+        bool batchExpired)
     {
         if (isComplete)
         {
+            if (batchExpired && (inProgress > 0 || waiting > 0))
+            {
+                return $"Batch timed out — {success} succeeded, {failed} failed, {inProgress + waiting} unfinished (of {total} sources).";
+            }
+
             return $"Batch complete — {success} succeeded, {failed} failed (of {total} sources).";
         }
 
