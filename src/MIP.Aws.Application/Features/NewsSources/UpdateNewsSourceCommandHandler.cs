@@ -12,26 +12,24 @@ public sealed class UpdateNewsSourceCommandHandler(IApplicationDbContext db, INe
 {
     public async Task<Unit> Handle(UpdateNewsSourceCommand request, CancellationToken cancellationToken)
     {
-        var entity = await db.NewsSources
-            .Include(s => s.Credential)
-            .Include(s => s.DownloadSchedule)
+        var portalProbe = await db.NewsSources.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == request.Id && !s.IsDeleted, cancellationToken)
             .ConfigureAwait(false);
 
-        if (entity is null)
+        if (portalProbe is null)
         {
             throw new InvalidOperationException("News source was not found.");
         }
 
-        var portalStrategyKey = request.Portal?.PortalStrategyKey ?? entity.PortalStrategyKey;
-        var editionUrl = string.IsNullOrWhiteSpace(request.EditionUrl) ? entity.EditionUrl : request.EditionUrl;
-        var baseUrl = string.IsNullOrWhiteSpace(request.BaseUrl) ? entity.BaseUrl : request.BaseUrl;
+        var portalStrategyKey = request.Portal?.PortalStrategyKey ?? portalProbe.PortalStrategyKey;
+        var editionUrl = string.IsNullOrWhiteSpace(request.EditionUrl) ? portalProbe.EditionUrl : request.EditionUrl;
+        var baseUrl = string.IsNullOrWhiteSpace(request.BaseUrl) ? portalProbe.BaseUrl : request.BaseUrl;
 
         if (NewsSourceUrlRules.IdentityChanged(
-                entity.SourceType,
-                entity.BaseUrl,
-                entity.EditionUrl,
-                entity.PortalStrategyKey,
+                portalProbe.SourceType,
+                portalProbe.BaseUrl,
+                portalProbe.EditionUrl,
+                portalProbe.PortalStrategyKey,
                 request.SourceType,
                 baseUrl,
                 editionUrl,
@@ -48,6 +46,56 @@ public sealed class UpdateNewsSourceCommandHandler(IApplicationDbContext db, INe
                 .ConfigureAwait(false);
         }
 
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var entity = await LoadTrackedSourceAsync(request.Id, cancellationToken).ConfigureAwait(false);
+            if (entity is null)
+            {
+                throw new InvalidOperationException("News source was not found.");
+            }
+
+            ApplyRequest(db, entity, request, credentialProtector);
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return Unit.Value;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                // Another process (PDF batch, auto-recovery, catalog seed) updated the same row — reload and retry.
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The source was updated by another process (for example a running PDF download or auto-recovery). Refresh the editor and try again.");
+    }
+
+    private async Task<NewsSource?> LoadTrackedSourceAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        if (db is DbContext context)
+        {
+            context.ChangeTracker.Clear();
+        }
+
+        return await db.NewsSources
+            .Include(s => s.Credential)
+            .Include(s => s.DownloadSchedule)
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static void ApplyRequest(
+        IApplicationDbContext db,
+        NewsSource entity,
+        UpdateNewsSourceCommand request,
+        INewsCredentialProtector credentialProtector)
+    {
+        var portalStrategyKey = request.Portal?.PortalStrategyKey ?? entity.PortalStrategyKey;
+        var editionUrl = string.IsNullOrWhiteSpace(request.EditionUrl) ? entity.EditionUrl : request.EditionUrl;
+        var baseUrl = string.IsNullOrWhiteSpace(request.BaseUrl) ? entity.BaseUrl : request.BaseUrl;
         var normalized = NewsSourceUrlRules.ResolveBaseUrl(
             request.SourceType,
             baseUrl,
@@ -113,7 +161,6 @@ public sealed class UpdateNewsSourceCommandHandler(IApplicationDbContext db, INe
 
         if (isManualAssisted && entity.Credential is not null)
         {
-            // Manual-assisted sources must NEVER carry a stored password — drop any prior secret.
             entity.Credential.ProtectedCredentialPayload = null;
             entity.Credential.ModifiedAt = DateTimeOffset.UtcNow;
         }
@@ -161,8 +208,5 @@ public sealed class UpdateNewsSourceCommandHandler(IApplicationDbContext db, INe
             entity.Credential.ProtectedCredentialPayload = payload;
             entity.Credential.ModifiedAt = DateTimeOffset.UtcNow;
         }
-
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return Unit.Value;
     }
 }

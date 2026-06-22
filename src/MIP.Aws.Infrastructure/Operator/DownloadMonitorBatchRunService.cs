@@ -38,6 +38,7 @@ public sealed class DownloadMonitorBatchRunService(
                     recoveryOrchestrator,
                     autoAiEnqueue,
                     existing,
+                    skipReconciliation: false,
                     cancellationToken)
                 .ConfigureAwait(false);
             if (existingProgress.IsActive)
@@ -55,6 +56,7 @@ public sealed class DownloadMonitorBatchRunService(
 
         var startedAt = DateTimeOffset.UtcNow;
         var hangfireJobId = BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+            HangfireQueueOptions.Names.Critical,
             j => j.ExecuteOperatorPdfBatchAsync(startedAt));
 
         await DownloadMonitorBatchRunPersistence.PersistAsync(
@@ -77,6 +79,7 @@ public sealed class DownloadMonitorBatchRunService(
 
     public async Task<DownloadMonitorBatchProgressResult?> GetProgressAsync(
         DateTimeOffset? batchStartedAt,
+        bool skipReconciliation,
         CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
@@ -90,7 +93,13 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
-        return await BuildProgressAsync(db, recoveryOrchestrator, autoAiEnqueue, entry, cancellationToken)
+        return await BuildProgressAsync(
+                db,
+                recoveryOrchestrator,
+                autoAiEnqueue,
+                entry,
+                skipReconciliation,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -186,9 +195,13 @@ public sealed class DownloadMonitorBatchRunService(
         ISourceRecoveryOrchestrator recoveryOrchestrator,
         IAutoAiDownloadRecoveryEnqueueService autoAiEnqueue,
         BatchEntry entry,
+        bool skipReconciliation,
         CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+        if (!skipReconciliation)
+        {
+            await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
@@ -214,9 +227,13 @@ public sealed class DownloadMonitorBatchRunService(
         var inProgressCount = 0;
         var waitingCount = 0;
         var autoRecoveryCount = 0;
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
+        var anyJobCreated = latestJobBySource.Count > 0;
 
-        foreach (var source in sources)
+        for (var sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
         {
+            var source = sources[sourceIndex];
             string state;
             string activity;
 
@@ -239,7 +256,7 @@ public sealed class DownloadMonitorBatchRunService(
                 waitingCount++;
                 activities.Add(new DownloadMonitorBatchActivityResult(
                     source.Name,
-                    "Waiting for scheduled download slot",
+                    DescribeWaitingActivity(sourceIndex, interval, entry.StartedAt, elapsed, anyJobCreated),
                     "Waiting"));
                 continue;
             }
@@ -268,7 +285,6 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         var completedCount = successCount + failedCount;
-        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
         var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
         var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
         var isComplete = inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow);
@@ -281,7 +297,15 @@ public sealed class DownloadMonitorBatchRunService(
             percent = Math.Min(percent, 99);
         }
 
-        var currentPhase = ResolvePhase(inProgressCount, autoRecoveryCount, waitingCount, isComplete, withinStaggerWindow);
+        var currentPhase = ResolvePhase(
+            inProgressCount,
+            autoRecoveryCount,
+            waitingCount,
+            total,
+            anyJobCreated,
+            elapsed,
+            isComplete,
+            withinStaggerWindow);
         var statusSummary = BuildSummary(
             completedCount,
             total,
@@ -321,6 +345,9 @@ public sealed class DownloadMonitorBatchRunService(
         int inProgressCount,
         int autoRecoveryCount,
         int waitingCount,
+        int total,
+        bool anyJobCreated,
+        TimeSpan elapsed,
         bool isComplete,
         bool withinStaggerWindow)
     {
@@ -339,12 +366,49 @@ public sealed class DownloadMonitorBatchRunService(
             return "Downloading";
         }
 
+        if (waitingCount > 0 && !anyJobCreated && waitingCount >= total && elapsed < TimeSpan.FromMinutes(3))
+        {
+            return "Starting";
+        }
+
         if (waitingCount > 0 && withinStaggerWindow)
         {
             return "Scheduling";
         }
 
         return waitingCount > 0 ? "Downloading" : "Complete";
+    }
+
+    private static string DescribeWaitingActivity(
+        int sourceIndex,
+        int intervalMinutes,
+        DateTimeOffset batchStartedAt,
+        TimeSpan elapsed,
+        bool anyJobCreated)
+    {
+        if (!anyJobCreated && elapsed < TimeSpan.FromMinutes(3))
+        {
+            return "Waiting for batch scheduler (critical queue)";
+        }
+
+        var slotAt = batchStartedAt.AddMinutes(sourceIndex * intervalMinutes);
+        var untilSlot = slotAt - DateTimeOffset.UtcNow;
+        if (untilSlot > TimeSpan.FromSeconds(30))
+        {
+            var minutes = (int)Math.Ceiling(untilSlot.TotalMinutes);
+            return minutes <= 1
+                ? "Scheduled to start within 1 minute"
+                : $"Scheduled in ~{minutes} minutes (stagger slot {sourceIndex + 1})";
+        }
+
+        if (DateTimeOffset.UtcNow - slotAt < TimeSpan.FromMinutes(5))
+        {
+            return anyJobCreated
+                ? "Queued — waiting for download worker"
+                : "Queued — another Playwright download is in progress";
+        }
+
+        return "Waiting for download worker (queue may be busy)";
     }
 
     private static string BuildSummary(

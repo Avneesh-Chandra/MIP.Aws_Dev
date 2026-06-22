@@ -429,6 +429,8 @@
         _ = PollBatchProgressAsync(token);
     }
 
+    private DateTimeOffset _lastMonitorRefreshAt;
+
     private async Task PollBatchProgressAsync(CancellationToken token)
     {
         try
@@ -438,15 +440,17 @@
                 await Task.Delay(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
                 await InvokeAsync(async () =>
                 {
-                    await RefreshBatchProgressAsync();
-                    if (_batchProgress?.IsActive == true)
-                    {
-                        await LoadAsync();
-                    }
-                    else if (_batchProgress?.IsComplete == true)
+                    await RefreshBatchProgressAsync(skipReconciliation: true);
+                    if (_batchProgress?.IsComplete == true)
                     {
                         await LoadAsync();
                         Snackbar.Add("PDF download batch finished.", Severity.Info);
+                    }
+                    else if (_batchProgress?.IsActive == true
+                             && DateTimeOffset.UtcNow - _lastMonitorRefreshAt >= TimeSpan.FromSeconds(30))
+                    {
+                        await LoadAsync();
+                        _lastMonitorRefreshAt = DateTimeOffset.UtcNow;
                     }
 
                     StateHasChanged();
@@ -464,11 +468,12 @@
         }
     }
 
-    private async Task RefreshBatchProgressAsync()
+    private async Task RefreshBatchProgressAsync(bool skipReconciliation = false)
     {
         try
         {
-            _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt));
+            _batchProgress = await Mediator.Send(
+                new GetDownloadMonitorBatchProgressQuery(_batchStartedAt, skipReconciliation));
             if (_batchProgress is not null)
             {
                 _batchStartedAt ??= _batchProgress.StartedAt;
@@ -493,6 +498,7 @@
         "Complete" => Color.Success,
         "Auto AI recovery" => Color.Info,
         "Downloading" => Color.Primary,
+        "Starting" => Color.Warning,
         "Scheduling" => Color.Tertiary,
         _ => Color.Default
     };

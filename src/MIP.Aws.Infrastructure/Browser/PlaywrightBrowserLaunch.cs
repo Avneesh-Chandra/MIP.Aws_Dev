@@ -10,6 +10,8 @@ public static class PlaywrightBrowserLaunch
     [
         "--no-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
         "--disable-blink-features=AutomationControlled"
     ];
 

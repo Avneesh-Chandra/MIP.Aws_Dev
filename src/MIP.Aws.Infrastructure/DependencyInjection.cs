@@ -186,7 +186,7 @@ public static class DependencyInjection
                 .UseSqlServerStorage(hangfireConnection, new SqlServerStorageOptions
                 {
                     PrepareSchemaIfNecessary = true,
-                    QueuePollInterval = TimeSpan.FromSeconds(5)
+                    QueuePollInterval = TimeSpan.FromSeconds(2)
                 }));
 
             if (hangfireHost.EnableJobServer)

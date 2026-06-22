@@ -25,7 +25,7 @@ internal static class DownloadJobRunningTiming
     public static TimeSpan ResolveRunningStaleThreshold(DownloadJob job, NewsSource? source) =>
         IsRecoveryDownloadJob(job)
             ? RecoveryRunningJobThreshold
-            : source is not null && IsLongRunningPlaywrightPdfSource(source)
+            : source is not null && IsLongRunningPlaywrightSource(source)
                 ? PlaywrightPdfRunningJobThreshold
                 : StaleRunningJobThreshold;
 
@@ -37,7 +37,9 @@ internal static class DownloadJobRunningTiming
         !string.IsNullOrWhiteSpace(job.CorrelationId)
         && job.CorrelationId.StartsWith("recovery:", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsLongRunningPlaywrightPdfSource(NewsSource source) =>
+    private static bool IsLongRunningPlaywrightSource(NewsSource source) =>
         source.UseHeadlessBrowser
-        && source.SourceType is NewsSourceType.PublicPdf or NewsSourceType.PublicHtml;
+        && source.SourceType is NewsSourceType.PublicPdf
+            or NewsSourceType.PublicHtml
+            or NewsSourceType.WebPortalLogin;
 }

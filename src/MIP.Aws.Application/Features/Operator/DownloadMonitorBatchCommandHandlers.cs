@@ -30,5 +30,5 @@ public sealed class GetDownloadMonitorBatchProgressQueryHandler(IDownloadMonitor
     public Task<DownloadMonitorBatchProgressResult?> Handle(
         GetDownloadMonitorBatchProgressQuery request,
         CancellationToken cancellationToken) =>
-        service.GetProgressAsync(request.BatchStartedAt, cancellationToken);
+        service.GetProgressAsync(request.BatchStartedAt, request.SkipReconciliation, cancellationToken);
 }

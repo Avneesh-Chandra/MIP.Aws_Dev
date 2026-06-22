@@ -4,6 +4,7 @@ using MIP.Aws.Domain.Enums;
 using MIP.Aws.Application.Abstractions.Telemetry;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.NewsSources;
+using MIP.Aws.Infrastructure.Browser;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,24 +23,28 @@ public sealed class NewsIngestionJobs(IServiceScopeFactory scopeFactory, ILogger
     [Queue(HangfireQueueOptions.Names.Downloads)]
     [AutomaticRetry(Attempts = 3, OnAttemptsExceeded = AttemptsExceededAction.Fail)]
     public async Task DownloadSourceAsync(Guid newsSourceId) =>
-        await RunDownloadAsync(
-            "hangfire.downloads.source",
-            async manager =>
-            {
-                using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
+        await PlaywrightDownloadConcurrencyGate.RunAsync(
+            () => RunDownloadAsync(
+                "hangfire.downloads.source",
+                async manager =>
                 {
-                    await manager.ExecuteSourceDownloadAsync(newsSourceId, CancellationToken.None).ConfigureAwait(false);
-                }
-            },
-            activity => activity?.SetTag("newsSourceId", newsSourceId)).ConfigureAwait(false);
+                    using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
+                    {
+                        await manager.ExecuteSourceDownloadAsync(newsSourceId, CancellationToken.None).ConfigureAwait(false);
+                    }
+                },
+                activity => activity?.SetTag("newsSourceId", newsSourceId)),
+            CancellationToken.None).ConfigureAwait(false);
 
     [Queue(HangfireQueueOptions.Names.Downloads)]
     [AutomaticRetry(Attempts = 3, OnAttemptsExceeded = AttemptsExceededAction.Fail)]
     public async Task DownloadJobAsync(Guid downloadJobId) =>
-        await RunDownloadAsync(
-            "hangfire.downloads.job",
-            manager => manager.ExecuteDownloadJobAsync(downloadJobId, CancellationToken.None),
-            activity => activity?.SetTag("downloadJobId", downloadJobId)).ConfigureAwait(false);
+        await PlaywrightDownloadConcurrencyGate.RunAsync(
+            () => RunDownloadAsync(
+                "hangfire.downloads.job",
+                manager => manager.ExecuteDownloadJobAsync(downloadJobId, CancellationToken.None),
+                activity => activity?.SetTag("downloadJobId", downloadJobId)),
+            CancellationToken.None).ConfigureAwait(false);
 
     private async Task RunDownloadAsync(
         string activityName,

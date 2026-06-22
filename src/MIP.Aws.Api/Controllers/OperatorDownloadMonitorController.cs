@@ -50,10 +50,11 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<DownloadMonitorBatchProgressResult>>> GetBatchProgressAsync(
         [FromQuery] DateTimeOffset? batchStartedAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] bool skipReconciliation = false)
     {
         var result = await mediator.Send(
-            new GetDownloadMonitorBatchProgressQuery(batchStartedAt),
+            new GetDownloadMonitorBatchProgressQuery(batchStartedAt, skipReconciliation),
             cancellationToken).ConfigureAwait(false);
         return result is null
             ? NotFound(ApiResponse<DownloadMonitorBatchProgressResult>.Fail("No active PDF download batch."))

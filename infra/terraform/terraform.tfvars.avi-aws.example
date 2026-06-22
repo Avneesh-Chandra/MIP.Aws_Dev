@@ -36,14 +36,14 @@ status_email_recipient = "ops@your-domain.example"
 # admin_portal_url = ""
 enable_cloudfront = true
 
-# --- ECS (minimal Fargate; Hangfire runs in API — worker optional) ---
+# --- ECS (Playwright PDF downloads need a dedicated worker with >=1 vCPU / 2 GiB RAM) ---
 enable_nat_gateway   = false
 api_desired_count    = 1
-worker_desired_count = 0
-api_cpu              = 256
-api_memory           = 1024
-worker_cpu           = 256
-worker_memory        = 512
+worker_desired_count = 1
+api_cpu              = 512
+api_memory           = 2048
+worker_cpu           = 1024
+worker_memory        = 2048
 
 # --- Observability ---
 cloudwatch_retention_days = 7

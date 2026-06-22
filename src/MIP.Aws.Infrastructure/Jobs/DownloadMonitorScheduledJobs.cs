@@ -18,12 +18,12 @@ namespace MIP.Aws.Infrastructure.Jobs;
 /// <summary>
 /// Staggered daily downloads for download-monitor sources and the post-run status email.
 /// </summary>
-[Queue(HangfireQueueOptions.Names.Default)]
 public sealed class DownloadMonitorScheduledJobs(
     IServiceScopeFactory scopeFactory,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
     ILogger<DownloadMonitorScheduledJobs> logger)
 {
+    [Queue(HangfireQueueOptions.Names.Critical)]
     [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
     [AutomaticRetry(Attempts = 1, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task ScheduleStaggeredDailyDownloadsAsync(PerformContext? context)
@@ -114,6 +114,7 @@ public sealed class DownloadMonitorScheduledJobs(
         }
     }
 
+    [Queue(HangfireQueueOptions.Names.Email)]
     [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task SendDailyStatusEmailAsync()
     {
@@ -125,6 +126,7 @@ public sealed class DownloadMonitorScheduledJobs(
     /// <summary>
     /// Operator "Execute PDF download task": stagger all monitored sources, wait for completion, send status email.
     /// </summary>
+    [Queue(HangfireQueueOptions.Names.Critical)]
     [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
     [AutomaticRetry(Attempts = 2, DelaysInSeconds = [120, 300], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task ExecuteOperatorPdfBatchAsync(DateTimeOffset batchStartedAt)
@@ -184,11 +186,22 @@ public sealed class DownloadMonitorScheduledJobs(
             sources.Count,
             successCount);
 
-        await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
-        logger.LogInformation(
-            "Operator PDF batch sent download monitor status email after batch completion ({SuccessCount}/{Total} succeeded).",
-            successCount,
-            sources.Count);
+        try
+        {
+            await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
+            logger.LogInformation(
+                "Operator PDF batch sent download monitor status email after batch completion ({SuccessCount}/{Total} succeeded).",
+                successCount,
+                sources.Count);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Operator PDF batch completed ({SuccessCount}/{Total} succeeded) but status email failed.",
+                successCount,
+                sources.Count);
+        }
     }
 
     private void ScheduleSourceDownload(NewsSource source, TimeSpan delay)
@@ -196,27 +209,44 @@ public sealed class DownloadMonitorScheduledJobs(
         if (source.PdfDiscoveryEnabled
             && source.SourceType is NewsSourceType.PublicHtml or NewsSourceType.PublicPdf)
         {
-            BackgroundJob.Schedule<PdfEditionJobs>(
-                j => j.DiscoverAndDownloadTodayPdfAsync(source.Id),
-                delay);
-            logger.LogInformation(
-                "Scheduled PDF edition download for {Source} in {Delay} (at ~{RunAt:u}).",
-                source.Name,
-                delay,
-                DateTimeOffset.UtcNow.Add(delay));
+            if (delay <= TimeSpan.Zero)
+            {
+                BackgroundJob.Enqueue<PdfEditionJobs>(j => j.DiscoverAndDownloadTodayPdfAsync(source.Id));
+                logger.LogInformation("Enqueued immediate PDF edition download for {Source}.", source.Name);
+            }
+            else
+            {
+                BackgroundJob.Schedule<PdfEditionJobs>(
+                    j => j.DiscoverAndDownloadTodayPdfAsync(source.Id),
+                    delay);
+                logger.LogInformation(
+                    "Scheduled PDF edition download for {Source} in {Delay} (at ~{RunAt:u}).",
+                    source.Name,
+                    delay,
+                    DateTimeOffset.UtcNow.Add(delay));
+            }
+
             return;
         }
 
         if (source.SourceType == NewsSourceType.WebPortalLogin)
         {
-            BackgroundJob.Schedule<NewsIngestionJobs>(
-                j => j.DownloadSourceAsync(source.Id),
-                delay);
-            logger.LogInformation(
-                "Scheduled portal download for {Source} in {Delay} (at ~{RunAt:u}).",
-                source.Name,
-                delay,
-                DateTimeOffset.UtcNow.Add(delay));
+            if (delay <= TimeSpan.Zero)
+            {
+                BackgroundJob.Enqueue<NewsIngestionJobs>(j => j.DownloadSourceAsync(source.Id));
+                logger.LogInformation("Enqueued immediate portal download for {Source}.", source.Name);
+            }
+            else
+            {
+                BackgroundJob.Schedule<NewsIngestionJobs>(
+                    j => j.DownloadSourceAsync(source.Id),
+                    delay);
+                logger.LogInformation(
+                    "Scheduled portal download for {Source} in {Delay} (at ~{RunAt:u}).",
+                    source.Name,
+                    delay,
+                    DateTimeOffset.UtcNow.Add(delay));
+            }
         }
     }
 

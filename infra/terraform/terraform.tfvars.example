@@ -24,10 +24,10 @@ bedrock_model_id = "anthropic.claude-3-5-haiku-20241022-v1:0"
 enable_nat_gateway = false
 api_desired_count  = 1
 worker_desired_count = 1
-api_cpu    = 256
-api_memory = 1024
-worker_cpu    = 256
-worker_memory = 512
+api_cpu    = 512
+api_memory = 2048
+worker_cpu    = 1024
+worker_memory = 2048
 
 cloudwatch_retention_days = 14
 db_instance_class         = "db.t3.small"

@@ -6,6 +6,7 @@ public interface IDownloadMonitorBatchRunService
 
     Task<DownloadMonitorBatchProgressResult?> GetProgressAsync(
         DateTimeOffset? batchStartedAt,
+        bool skipReconciliation,
         CancellationToken cancellationToken);
 }
 

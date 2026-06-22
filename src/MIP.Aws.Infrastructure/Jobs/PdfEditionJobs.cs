@@ -3,6 +3,7 @@ using MIP.Aws.Application.Abstractions.Downloading;
 using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Domain.Enums;
+using MIP.Aws.Infrastructure.Browser;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,17 +23,20 @@ public sealed class PdfEditionJobs(IServiceScopeFactory scopeFactory, ILogger<Pd
     [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task DiscoverAndDownloadTodayPdfAsync(Guid newsSourceId)
     {
-        using var scope = scopeFactory.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IPdfEditionDownloadService>();
-        using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
+        await PlaywrightDownloadConcurrencyGate.RunAsync(async () =>
         {
-            var result = await service.DownloadTodayAsync(newsSourceId, enqueueOcr: true, CancellationToken.None).ConfigureAwait(false);
-            logger.LogInformation(
-                "PDF edition job for {SourceId}: {Status} ({Path})",
-                newsSourceId,
-                result.Status,
-                result.SavedPath);
-        }
+            using var scope = scopeFactory.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<IPdfEditionDownloadService>();
+            using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
+            {
+                var result = await service.DownloadTodayAsync(newsSourceId, enqueueOcr: true, CancellationToken.None).ConfigureAwait(false);
+                logger.LogInformation(
+                    "PDF edition job for {SourceId}: {Status} ({Path})",
+                    newsSourceId,
+                    result.Status,
+                    result.SavedPath);
+            }
+        }, CancellationToken.None).ConfigureAwait(false);
     }
 
     [AutomaticRetry(Attempts = 1, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
