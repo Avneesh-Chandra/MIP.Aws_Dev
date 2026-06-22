@@ -82,8 +82,22 @@ public static class DependencyInjection
         services.AddMipAwsCloudServices(configuration);
         services.AddMipAwsDataProtection(configuration, environment);
 
-        services.AddHttpClient(nameof(PdfEditionContentFetcher));
+        services.AddHttpClient(nameof(PdfEditionContentFetcher), client =>
+        {
+            client.Timeout = TimeSpan.FromMinutes(3);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/pdf,*/*;q=0.8");
+        });
         services.AddHttpClient(nameof(ResilientContentDownloader));
+        services.AddHttpClient(nameof(EditionDiscoveryHtmlClient), client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(60);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ar,en-US;q=0.9,en;q=0.8");
+        });
 
         services.AddSingleton<ITelemetryService, NoopTelemetryService>();
         services.AddSingleton<IHeadlessBrowserService, PlaywrightHeadlessBrowserService>();

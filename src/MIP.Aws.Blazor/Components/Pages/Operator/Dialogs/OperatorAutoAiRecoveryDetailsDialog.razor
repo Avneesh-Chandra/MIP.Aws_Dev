@@ -1,0 +1,27 @@
+@using MIP.Aws.Blazor.Components.Shared
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true"
+                      Icon="@Icons.Material.Filled.SmartToy">
+                <MudText Typo="Typo.body2">
+                    Automatic AI recovery ran for this source but could not restore today's PDF download.
+                    Review the timeline below for what was analyzed, applied, and retried.
+                </MudText>
+            </MudAlert>
+            <AutoAiRecoveryTimelinePanel DownloadJobId="@DownloadJobId" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid DownloadJobId { get; set; }
+    [Parameter, EditorRequired] public string SourceName { get; set; } = string.Empty;
+
+    private void Close() => Dialog.Close();
+}

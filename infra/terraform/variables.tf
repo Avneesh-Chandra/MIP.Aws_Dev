@@ -138,6 +138,12 @@ variable "admin_portal_url" {
   default = ""
 }
 
+variable "enable_cloudfront" {
+  description = "Front the ALB with CloudFront for HTTPS on a *.cloudfront.net URL (dev/test)."
+  type        = bool
+  default     = true
+}
+
 variable "auto_migrate_on_startup" {
   description = "Run EF migrations on API startup (dev first-deploy; RDS is private)"
   type        = bool

@@ -115,8 +115,14 @@ if (-not $SkipTerraform) {
         Write-Host "`nApplying Terraform (RDS may take 20-40 minutes)..." -ForegroundColor Yellow
         & $TerraformExe apply -auto-approve
         $alb = & $TerraformExe output -raw alb_dns_name
-        Write-Host "`nALB DNS: http://$alb" -ForegroundColor Green
-        Write-Host "Update admin_portal_url in terraform.tfvars to http://$alb then re-apply if needed."
+        $portalUrl = & $TerraformExe output -raw admin_portal_url 2>$null
+        $cfUrl = & $TerraformExe output -raw cloudfront_https_url 2>$null
+        if ($cfUrl -and $cfUrl -ne "null") {
+            Write-Host "`nPortal (HTTPS): $cfUrl" -ForegroundColor Green
+            Write-Host "ALB (HTTP only): http://$alb"
+        } else {
+            Write-Host "`nALB DNS: http://$alb" -ForegroundColor Green
+        }
     }
     finally {
         Pop-Location
@@ -133,9 +139,10 @@ if (-not $SkipImages -and -not $PlanOnly) {
         Write-Host "Waiting 90s for ECS tasks to start..."
         Start-Sleep -Seconds 90
         if ($alb) {
+            $healthUrl = if ($cfUrl -and $cfUrl -ne "null") { "$cfUrl/health/live" } else { "http://$alb/health/live" }
             try {
-                Invoke-WebRequest -Uri "http://$alb/health/live" -UseBasicParsing -TimeoutSec 30 | Out-Null
-                Write-Host "Health check OK: http://$alb/health/live" -ForegroundColor Green
+                Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 30 | Out-Null
+                Write-Host "Health check OK: $healthUrl" -ForegroundColor Green
             }
             catch {
                 Write-Warning "Health check not ready yet. Check ECS logs in CloudWatch."
@@ -160,5 +167,5 @@ Write-Host @"
 
 4. SES: verify sender email for status emails
 
-5. Open app: http://$alb
+5. Open app: $(if ($cfUrl -and $cfUrl -ne 'null') { $cfUrl } else { "http://$alb" })
 "@ -ForegroundColor Cyan

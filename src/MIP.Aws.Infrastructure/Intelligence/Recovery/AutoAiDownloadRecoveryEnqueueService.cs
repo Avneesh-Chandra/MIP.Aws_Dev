@@ -32,8 +32,8 @@ public sealed class AutoAiDownloadRecoveryEnqueueService(
         var settings = await settingsProvider.GetEffectiveAsync(cancellationToken).ConfigureAwait(false);
         if (!settings.Enabled)
         {
-            logger.LogInformation(
-                "Skipped auto AI download recovery enqueue for job {JobId} (source {SourceId}): auto AI recovery is disabled.",
+            logger.LogWarning(
+                "Skipped auto AI download recovery enqueue for job {JobId} (source {SourceId}): auto AI recovery is disabled in settings.",
                 failedJob.Id,
                 failedJob.NewsSourceId);
             return;

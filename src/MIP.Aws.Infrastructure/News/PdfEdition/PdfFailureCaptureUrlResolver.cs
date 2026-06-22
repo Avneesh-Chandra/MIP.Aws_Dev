@@ -19,6 +19,11 @@ public static class PdfFailureCaptureUrlResolver
             return AawsatFullPublicationPdf.ResolveIssueViewerUri(hinted).ToString();
         }
 
+        if (AlAyamFullEditionPdf.UsesClickPath(source))
+        {
+            return AlAyamFullEditionPdf.EpaperUrl;
+        }
+
         if (AawsatFullPublicationPdf.UsesClickPath(source)
             && !string.IsNullOrWhiteSpace(source.EditionUrl)
             && Uri.TryCreate(source.EditionUrl.Trim(), UriKind.Absolute, out var editionUri)

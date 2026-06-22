@@ -95,6 +95,8 @@ public sealed class MediaIntelligenceDbContext
 
     public DbSet<AdminInterventionNotification> AdminInterventionNotifications => Set<AdminInterventionNotification>();
 
+    public DbSet<DownloadMonitorBatchRun> DownloadMonitorBatchRuns => Set<DownloadMonitorBatchRun>();
+
     public DbSet<SourceConfigurationVersion> SourceConfigurationVersions => Set<SourceConfigurationVersion>();
 
     public DbSet<SourceRecoveryAttempt> SourceRecoveryAttempts => Set<SourceRecoveryAttempt>();

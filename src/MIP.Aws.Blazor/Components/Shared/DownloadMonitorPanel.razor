@@ -66,6 +66,10 @@
                     <MudSpacer />
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         Started @UserTz.Format(_batchProgress.StartedAt)
+                        @if (!string.IsNullOrWhiteSpace(_batchProgress.HangfireJobId))
+                        {
+                            <span> · Job @_batchProgress.HangfireJobId</span>
+                        }
                     </MudText>
                 </MudStack>
                 <MudProgressLinear Color="Color.Primary" Rounded="true" Size="Size.Large"
@@ -200,16 +204,20 @@
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Icon="@Icons.Material.Filled.SmartToy">Auto</MudChip>
                             }
-                            @if (ShowsAiRecoveryDetails(row.LastDownloadStatus) && row.LatestDownloadJobId is Guid recoveryJobId)
+                            @if (row.LastDownloadStatus == FailedAfterAutoAiRecovery)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text" Icon="@Icons.Material.Filled.SmartToy">Auto</MudChip>
+                            }
+                            @if (ShowsAutoAiRecoveryDetails(row.LastDownloadStatus) && row.LatestDownloadJobId is Guid recoveryJobId)
                             {
                                 <AuthorizeView Policy="@AuthPolicies.SourceRecoveryView">
                                     <Authorized>
-                                        <MudTooltip Text="View AI recovery details">
+                                        <MudTooltip Text="@AutoAiRecoveryDetailsTooltip(row.LastDownloadStatus)">
                                             <MudIconButton Icon="@Icons.Material.Filled.Info"
                                                            Size="Size.Small"
-                                                           Color="Color.Success"
-                                                           aria-label="AI recovery details"
-                                                           OnClick="@(() => ViewAiRecoveryDetailsAsync(recoveryJobId, row.SourceName))" />
+                                                           Color="@AutoAiRecoveryInfoColor(row.LastDownloadStatus)"
+                                                           aria-label="Automatic AI recovery details"
+                                                           OnClick="@(() => ViewAutoAiRecoveryDetailsAsync(row.LastDownloadStatus, recoveryJobId, row.SourceName))" />
                                         </MudTooltip>
                                     </Authorized>
                                 </AuthorizeView>
@@ -355,6 +363,14 @@
         {
             var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
             _monitor = await Mediator.Send(new GetDownloadMonitorQuery(date));
+            if (SelfLoad)
+            {
+                await RefreshBatchProgressAsync();
+                if (_batchProgress?.IsActive == true && _pollCts is null)
+                {
+                    StartBatchPolling();
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -450,10 +466,18 @@
 
     private async Task RefreshBatchProgressAsync()
     {
-        _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt));
-        if (_batchProgress is not null)
+        try
         {
-            _batchStartedAt ??= _batchProgress.StartedAt;
+            _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt));
+            if (_batchProgress is not null)
+            {
+                _batchStartedAt ??= _batchProgress.StartedAt;
+            }
+        }
+        catch (Exception)
+        {
+            // Non-fatal: monitor table still loads if batch metadata is unavailable.
+            _batchProgress = null;
         }
     }
 
@@ -493,7 +517,7 @@
             new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
     }
 
-    private async Task ViewAiRecoveryDetailsAsync(Guid recoveryJobId, string sourceName)
+    private async Task ViewAiRecoverySuccessDetailsAsync(Guid recoveryJobId, string sourceName)
     {
         var parameters = new DialogParameters<OperatorAiRecoverySuccessDialog>
         {
@@ -503,6 +527,24 @@
         await DialogService.ShowAsync<OperatorAiRecoverySuccessDialog>($"AI recovery — {sourceName}", parameters,
             new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
     }
+
+    private async Task ViewAutoAiRecoveryFailureDetailsAsync(Guid failedJobId, string sourceName)
+    {
+        var parameters = new DialogParameters<OperatorAutoAiRecoveryDetailsDialog>
+        {
+            { x => x.DownloadJobId, failedJobId },
+            { x => x.SourceName, sourceName }
+        };
+        await DialogService.ShowAsync<OperatorAutoAiRecoveryDetailsDialog>(
+            $"Automatic AI recovery — {sourceName}",
+            parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
+    }
+
+    private Task ViewAutoAiRecoveryDetailsAsync(string status, Guid jobId, string sourceName) =>
+        status == FailedAfterAutoAiRecovery
+            ? ViewAutoAiRecoveryFailureDetailsAsync(jobId, sourceName)
+            : ViewAiRecoverySuccessDetailsAsync(jobId, sourceName);
 
     private async Task InformAdminAsync(Guid jobId, string sourceName)
     {
@@ -527,8 +569,16 @@
         await JS.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
     }
 
-    private static bool ShowsAiRecoveryDetails(string status) =>
-        status is SuccessByAiRecovery or SuccessByAutoAiRecovery;
+    private static bool ShowsAutoAiRecoveryDetails(string status) =>
+        status is SuccessByAiRecovery or SuccessByAutoAiRecovery or FailedAfterAutoAiRecovery;
+
+    private static Color AutoAiRecoveryInfoColor(string status) =>
+        status == FailedAfterAutoAiRecovery ? Color.Error : Color.Success;
+
+    private static string AutoAiRecoveryDetailsTooltip(string status) =>
+        status == FailedAfterAutoAiRecovery
+            ? "View automatic AI recovery attempt details"
+            : "View AI recovery details";
 
     private static bool IsAutoRecoveryInProgress(string status) =>
         status is AutoAiRecoveryQueued or AutoAiRecoveryRunning;

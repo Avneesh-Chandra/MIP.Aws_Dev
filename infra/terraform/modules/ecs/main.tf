@@ -36,6 +36,10 @@ variable "jwt_secret_arn" { type = string }
 variable "connection_secret_arn" { type = string }
 variable "status_email_recipient" { type = string }
 variable "admin_portal_url" { type = string }
+variable "use_https_cookies" {
+  type    = bool
+  default = false
+}
 variable "auto_migrate_on_startup" {
   type    = bool
   default = true
@@ -61,7 +65,9 @@ variable "tags" { type = map(string) }
 locals {
   default_conn = "Server=${var.db_endpoint};Database=${var.db_name};User Id=${var.db_username};Password=${var.db_password};TrustServerCertificate=True;MultipleActiveResultSets=true"
   # RDS SQL Server Express allows only one user database per instance — share MIPAws with Hangfire.
-  hangfire_conn = local.default_conn
+  hangfire_conn       = local.default_conn
+  # When no dedicated worker task is running, the API must host the Hangfire job server.
+  api_runs_hangfire   = var.worker_desired_count <= 0
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -86,7 +92,7 @@ resource "aws_ecs_task_definition" "api" {
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       environment = [
         { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
-        { name = "Hangfire__EnableJobServer", value = "false" },
+        { name = "Hangfire__EnableJobServer", value = tostring(local.api_runs_hangfire) },
         { name = "ASPNETCORE_URLS", value = "http://+:8080" },
         { name = "Aws__Region", value = var.aws_region },
         { name = "Aws__S3__Enabled", value = "true" },
@@ -118,7 +124,12 @@ resource "aws_ecs_task_definition" "api" {
         { name = "IdentitySeed__DefaultAdminEmail", value = "superadmin@mip.local" },
         { name = "IdentitySeed__DefaultAdminPassword", value = var.identity_default_admin_password },
         { name = "Application__DisplayTimeZoneId", value = "Asia/Bahrain" },
-        { name = "Auth__UseHttpsCookies", value = "false" }
+        { name = "Auth__UseHttpsCookies", value = tostring(var.use_https_cookies) },
+        { name = "AutoAiDownloadRecovery__Enabled", value = "true" },
+        { name = "AutoAiDownloadRecovery__RunAfterScheduledFailure", value = "true" },
+        { name = "AutoAiDownloadRecovery__RunAfterManualFailure", value = "true" },
+        { name = "AutoAiDownloadRecovery__CooldownMinutesPerSource", value = "15" },
+        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" }
       ]
       secrets = [
         { name = "Jwt__SigningKey", valueFrom = var.jwt_secret_arn }
@@ -136,7 +147,7 @@ resource "aws_ecs_task_definition" "api" {
         interval    = 30
         timeout     = 10
         retries     = 3
-        startPeriod = 120
+        startPeriod = 240
       }
     }
   ])
@@ -188,7 +199,12 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "Aws__Bedrock__TopP", value = "0.9" },
         { name = "Aws__Bedrock__TimeoutSeconds", value = "60" },
         { name = "Application__DisplayTimeZoneId", value = "Asia/Bahrain" },
-        { name = "HangfireQueues__WorkerCount", value = "2" }
+        { name = "HangfireQueues__WorkerCount", value = "2" },
+        { name = "AutoAiDownloadRecovery__Enabled", value = "true" },
+        { name = "AutoAiDownloadRecovery__RunAfterScheduledFailure", value = "true" },
+        { name = "AutoAiDownloadRecovery__RunAfterManualFailure", value = "true" },
+        { name = "AutoAiDownloadRecovery__CooldownMinutesPerSource", value = "15" },
+        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" }
       ]
       logConfiguration = {
         logDriver = "awslogs"

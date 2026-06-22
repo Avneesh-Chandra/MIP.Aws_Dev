@@ -13,7 +13,9 @@ jwt_signing_key = "CHANGE_ME_MINIMUM_32_CHARACTER_SIGNING_KEY"
 
 ses_sender_email       = "noreply@your-domain.example"
 status_email_recipient = "ops@your-domain.example"
-admin_portal_url       = "https://api.your-domain.example"
+# Optional: custom domain for status emails. Leave empty to use CloudFront HTTPS automatically.
+# admin_portal_url       = "https://api.your-domain.example"
+enable_cloudfront      = true
 
 enable_bedrock   = true
 bedrock_region   = "eu-north-1"

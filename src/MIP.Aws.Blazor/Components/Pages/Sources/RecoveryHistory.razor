@@ -57,15 +57,15 @@
                 <MudTd>@context.AppliedByLabel</MudTd>
                 <MudTd>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@FormatStatus(context)</MudChip>
-                        @if (IsAiRecoverySuccess(context))
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context)">@FormatStatus(context)</MudChip>
+                        @if (ShowsAutoAiRecoveryDetails(context))
                         {
-                            <MudTooltip Text="View AI recovery details">
+                            <MudTooltip Text="@AutoAiRecoveryDetailsTooltip(context)">
                                 <MudIconButton Icon="@Icons.Material.Filled.Info"
                                                Size="Size.Small"
-                                               Color="Color.Success"
-                                               aria-label="View AI recovery details"
-                                               OnClick="@(() => ViewAiRecoveryDetailsAsync(context))" />
+                                               Color="@AutoAiRecoveryInfoColor(context)"
+                                               aria-label="View automatic AI recovery details"
+                                               OnClick="@(() => ViewAutoAiRecoveryDetailsAsync(context))" />
                             </MudTooltip>
                         }
                     </MudStack>
@@ -129,10 +129,25 @@
     private static bool IsAiRecoverySuccess(SourceRecoveryHistoryItemDto item) =>
         item.Status == SourceRecoveryAttemptStatus.Succeeded;
 
+    private static bool IsAutoAiRecoveryFailure(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic
+        && item.Status is SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack;
+
+    private static bool ShowsAutoAiRecoveryDetails(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic && (IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item));
+
+    private static Color AutoAiRecoveryInfoColor(SourceRecoveryHistoryItemDto item) =>
+        IsAutoAiRecoveryFailure(item) ? Color.Error : Color.Success;
+
+    private static string AutoAiRecoveryDetailsTooltip(SourceRecoveryHistoryItemDto item) =>
+        IsAutoAiRecoveryFailure(item)
+            ? "View automatic AI recovery attempt details"
+            : "View AI recovery details";
+
     private static string FormatSuccessStatus(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic ? SuccessByAutoAiRecovery : SuccessByAiRecovery;
 
-    private async Task ViewAiRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item)
+    private async Task ViewAiRecoverySuccessDetailsAsync(SourceRecoveryHistoryItemDto item)
     {
         var parameters = new DialogParameters<OperatorAiRecoverySuccessDialog>
         {
@@ -144,10 +159,38 @@
             new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Large });
     }
 
+    private async Task ViewAutoAiRecoveryFailureDetailsAsync(SourceRecoveryHistoryItemDto item)
+    {
+        if (item.DownloadJobId is not Guid failedJobId)
+        {
+            Snackbar.Add("No download job is linked to this automatic recovery attempt.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<OperatorAutoAiRecoveryDetailsDialog>
+        {
+            { x => x.DownloadJobId, failedJobId },
+            { x => x.SourceName, item.SourceName }
+        };
+        await DialogService.ShowAsync<OperatorAutoAiRecoveryDetailsDialog>(
+            $"Automatic AI recovery — {item.SourceName}",
+            parameters,
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
+    }
+
+    private Task ViewAutoAiRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item) =>
+        IsAiRecoverySuccess(item)
+            ? ViewAiRecoverySuccessDetailsAsync(item)
+            : ViewAutoAiRecoveryFailureDetailsAsync(item);
+
     private static string FormatStatus(SourceRecoveryHistoryItemDto item) =>
-        item.Status == SourceRecoveryAttemptStatus.Succeeded
-            ? FormatSuccessStatus(item)
-            : System.Text.RegularExpressions.Regex.Replace(item.Status.ToString(), "([a-z])([A-Z])", "$1 $2");
+        item.Status switch
+        {
+            SourceRecoveryAttemptStatus.Succeeded => FormatSuccessStatus(item),
+            SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack when item.IsAutomatic
+                => FailedAfterAutoAiRecovery,
+            _ => System.Text.RegularExpressions.Regex.Replace(item.Status.ToString(), "([a-z])([A-Z])", "$1 $2")
+        };
 
     private static Color StatusColor(SourceRecoveryAttemptStatus status) => status switch
     {
@@ -156,6 +199,9 @@
         SourceRecoveryAttemptStatus.PendingAdminApproval => Color.Warning,
         _ => Color.Info
     };
+
+    private static Color StatusColor(SourceRecoveryHistoryItemDto item) =>
+        IsAutoAiRecoveryFailure(item) ? Color.Error : StatusColor(item.Status);
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";

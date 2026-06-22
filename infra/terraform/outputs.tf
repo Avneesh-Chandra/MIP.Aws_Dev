@@ -6,6 +6,20 @@ output "alb_dns_name" {
   value = module.alb.alb_dns_name
 }
 
+output "cloudfront_domain_name" {
+  value = var.enable_cloudfront ? module.cloudfront[0].domain_name : null
+}
+
+output "cloudfront_https_url" {
+  description = "Public HTTPS URL for the app (use this instead of the raw ALB HTTP URL when CloudFront is enabled)."
+  value       = var.enable_cloudfront ? module.cloudfront[0].https_url : null
+}
+
+output "admin_portal_url" {
+  description = "Effective portal URL passed to ECS (CloudFront HTTPS when enabled, unless admin_portal_url is overridden)."
+  value       = local.admin_portal_url
+}
+
 output "api_ecr_repository_url" {
   value = module.ecr.api_repository_url
 }

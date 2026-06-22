@@ -7,6 +7,7 @@ using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using Hangfire;
+using Hangfire.Server;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -23,8 +24,9 @@ public sealed class DownloadMonitorScheduledJobs(
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
     ILogger<DownloadMonitorScheduledJobs> logger)
 {
+    [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
     [AutomaticRetry(Attempts = 1, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
-    public async Task ScheduleStaggeredDailyDownloadsAsync()
+    public async Task ScheduleStaggeredDailyDownloadsAsync(PerformContext? context)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
@@ -32,6 +34,7 @@ public sealed class DownloadMonitorScheduledJobs(
         var opt = schedulerOptions.Value;
         var interval = Math.Clamp(opt.StaggerIntervalMinutes, 1, 60);
         var batchStartedAt = DateTimeOffset.UtcNow;
+        var hangfireJobId = context?.BackgroundJob?.Id ?? string.Empty;
 
         var sources = (await db.NewsSources.AsNoTracking()
                 .Where(s => !s.IsDeleted && s.IsEnabled)
@@ -47,9 +50,20 @@ public sealed class DownloadMonitorScheduledJobs(
             return;
         }
 
+        await DownloadMonitorBatchRunPersistence.PersistAsync(
+                db,
+                batchStartedAt,
+                sources.Count,
+                hangfireJobId,
+                logger,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
         logger.LogInformation(
-            "Scheduling {Count} monitored source download(s) starting now with {Interval} minute stagger.",
+            "Scheduled daily download monitor batch {HangfireJobId} for {Count} source(s) at {StartedAt:u} ({Interval} minute stagger).",
+            hangfireJobId,
             sources.Count,
+            batchStartedAt,
             interval);
 
         var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);

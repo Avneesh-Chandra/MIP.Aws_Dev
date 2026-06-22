@@ -55,7 +55,9 @@ jobs:
           ECR_REPOSITORY: mip-aws-dev-api
           IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
-          docker build -f Dockerfile.Api -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -f Dockerfile.Api \
+            --build-arg SOURCE_REVISION=${{ github.sha }} \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       - name: Build and push Worker image
@@ -64,7 +66,9 @@ jobs:
           ECR_REPOSITORY: mip-aws-dev-worker
           IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
-          docker build -f Dockerfile.Worker -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -f Dockerfile.Worker \
+            --build-arg SOURCE_REVISION=${{ github.sha }} \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       - uses: hashicorp/setup-terraform@v4

@@ -7,6 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
+. "$PSScriptRoot\Ensure-GitOnPath.ps1"
+$null = Ensure-GitOnPath
+$sourceRevision = Get-SourceRevision
+Write-Host "Source revision: $sourceRevision" -ForegroundColor DarkGray
+
 if ($Slim) {
     $publishDir = "artifacts/api-publish"
     Write-Host "Publishing API to $publishDir ($Configuration)..."
@@ -26,10 +31,10 @@ if (-not (Test-Path ".dockerignore")) {
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 $apiDockerfile = if ($Slim) { "Dockerfile.Api.slim" } else { "Dockerfile.Api" }
-docker build -f $apiDockerfile -t mip-aws-api:local .
+docker build -f $apiDockerfile -t mip-aws-api:local --build-arg "SOURCE_REVISION=$sourceRevision" .
 if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = $prevEap; exit $LASTEXITCODE }
 if (-not $ApiOnly) {
-    docker build -f Dockerfile.Worker -t mip-aws-worker:local .
+    docker build -f Dockerfile.Worker -t mip-aws-worker:local --build-arg "SOURCE_REVISION=$sourceRevision" .
     if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = $prevEap; exit $LASTEXITCODE }
     Write-Host "Images: mip-aws-api:local, mip-aws-worker:local"
 }

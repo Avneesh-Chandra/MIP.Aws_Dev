@@ -8,7 +8,6 @@ using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Jobs;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,24 +16,23 @@ namespace MIP.Aws.Infrastructure.Operator;
 
 public sealed class DownloadMonitorBatchRunService(
     IServiceScopeFactory scopeFactory,
-    IMemoryCache cache,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
     ILogger<DownloadMonitorBatchRunService> logger) : IDownloadMonitorBatchRunService
 {
-    private const string ActiveBatchCacheKey = "download-monitor-batch:active";
-    private static readonly TimeSpan BatchCacheTtl = TimeSpan.FromHours(8);
+    private static readonly TimeSpan BatchRetention = TimeSpan.FromHours(8);
     private static readonly TimeSpan BatchWaitGracePeriod = TimeSpan.FromMinutes(50);
+    private static readonly TimeSpan InferredBatchWindow = TimeSpan.FromHours(3);
 
     public async Task<DownloadMonitorBatchRunResult> StartBatchAsync(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var recoveryOrchestrator = scope.ServiceProvider.GetRequiredService<ISourceRecoveryOrchestrator>();
+        var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
 
-        var existing = cache.Get<BatchCacheEntry>(ActiveBatchCacheKey);
+        var existing = await FindLatestBatchEntryAsync(db, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
-            var autoAiEnqueue = scope.ServiceProvider.GetRequiredService<IAutoAiDownloadRecoveryEnqueueService>();
             var existingProgress = await BuildProgressAsync(
                     db,
                     recoveryOrchestrator,
@@ -59,8 +57,14 @@ public sealed class DownloadMonitorBatchRunService(
         var hangfireJobId = BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
             j => j.ExecuteOperatorPdfBatchAsync(startedAt));
 
-        var entry = new BatchCacheEntry(startedAt, sources.Count, hangfireJobId);
-        cache.Set(ActiveBatchCacheKey, entry, BatchCacheTtl);
+        await DownloadMonitorBatchRunPersistence.PersistAsync(
+                db,
+                startedAt,
+                sources.Count,
+                hangfireJobId,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
 
         logger.LogInformation(
             "Operator started PDF download batch {HangfireJobId} for {Count} source(s) at {StartedAt:u}.",
@@ -79,7 +83,7 @@ public sealed class DownloadMonitorBatchRunService(
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var recoveryOrchestrator = scope.ServiceProvider.GetRequiredService<ISourceRecoveryOrchestrator>();
 
-        var entry = ResolveBatchEntry(batchStartedAt);
+        var entry = await ResolveBatchEntryAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
         if (entry is null)
         {
             return null;
@@ -90,27 +94,98 @@ public sealed class DownloadMonitorBatchRunService(
             .ConfigureAwait(false);
     }
 
-    private BatchCacheEntry? ResolveBatchEntry(DateTimeOffset? batchStartedAt)
+    private static async Task<BatchEntry?> FindLatestBatchEntryAsync(
+        IApplicationDbContext db,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var cutoff = DateTimeOffset.UtcNow.Subtract(BatchRetention);
+            var latest = await db.DownloadMonitorBatchRuns.AsNoTracking()
+                .Where(b => !b.IsDeleted && b.StartedAt >= cutoff)
+                .OrderByDescending(b => b.StartedAt)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (latest is not null)
+            {
+                return new BatchEntry(latest.StartedAt, latest.TotalSources, latest.HangfireJobId);
+            }
+        }
+        catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
+        {
+            // Table not migrated yet — fall through to job inference.
+        }
+
+        return await TryInferLatestBatchFromJobsAsync(db, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<BatchEntry?> TryInferLatestBatchFromJobsAsync(
+        IApplicationDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = DateTimeOffset.UtcNow.Subtract(BatchRetention);
+        var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
+        if (sources.Count == 0)
+        {
+            return null;
+        }
+
+        var sourceIds = sources.Select(s => s.Id).ToHashSet();
+        var jobs = await db.DownloadJobs.AsNoTracking()
+            .Where(j => !j.IsDeleted && j.CreatedAt >= cutoff && sourceIds.Contains(j.NewsSourceId))
+            .OrderByDescending(j => j.CreatedAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (jobs.Count == 0)
+        {
+            return null;
+        }
+
+        var latestActivity = jobs[0].CreatedAt;
+        var earliestInBatch = jobs
+            .Where(j => latestActivity - j.CreatedAt <= InferredBatchWindow)
+            .Min(j => j.CreatedAt);
+
+        return new BatchEntry(earliestInBatch.AddMinutes(-1), sources.Count, string.Empty);
+    }
+
+    private static async Task<BatchEntry?> ResolveBatchEntryAsync(
+        IApplicationDbContext db,
+        DateTimeOffset? batchStartedAt,
+        CancellationToken cancellationToken)
     {
         if (batchStartedAt is DateTimeOffset explicitStart)
         {
-            var cached = cache.Get<BatchCacheEntry>(ActiveBatchCacheKey);
-            if (cached is not null && cached.StartedAt == explicitStart)
+            try
             {
-                return cached;
+                var row = await db.DownloadMonitorBatchRuns.AsNoTracking()
+                    .Where(b => !b.IsDeleted && b.StartedAt == explicitStart)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (row is not null)
+                {
+                    return new BatchEntry(row.StartedAt, row.TotalSources, row.HangfireJobId);
+                }
+            }
+            catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
+            {
+                // Table not migrated yet.
             }
 
-            return new BatchCacheEntry(explicitStart, 0, string.Empty);
+            return new BatchEntry(explicitStart, 0, string.Empty);
         }
 
-        return cache.Get<BatchCacheEntry>(ActiveBatchCacheKey);
+        return await FindLatestBatchEntryAsync(db, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<DownloadMonitorBatchProgressResult> BuildProgressAsync(
         IApplicationDbContext db,
         ISourceRecoveryOrchestrator recoveryOrchestrator,
         IAutoAiDownloadRecoveryEnqueueService autoAiEnqueue,
-        BatchCacheEntry entry,
+        BatchEntry entry,
         CancellationToken cancellationToken)
     {
         await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
@@ -219,6 +294,7 @@ public sealed class DownloadMonitorBatchRunService(
 
         return new DownloadMonitorBatchProgressResult(
             entry.StartedAt,
+            entry.HangfireJobId,
             total,
             completedCount,
             successCount,
@@ -350,5 +426,5 @@ public sealed class DownloadMonitorBatchRunService(
         return all.Where(PdfManagementSourceRules.IsPdfDownloadMonitoredSource).ToList();
     }
 
-    private sealed record BatchCacheEntry(DateTimeOffset StartedAt, int TotalSources, string HangfireJobId);
+    private sealed record BatchEntry(DateTimeOffset StartedAt, int TotalSources, string HangfireJobId);
 }

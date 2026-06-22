@@ -11,6 +11,10 @@ locals {
   }, local.application_tags)
   ecs_assign_public_ip = !var.enable_nat_gateway
   ecs_subnet_ids       = var.enable_nat_gateway ? module.vpc.private_subnet_ids : module.vpc.public_subnet_ids
+  admin_portal_url = var.admin_portal_url != "" ? var.admin_portal_url : (
+    var.enable_cloudfront ? module.cloudfront[0].https_url : "http://${module.alb.alb_dns_name}"
+  )
+  use_https_cookies = startswith(local.admin_portal_url, "https://")
 }
 
 module "vpc" {
@@ -84,6 +88,15 @@ module "alb" {
   tags              = local.common_tags
 }
 
+module "cloudfront" {
+  count  = var.enable_cloudfront ? 1 : 0
+  source = "./modules/cloudfront"
+
+  name_prefix  = local.name_prefix
+  alb_dns_name = module.alb.alb_dns_name
+  tags         = local.common_tags
+}
+
 module "rds_sqlserver" {
   source = "./modules/rds-sqlserver"
 
@@ -148,7 +161,8 @@ module "ecs" {
   jwt_secret_arn                  = module.secrets_manager.jwt_secret_arn
   connection_secret_arn           = module.secrets_manager.connection_secret_arn
   status_email_recipient          = var.status_email_recipient
-  admin_portal_url                = var.admin_portal_url
+  admin_portal_url                = local.admin_portal_url
+  use_https_cookies               = local.use_https_cookies
   auto_migrate_on_startup         = var.auto_migrate_on_startup
   enable_bedrock                  = var.enable_bedrock
   bedrock_region                  = var.bedrock_region

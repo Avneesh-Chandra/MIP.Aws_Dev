@@ -32,8 +32,9 @@ jwt_signing_key = "CHANGE_ME_MINIMUM_32_CHARACTER_JWT_SIGNING_KEY!!"
 ses_sender_email       = "noreply@your-domain.example"
 status_email_recipient = "ops@your-domain.example"
 
-# Set after first terraform apply (terraform output alb_dns_name), then re-apply or update ECS env
-admin_portal_url = "http://CHANGE_ME_AFTER_ALB_DEPLOY"
+# Leave empty to auto-use CloudFront HTTPS (enable_cloudfront=true). Set a custom domain when ready.
+# admin_portal_url = ""
+enable_cloudfront = true
 
 # --- ECS (minimal Fargate; Hangfire runs in API — worker optional) ---
 enable_nat_gateway   = false

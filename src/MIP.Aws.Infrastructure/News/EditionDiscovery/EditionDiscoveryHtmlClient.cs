@@ -15,21 +15,33 @@ public sealed class EditionDiscoveryHtmlClient(
 
     public async Task<string> FetchHtmlAsync(Uri pageUri, bool useHeadlessFallback, CancellationToken cancellationToken)
     {
-        if (useHeadlessFallback && pageUri.Host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase))
+        // Al Ayam: HTTP-first — plain GET returns INAF links reliably; Playwright from datacenter often hits Cloudflare.
+        if (pageUri.Host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Using Playwright-first fetch for Al Ayam e-paper: {Url}", pageUri);
-            var rendered = await headless.GetRenderedHtmlAsync(pageUri, TimeSpan.FromSeconds(120), cancellationToken)
-                .ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(rendered))
+            var html = await TryHttpAsync(pageUri, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(html) && !PublisherAccessGuard.IsAccessBlocked(html))
             {
-                return rendered;
+                return html;
             }
+
+            if (useHeadlessFallback)
+            {
+                logger.LogInformation("Al Ayam HTTP fetch empty or blocked for {Url}; trying Playwright.", pageUri);
+                var rendered = await headless.GetRenderedHtmlAsync(pageUri, TimeSpan.FromSeconds(120), cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(rendered))
+                {
+                    return rendered;
+                }
+            }
+
+            return string.Empty;
         }
 
-        var html = await TryHttpAsync(pageUri, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(html) && !PublisherAccessGuard.IsAccessBlocked(html))
+        var genericHtml = await TryHttpAsync(pageUri, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(genericHtml) && !PublisherAccessGuard.IsAccessBlocked(genericHtml))
         {
-            return html;
+            return genericHtml;
         }
 
         if (!useHeadlessFallback)

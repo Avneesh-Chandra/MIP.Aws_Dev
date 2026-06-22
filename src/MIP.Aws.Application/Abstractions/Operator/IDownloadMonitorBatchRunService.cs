@@ -16,6 +16,7 @@ public sealed record DownloadMonitorBatchRunResult(
 
 public sealed record DownloadMonitorBatchProgressResult(
     DateTimeOffset StartedAt,
+    string HangfireJobId,
     int TotalSources,
     int CompletedCount,
     int SuccessCount,

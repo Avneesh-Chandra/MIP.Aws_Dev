@@ -104,7 +104,8 @@ public sealed class UpdateAutoAiDownloadRecoverySettingsCommandHandler(IApplicat
         CancellationToken cancellationToken)
     {
         var row = await db.AutoAiDownloadRecoverySettings
-            .OrderBy(s => s.CreatedAt)
+            .Where(s => !s.IsDeleted)
+            .OrderByDescending(s => s.ModifiedAt ?? s.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 

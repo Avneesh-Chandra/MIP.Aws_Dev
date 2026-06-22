@@ -21,6 +21,8 @@ public sealed class PressReaderDownloadStrategy(
     IOptions<StorageOptions> storageOptions,
     ILogger<PressReaderDownloadStrategy> logger) : IPortalDownloadStrategy
 {
+    /// <summary>UAE Al Khaleej + Economy share one PressReader subscriber; serialize downloads.</summary>
+    private static readonly SemaphoreSlim DarAlKhaleejDownloadGate = new(1, 1);
     private static readonly string[] DefaultCanvasSelectors =
     [
         "[class*='issue-page']",
@@ -157,6 +159,30 @@ public sealed class PressReaderDownloadStrategy(
         CancellationToken cancellationToken)
     {
         var source = session.Source;
+        var useGate = PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source);
+        if (useGate)
+        {
+            await DarAlKhaleejDownloadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await DownloadEditionCoreAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (useGate)
+            {
+                DarAlKhaleejDownloadGate.Release();
+            }
+        }
+    }
+
+    private async Task<PortalEditionDownloadStepResult> DownloadEditionCoreAsync(
+        PortalAutomationSession session,
+        CancellationToken cancellationToken)
+    {
+        var source = session.Source;
         var page = session.Page;
         var editionUrl = !string.IsNullOrWhiteSpace(source.EditionUrl) ? source.EditionUrl.Trim() : source.BaseUrl?.Trim();
         if (string.IsNullOrWhiteSpace(editionUrl))
@@ -177,7 +203,10 @@ public sealed class PressReaderDownloadStrategy(
             return new PortalEditionDownloadStepResult(false, $"Could not open edition: {ex.Message}", "NavigationFailed");
         }
 
-        await DismissLoginDialogIfPresentAsync(page).ConfigureAwait(false);
+        if (!PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source))
+        {
+            await DismissLoginDialogIfPresentAsync(page).ConfigureAwait(false);
+        }
 
         if (await PressReaderPortalLogin.TryGetLoginBlockerAsync(page).ConfigureAwait(false) is { } blocker)
         {
@@ -455,6 +484,24 @@ public sealed class PressReaderDownloadStrategy(
             }
         }
 
+        if (await TryExpandDownloadSubmenuViaChevronAsync(page, cancellationToken).ConfigureAwait(false))
+        {
+            await Task.Delay(900, cancellationToken).ConfigureAwait(false);
+            if (await IsDownloadPdfSubmenuVisibleAsync(page).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        if (await TryExpandDownloadSubmenuViaKeyboardAsync(page, cancellationToken).ConfigureAwait(false))
+        {
+            await Task.Delay(900, cancellationToken).ConfigureAwait(false);
+            if (await IsDownloadPdfSubmenuVisibleAsync(page).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
         if (await ClickDownloadRowInPageActionsPanelAsync(page).ConfigureAwait(false)
             || await ClickDownloadInPageActionsPanelViaDomAsync(page).ConfigureAwait(false))
         {
@@ -495,6 +542,84 @@ public sealed class PressReaderDownloadStrategy(
         }
 
         return await WaitForPressReaderDownloadSubmenuAsync(page, cancellationToken, 10_000).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> TryExpandDownloadSubmenuViaChevronAsync(IPage page, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await page.EvaluateAsync<bool>(
+            """
+            () => {
+              const panelMarkers = ['عرض النص', 'Text View'];
+              const isVisible = (el) => {
+                const r = el.getBoundingClientRect();
+                if (r.width < 1 || r.height < 1) return false;
+                const style = window.getComputedStyle(el);
+                return style.visibility !== 'hidden' && style.display !== 'none' && parseFloat(style.opacity) >= 0.1;
+              };
+              const inMainMenu = (el) => {
+                let node = el;
+                for (let depth = 0; depth < 18 && node; depth++, node = node.parentElement) {
+                  const text = node.innerText || '';
+                  if (text.includes('Download Issue as PDF') || text.includes('تنزيل العدد')) return false;
+                  if (panelMarkers.some(m => text.includes(m)) && text.includes('تنزيل')) return true;
+                }
+                return false;
+              };
+              for (const el of document.querySelectorAll('button, a, li, [role="menuitem"], span, div')) {
+                const text = (el.innerText || '').trim().replace(/\s+/g, ' ');
+                if (text !== 'تنزيل' && text !== 'Download') continue;
+                if (!isVisible(el) || !inMainMenu(el)) continue;
+                let row = el;
+                for (let up = 0; up < 12 && row; up++) {
+                  const siblings = row.parentElement ? Array.from(row.parentElement.children) : [];
+                  for (const sib of siblings) {
+                    const st = (sib.innerText || '').trim();
+                    if (/^[>›»▸]$/.test(st) || sib.getAttribute('aria-haspopup') === 'true') {
+                      sib.click();
+                      return true;
+                    }
+                  }
+                  const chevron = row.querySelector('svg, [class*="chevron"], [class*="arrow"], [class*="caret"]');
+                  if (chevron && isVisible(chevron)) {
+                    chevron.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    return true;
+                  }
+                  row = row.parentElement;
+                }
+              }
+              return false;
+            }
+            """).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> TryExpandDownloadSubmenuViaKeyboardAsync(IPage page, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var tanzil = page.GetByText("تنزيل", new PageGetByTextOptions { Exact = true });
+            if (await tanzil.CountAsync().ConfigureAwait(false) > 0)
+            {
+                await tanzil.First.FocusAsync().ConfigureAwait(false);
+                await page.Keyboard.PressAsync("Enter").ConfigureAwait(false);
+                await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+                if (await IsDownloadPdfSubmenuVisibleAsync(page).ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                await page.Keyboard.PressAsync("ArrowRight").ConfigureAwait(false);
+                await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+                return await IsDownloadPdfSubmenuVisibleAsync(page).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
     }
 
     /// <summary>

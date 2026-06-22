@@ -82,6 +82,8 @@ public interface IApplicationDbContext
 
     DbSet<AdminInterventionNotification> AdminInterventionNotifications { get; }
 
+    DbSet<DownloadMonitorBatchRun> DownloadMonitorBatchRuns { get; }
+
     DbSet<SourceConfigurationVersion> SourceConfigurationVersions { get; }
 
     DbSet<SourceRecoveryAttempt> SourceRecoveryAttempts { get; }

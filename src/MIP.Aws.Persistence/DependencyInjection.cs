@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddHostedService<IdentitySeedHostedService>();
         services.AddHostedService<NewsSourceTemplateSeedHostedService>();
         services.AddHostedService<NewspaperCatalogSeedHostedService>();
+        services.AddHostedService<AutoAiDownloadRecoverySettingsSeedHostedService>();
 
         return services;
     }

@@ -15,7 +15,8 @@ public sealed class AutoAiDownloadRecoverySettingsProvider(
     {
         var effective = Clone(options.Value);
         var row = await db.AutoAiDownloadRecoverySettings.AsNoTracking()
-            .OrderBy(s => s.CreatedAt)
+            .Where(s => !s.IsDeleted)
+            .OrderByDescending(s => s.ModifiedAt ?? s.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -24,9 +25,10 @@ public sealed class AutoAiDownloadRecoverySettingsProvider(
             return effective;
         }
 
-        effective.Enabled = row.Enabled;
-        effective.RunAfterScheduledFailure = row.RunAfterScheduledFailure;
-        effective.RunAfterManualFailure = row.RunAfterManualFailure;
+        // Config/env is the floor: compulsory recovery stays on when appsettings or ECS env enable it.
+        effective.Enabled = row.Enabled || options.Value.Enabled;
+        effective.RunAfterScheduledFailure = row.RunAfterScheduledFailure || options.Value.RunAfterScheduledFailure;
+        effective.RunAfterManualFailure = row.RunAfterManualFailure || options.Value.RunAfterManualFailure;
         effective.MaxSuggestionsToTry = row.MaxSuggestionsToTry;
         effective.MinimumConfidence = row.MinimumConfidence;
         effective.MaximumRiskAllowed = row.MaximumRiskAllowed;

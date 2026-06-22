@@ -1,6 +1,7 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Auditing;
 using MIP.Aws.Application.Abstractions.Intelligence;
+using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Domain.Security;
 using MediatR;
@@ -109,6 +110,18 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var autoAiRunIds = attempts
+            .Where(a => a.AutoAiRecoveryRunId.HasValue)
+            .Select(a => a.AutoAiRecoveryRunId!.Value)
+            .Distinct()
+            .ToList();
+        var autoAiRuns = autoAiRunIds.Count == 0
+            ? new Dictionary<Guid, AutoAiRecoveryRun>()
+            : await db.AutoAiRecoveryRuns.AsNoTracking()
+                .Where(r => autoAiRunIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, cancellationToken)
+                .ConfigureAwait(false);
+
         var userIds = attempts
             .Where(a => a.AppliedByUserId.HasValue)
             .Select(a => a.AppliedByUserId!.Value)
@@ -145,6 +158,27 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 : a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
                     ? user.Email ?? user.UserName ?? uid.ToString()
                     : "—";
+
+            autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
+            var resultSummary = a.ResultSummary
+                                ?? autoAiRun?.ResultSummary
+                                ?? (a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
+                                    ? "Download retry in progress."
+                                    : null);
+            var predicted = a.PredictedSuccessPercent;
+            int? actual = a.ActualSuccessPercent;
+            if (actual is null && autoAiRun?.CompletedAt is not null)
+            {
+                actual = autoAiRun.Status switch
+                {
+                    AutoAiRecoveryRunStatus.CompletedSuccess => 100,
+                    AutoAiRecoveryRunStatus.CompletedFailure
+                        or AutoAiRecoveryRunStatus.CandidateFailed
+                        or AutoAiRecoveryRunStatus.SkippedNoSuggestions => 0,
+                    _ => null
+                };
+            }
+
             return new SourceRecoveryHistoryItemDto(
                 a.Id,
                 a.NewsSourceId,
@@ -155,12 +189,12 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 title,
                 appliedBy,
                 a.Status,
-                a.ResultSummary,
-                a.PredictedSuccessPercent,
-                a.ActualSuccessPercent,
+                resultSummary,
+                predicted,
+                actual,
                 a.IsAutomatic,
                 a.CreatedAt,
-                a.CompletedAt);
+                a.CompletedAt ?? autoAiRun?.CompletedAt);
         }).ToList();
     }
 }

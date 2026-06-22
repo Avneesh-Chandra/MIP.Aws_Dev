@@ -40,7 +40,7 @@ public sealed class HangfireScheduledJobRegistry(
             fallbackUtcMinute: 30);
         recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
             "download-monitor-stagger-schedule",
-            job => job.ScheduleStaggeredDailyDownloadsAsync(),
+            job => job.ScheduleStaggeredDailyDownloadsAsync(null),
             staggerCron);
         recurringJobs.RemoveIfExists("pdf-edition-daily");
 

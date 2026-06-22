@@ -24,6 +24,7 @@ public sealed class PdfEditionDownloadService(
     IPdfEditionDiscoveryService discovery,
     PdfEditionValidator validator,
     PdfEditionContentFetcher contentFetcher,
+    IHttpClientFactory httpClientFactory,
     IPdfEditionFailureArtifactService failureArtifacts,
     IPdfEditionDownloadProgressTracker progress,
     IPublisherComplianceGate complianceGate,
@@ -504,6 +505,18 @@ public sealed class PdfEditionDownloadService(
                         logger,
                         cancellationToken).ConfigureAwait(false);
                 }
+                else if ((best.Method == PdfDiscoveryMethod.ConfiguredLinkSelector
+                          || AlAyamFullEditionPdf.IsDirectPdfUrl(best.Url))
+                         && AlAyamFullEditionPdf.UsesClickPath(source))
+                {
+                    bytes = await AlAyamFullEditionPdf.TryDownloadBytesWithFallbacksAsync(
+                        best.Url,
+                        source,
+                        ResolveWarmUpUrl(source),
+                        httpClientFactory,
+                        logger,
+                        cancellationToken).ConfigureAwait(false);
+                }
                 else
                 {
                     bytes = await contentFetcher.FetchAsync(
@@ -623,6 +636,23 @@ public sealed class PdfEditionDownloadService(
                     0.99,
                     PdfDiscoveryMethod.ManualOverride,
                     "Full Publication (manual issue URL)",
+                    true);
+            }
+        }
+
+        if (AlAyamFullEditionPdf.UsesClickPath(source)
+            && (AlAyamFullEditionPdf.IsDirectPdfUrl(manualUri)
+                || manualUri.AbsolutePath.Contains("/epaper", StringComparison.OrdinalIgnoreCase)))
+        {
+            var alAyam = await AlAyamFullEditionPdf.TryDiscoverAsync(manualUri, source, httpClientFactory, logger, cancellationToken)
+                .ConfigureAwait(false);
+            if (alAyam?.PdfUrl is not null)
+            {
+                return new PdfEditionCandidate(
+                    alAyam.PdfUrl,
+                    0.99,
+                    PdfDiscoveryMethod.ManualOverride,
+                    "كل الصفحات (manual)",
                     true);
             }
         }
@@ -987,6 +1017,50 @@ public sealed class PdfEditionDownloadService(
                     null,
                     null,
                     "Asharq Al-Awsat Full Publication click path could not download a PDF. Issue viewer HTML is not a valid PDF.");
+                continue;
+            }
+
+            if (AlAyamFullEditionPdf.UsesClickPath(source)
+                && (candidate.Method == PdfDiscoveryMethod.ConfiguredLinkSelector
+                    || AlAyamFullEditionPdf.IsDirectPdfUrl(candidate.Url)))
+            {
+                var clickBytes = await AlAyamFullEditionPdf.TryDownloadBytesWithFallbacksAsync(
+                    candidate.Url,
+                    source,
+                    warmUpUrl,
+                    httpClientFactory,
+                    logger,
+                    cancellationToken).ConfigureAwait(false);
+                if (clickBytes is not null && clickBytes.Length > 0)
+                {
+                    if (PdfEditionContentFetcher.IsPdf(clickBytes))
+                    {
+                        if (clickBytes.Length >= source.MinimumPdfSizeKb * 1024L)
+                        {
+                            return (candidate, new PdfEditionValidationResult(true, "application/pdf", clickBytes.Length, null, clickBytes));
+                        }
+
+                        lastResult = new PdfEditionValidationResult(
+                            false,
+                            "application/pdf",
+                            clickBytes.Length,
+                            $"File smaller than minimum {source.MinimumPdfSizeKb} KB.");
+                        continue;
+                    }
+
+                    lastResult = new PdfEditionValidationResult(
+                        false,
+                        null,
+                        clickBytes.Length,
+                        "Al Ayam all-pages click path returned non-PDF content.");
+                    continue;
+                }
+
+                lastResult = new PdfEditionValidationResult(
+                    false,
+                    null,
+                    null,
+                    "Al Ayam all-pages click path could not download a PDF from i.alayam.com.");
                 continue;
             }
 

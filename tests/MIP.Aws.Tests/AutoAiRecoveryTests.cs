@@ -119,10 +119,22 @@ public sealed class AutoAiRecoveryTests
     [Fact]
     public void ShouldRunForTrigger_allows_scheduled_when_RunAfterScheduledFailure_enabled()
     {
-        var settings = new AutoAiDownloadRecoveryOptions { RunAfterScheduledFailure = true };
+        var settings = new AutoAiDownloadRecoveryOptions
+        {
+            RunAfterScheduledFailure = true,
+            RunAfterManualFailure = false
+        };
 
         Assert.True(AutoAiRecoveryEligibility.ShouldRunForTrigger(DownloadJobTrigger.Scheduled, settings));
         Assert.False(AutoAiRecoveryEligibility.ShouldRunForTrigger(DownloadJobTrigger.Manual, settings));
+    }
+
+    [Fact]
+    public void ShouldRunForTrigger_allows_manual_by_default()
+    {
+        var settings = new AutoAiDownloadRecoveryOptions { RunAfterScheduledFailure = true };
+
+        Assert.True(AutoAiRecoveryEligibility.ShouldRunForTrigger(DownloadJobTrigger.Manual, settings));
     }
 
     [Fact]

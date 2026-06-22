@@ -418,6 +418,33 @@ public sealed class PlaywrightWebPortalAutomationService(
                 null,
                 cancellationToken).ConfigureAwait(false);
 
+            if (PressReaderPortalLogin.IsBrandedDarAlKhaleejSource(source)
+                && !string.IsNullOrWhiteSpace(probe.Username))
+            {
+                var editionUrl = !string.IsNullOrWhiteSpace(source.EditionUrl)
+                    ? source.EditionUrl.Trim()
+                    : source.BaseUrl?.Trim();
+                if (!string.IsNullOrWhiteSpace(editionUrl))
+                {
+                    try
+                    {
+                        await page.GotoAsync(editionUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded })
+                            .ConfigureAwait(false);
+                        if (!await PressReaderPortalLogin.IsBrandedDarAlKhaleejLoggedInAsync(page, source).ConfigureAwait(false))
+                        {
+                            darAlKhaleejSessionStore.Clear(probe.Username!);
+                            logger.LogInformation(
+                                "Cleared stale Dar Al Khaleej PressReader session for {Username}; subscriber chip not visible.",
+                                probe.Username);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogDebug(ex, "Could not validate restored Dar Al Khaleej session before login.");
+                    }
+                }
+            }
+
             var loginOutcome = await RunStrategyLoginAsync(strategy, page, source, job.Id, probe.Username!, probe.Password!, cancellationToken).ConfigureAwait(false);
             if (!loginOutcome.Success)
             {

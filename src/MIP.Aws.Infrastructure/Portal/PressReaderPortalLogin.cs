@@ -682,6 +682,7 @@ public static class PressReaderPortalLogin
 
     /// <summary>
     /// After successful daralkhaleej login the header shows the subscriber id (e.g. JM37955283) instead of تسجيل الدخول.
+    /// Requires positive proof — stale cookies or a closed login modal must not count as authenticated.
     /// </summary>
     public static async Task<bool> IsBrandedDarAlKhaleejLoggedInAsync(IPage page, NewsSource source)
     {
@@ -708,39 +709,7 @@ public static class PressReaderPortalLogin
             }
         }
 
-        var headerLogin = page.Locator(
-            "header button:has-text('تسجيل الدخول'), header a:has-text('تسجيل الدخول'), " +
-            "header button:has-text('Sign in'), header a:has-text('Sign in')");
-        if (await headerLogin.CountAsync() > 0)
-        {
-            try
-            {
-                if (await headerLogin.First.IsVisibleAsync().ConfigureAwait(false))
-                {
-                    return false;
-                }
-            }
-            catch
-            {
-                // treat as logged in if we cannot read header login control
-            }
-        }
-
-        var dialogEmail = page.Locator(
-            "[role='dialog'] input[placeholder*='البريد'], [role='dialog'] input[type='email']");
-        if (await dialogEmail.CountAsync() == 0)
-        {
-            return true;
-        }
-
-        try
-        {
-            return !await dialogEmail.First.IsVisibleAsync().ConfigureAwait(false);
-        }
-        catch
-        {
-            return true;
-        }
+        return false;
     }
 
     private static async Task<bool> WaitForBrandedDarAlKhaleejLoginSuccessAsync(

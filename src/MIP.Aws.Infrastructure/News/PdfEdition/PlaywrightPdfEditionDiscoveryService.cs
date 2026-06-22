@@ -11,6 +11,7 @@ namespace MIP.Aws.Infrastructure.News.PdfEdition;
 public sealed class PlaywrightPdfEditionDiscoveryService(
     EditionDiscoveryHtmlClient htmlClient,
     EditionUrlDiscoveryRegistry editionRegistry,
+    IHttpClientFactory httpClientFactory,
     ILogger<PlaywrightPdfEditionDiscoveryService> logger) : IPdfEditionDiscoveryService
 {
     public async Task<PdfEditionDiscoveryResult> DiscoverAsync(NewsSource source, bool allowPlaywright, CancellationToken cancellationToken)
@@ -27,6 +28,43 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
 
         var useHeadless = allowPlaywright && source.UseHeadlessBrowser;
         var aawsatClickPath = allowPlaywright && AawsatFullPublicationPdf.UsesClickPath(source);
+        var alAyamClickPath = AlAyamFullEditionPdf.UsesClickPath(source);
+
+        if (alAyamClickPath)
+        {
+            try
+            {
+                var discovered = await AlAyamFullEditionPdf.TryDiscoverAsync(
+                        pageUrl,
+                        source,
+                        httpClientFactory,
+                        logger,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (discovered?.AccessBlocked == true)
+                {
+                    return new PdfEditionDiscoveryResult(
+                        [],
+                        null,
+                        pageUrl.ToString(),
+                        "Publisher blocked automated access (Cloudflare/bot protection) on the e-paper page.");
+                }
+
+                if (discovered?.PdfUrl is not null)
+                {
+                    candidates.Add(new PdfEditionCandidate(
+                        discovered.PdfUrl,
+                        0.99,
+                        PdfDiscoveryMethod.ConfiguredLinkSelector,
+                        "كل الصفحات (All Pages)",
+                        true));
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Al Ayam click-path discovery did not yield a PDF for {Source}", source.Name);
+            }
+        }
 
         if (aawsatClickPath)
         {
@@ -57,8 +95,8 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
         // 1) Aawsat or other connectors: resolve edition URL via HTTP where possible.
         await TryAddEditionConnectorCandidatesAsync(source, candidates, cancellationToken).ConfigureAwait(false);
 
-        // 2) Selector-based link extraction (requires Playwright; skipped for Aawsat click path)
-        if (!aawsatClickPath &&
+        // 2) Selector-based link extraction (requires Playwright; skipped for dedicated click paths)
+        if (!aawsatClickPath && !alAyamClickPath &&
             allowPlaywright &&
             !string.IsNullOrWhiteSpace(source.PdfLinkSelector) &&
             source.PdfDiscoveryMode is PdfDiscoveryMode.ManualSelector or PdfDiscoveryMode.Hybrid)
@@ -68,7 +106,7 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
         }
 
         // 4) HTML auto-scan / keyword
-        if (!aawsatClickPath &&
+        if (!aawsatClickPath && !alAyamClickPath &&
             source.PdfDiscoveryMode is PdfDiscoveryMode.AutoDetectPdfLink or PdfDiscoveryMode.KeywordBased or PdfDiscoveryMode.Hybrid)
         {
             var html = await htmlClient.FetchHtmlAsync(pageUrl, useHeadless, cancellationToken).ConfigureAwait(false);
@@ -88,7 +126,7 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
         }
 
         // 5) Generic Playwright click on download selector (non-Aawsat)
-        if (!aawsatClickPath &&
+        if (!aawsatClickPath && !alAyamClickPath &&
             allowPlaywright &&
             !string.IsNullOrWhiteSpace(source.PdfDownloadSelector) &&
             source.PdfDiscoveryMode is PdfDiscoveryMode.ManualSelector or PdfDiscoveryMode.Hybrid)
@@ -187,7 +225,9 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
     private static bool ShouldAddEditionConnectorCandidate(EditionDiscoveryResult edition, NewsSource source) =>
         LooksLikeDirectPdfEdition(edition)
         || (AawsatFullPublicationPdf.UsesClickPath(source)
-            && AawsatFullPublicationPdf.IsIssueViewerUrl(edition.ResourceUri));
+            && AawsatFullPublicationPdf.IsIssueViewerUrl(edition.ResourceUri))
+        || (AlAyamFullEditionPdf.UsesClickPath(source)
+            && AlAyamFullEditionPdf.IsDirectPdfUrl(edition.ResourceUri));
 
     private static bool LooksLikeDirectPdfEdition(EditionDiscoveryResult edition) =>
         edition.ContentTypeHint.Contains("pdf", StringComparison.OrdinalIgnoreCase)

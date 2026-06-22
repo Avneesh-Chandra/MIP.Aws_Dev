@@ -28,6 +28,8 @@ using Hangfire;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
+using Microsoft.AspNetCore.HttpOverrides;
+
 using Microsoft.AspNetCore.Identity;
 
 using Microsoft.AspNetCore.Mvc;
@@ -41,6 +43,26 @@ using MudBlazor.Services;
 
 
 var builder = WebApplication.CreateBuilder(args);
+
+
+
+if (!builder.Environment.IsDevelopment())
+
+{
+
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+
+    {
+
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+
+        options.KnownNetworks.Clear();
+
+        options.KnownProxies.Clear();
+
+    });
+
+}
 
 
 
@@ -410,6 +432,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
 
     app.UseSwaggerUI();
+
+}
+
+else
+
+{
+
+    app.UseForwardedHeaders();
 
 }
 

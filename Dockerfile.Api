@@ -17,12 +17,13 @@ RUN dotnet restore src/MIP.Aws.Api/MIP.Aws.Api.csproj
 
 FROM restore AS build
 ARG BUILD_CONFIGURATION=Release
+ARG SOURCE_REVISION=unknown
 WORKDIR /src
 COPY . .
 RUN dotnet publish src/MIP.Aws.Api/MIP.Aws.Api.csproj \
     -c $BUILD_CONFIGURATION \
     -o /app/publish \
-    /p:UseAppHost=false /p:ContinuousIntegrationBuild=true
+    /p:UseAppHost=false /p:ContinuousIntegrationBuild=true /p:SourceRevisionId=$SOURCE_REVISION
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS playwright-install
 WORKDIR /install

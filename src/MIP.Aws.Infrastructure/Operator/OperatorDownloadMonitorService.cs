@@ -935,6 +935,12 @@ public sealed class OperatorDownloadMonitorService(
                 status = DownloadMonitorStatusLabels.SuccessByAutoAiRecovery;
             }
         }
+        else if (status == DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery)
+        {
+            latestJobId = lastActivity.Job?.Id
+                          ?? sourceJobs.FirstOrDefault(j => j.Status == DownloadJobStatus.FailedAfterAutoAiRecovery)?.Id
+                          ?? latestJobId;
+        }
         else if (manualRequired)
         {
             latestJobId = ResolveInterventionJobId(lastActivity, sourceJobs, sourcePdfs);
@@ -986,7 +992,7 @@ public sealed class OperatorDownloadMonitorService(
         IReadOnlyList<DownloadJob> sourceJobs,
         IReadOnlyList<PdfEditionDownload> sourcePdfs)
     {
-        if (lastActivity.Job?.Status == DownloadJobStatus.Failed)
+        if (lastActivity.Job?.Status is DownloadJobStatus.Failed or DownloadJobStatus.FailedAfterAutoAiRecovery)
         {
             return lastActivity.Job.Id;
         }
@@ -1067,7 +1073,8 @@ public sealed class OperatorDownloadMonitorService(
 
         return sourceJobs.FirstOrDefault(j => j.Status is DownloadJobStatus.Succeeded
                                                   or DownloadJobStatus.SuccessWithAutoAiRecovery
-                                                  or DownloadJobStatus.Failed)
+                                                  or DownloadJobStatus.Failed
+                                                  or DownloadJobStatus.FailedAfterAutoAiRecovery)
                ?? latest;
     }
 

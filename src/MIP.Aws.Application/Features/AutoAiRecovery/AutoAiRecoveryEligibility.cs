@@ -11,8 +11,8 @@ public static class AutoAiRecoveryEligibility
         options.OnlyForSourceTypes.Any(t =>
             string.Equals(t, source.SourceType.ToString(), StringComparison.OrdinalIgnoreCase));
 
-    public static bool IsSourceEnabled(NewsSource source, bool globalEnabled) =>
-        globalEnabled && (source.AutoAiRecoveryEnabled ?? true);
+    /// <summary>Per-source opt-out is ignored when global recovery is on (compulsory after PDF failure).</summary>
+    public static bool IsSourceEnabled(NewsSource source, bool globalEnabled) => globalEnabled;
 
     public static bool IsJobEligibleForAutoRecovery(DownloadJob job) =>
         job.Status == DownloadJobStatus.Failed

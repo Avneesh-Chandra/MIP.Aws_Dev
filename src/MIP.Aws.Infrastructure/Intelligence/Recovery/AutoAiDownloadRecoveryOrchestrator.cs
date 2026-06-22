@@ -401,6 +401,8 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             job.Status = DownloadJobStatus.AutoAiRecoverySkipped;
         }
 
+        await SyncLinkedRecoveryAttemptAsync(run, summary, success: false, cancellationToken).ConfigureAwait(false);
+
         AutoAiRecoveryTimelineWriter.AddStep(run, "Skipped", summary, succeeded: false);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return ToResult(run, false);
@@ -417,6 +419,7 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         run.CompletedAt = DateTimeOffset.UtcNow;
         job.Status = DownloadJobStatus.FailedAfterAutoAiRecovery;
         AutoAiRecoveryTimelineWriter.AddStep(run, "Final result", summary, succeeded: false);
+        await SyncLinkedRecoveryAttemptAsync(run, summary, success: false, cancellationToken).ConfigureAwait(false);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         await CreateAdminNotificationAsync(run, job, summary, cancellationToken).ConfigureAwait(false);
@@ -472,4 +475,55 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             run.SuccessfulOptionTitle,
             run.RetryDownloadJobId,
             AutoAiRecoveryTimelineJson.Deserialize(run.TimelineJson));
+
+    private async Task SyncLinkedRecoveryAttemptAsync(
+        AutoAiRecoveryRun run,
+        string summary,
+        bool success,
+        CancellationToken cancellationToken)
+    {
+        if (run.SourceRecoveryAttemptId is not Guid attemptId)
+        {
+            return;
+        }
+
+        var attempt = await db.SourceRecoveryAttempts
+            .FirstOrDefaultAsync(a => a.Id == attemptId && !a.IsDeleted, cancellationToken)
+            .ConfigureAwait(false);
+        if (attempt is null)
+        {
+            return;
+        }
+
+        if (attempt.Status is SourceRecoveryAttemptStatus.Succeeded
+            or SourceRecoveryAttemptStatus.Failed
+            or SourceRecoveryAttemptStatus.RolledBack)
+        {
+            return;
+        }
+
+        attempt.Status = success ? SourceRecoveryAttemptStatus.Succeeded : SourceRecoveryAttemptStatus.Failed;
+        attempt.ResultSummary = summary;
+        attempt.ActualSuccessPercent = success ? 100 : 0;
+        attempt.CompletedAt = DateTimeOffset.UtcNow;
+        attempt.PredictedSuccessPercent ??= TryReadPredictedPercent(attempt);
+    }
+
+    private static int? TryReadPredictedPercent(SourceRecoveryAttempt attempt)
+    {
+        if (attempt.SelectedOptionIndex < 0 || string.IsNullOrWhiteSpace(attempt.AnalysisJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var options = SourceRecoveryJsonParser.ParseOptions(attempt.AnalysisJson);
+            return options.FirstOrDefault(o => o.OptionIndex == attempt.SelectedOptionIndex)?.PredictedSuccessPercent;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

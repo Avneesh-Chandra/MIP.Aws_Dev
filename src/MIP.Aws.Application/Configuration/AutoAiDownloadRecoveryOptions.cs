@@ -4,11 +4,11 @@ public sealed class AutoAiDownloadRecoveryOptions
 {
     public const string SectionName = "AutoAiDownloadRecovery";
 
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     public bool RunAfterScheduledFailure { get; set; } = true;
 
-    public bool RunAfterManualFailure { get; set; }
+    public bool RunAfterManualFailure { get; set; } = true;
 
     public int MaxSuggestionsToTry { get; set; } = 3;
 

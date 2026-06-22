@@ -394,6 +394,34 @@ public sealed class SourceRecoveryOrchestrator(
             attemptIds.Add(attemptId);
         }
 
+        var completedAutoAiRuns = await db.AutoAiRecoveryRuns.AsNoTracking()
+            .Where(r => !r.IsDeleted
+                        && r.SourceRecoveryAttemptId != null
+                        && r.CompletedAt != null
+                        && (r.Status == AutoAiRecoveryRunStatus.CompletedSuccess
+                            || r.Status == AutoAiRecoveryRunStatus.CompletedFailure
+                            || r.Status == AutoAiRecoveryRunStatus.CandidateFailed
+                            || r.Status == AutoAiRecoveryRunStatus.SkippedNoSuggestions
+                            || r.Status == AutoAiRecoveryRunStatus.SkippedIneligible))
+            .Select(r => r.SourceRecoveryAttemptId!.Value)
+            .Take(50)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var attemptId in completedAutoAiRuns)
+        {
+            var stillOpen = await db.SourceRecoveryAttempts.AsNoTracking()
+                .AnyAsync(
+                    a => a.Id == attemptId
+                         && !a.IsDeleted
+                         && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (stillOpen)
+            {
+                attemptIds.Add(attemptId);
+            }
+        }
+
         foreach (var attemptId in attemptIds)
         {
             try
@@ -645,6 +673,9 @@ public sealed class SourceRecoveryOrchestrator(
         attempt.PredictedSuccessPercent = option.PredictedSuccessPercent;
         attempt.RetryDownloadJobId = retryJobId;
         attempt.Status = status;
+        attempt.ResultSummary ??= status == SourceRecoveryAttemptStatus.RetryEnqueued
+            ? "Configuration applied; download retry in progress."
+            : null;
     }
 
     private Task SaveChangesWithApplyConcurrencyRetryAsync(
@@ -713,6 +744,8 @@ public sealed class SourceRecoveryOrchestrator(
         attempt.RetryDownloadJobId = orphanJob.Id;
         attempt.AppliedAt = orphanJob.CreatedAt;
         attempt.Status = SourceRecoveryAttemptStatus.RetryEnqueued;
+        attempt.ResultSummary ??= "Configuration applied; download retry in progress.";
+        attempt.PredictedSuccessPercent ??= TryReadPredictedPercentFromAnalysis(attempt);
         attempt.RollbackVersionId ??= versions
             .FirstOrDefault(v => v.Status == SourceConfigurationVersionStatus.Rollback)?.Id;
         attempt.CandidateVersionId ??= versions
@@ -817,6 +850,24 @@ public sealed class SourceRecoveryOrchestrator(
             .MaxAsync(v => (int?)v.VersionNumber, cancellationToken)
             .ConfigureAwait(false);
         return (max ?? 0) + 1;
+    }
+
+    private static int? TryReadPredictedPercentFromAnalysis(SourceRecoveryAttempt attempt)
+    {
+        if (attempt.SelectedOptionIndex < 0 || string.IsNullOrWhiteSpace(attempt.AnalysisJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var options = SourceRecoveryJsonParser.ParseOptions(attempt.AnalysisJson);
+            return options.FirstOrDefault(o => o.OptionIndex == attempt.SelectedOptionIndex)?.PredictedSuccessPercent;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<string> BuildRetryFailureSummaryAsync(DownloadJob job, CancellationToken cancellationToken)

@@ -541,6 +541,18 @@ public sealed class DownloadOperatorNoteConfiguration : IEntityTypeConfiguration
     }
 }
 
+public sealed class DownloadMonitorBatchRunConfiguration : IEntityTypeConfiguration<DownloadMonitorBatchRun>
+{
+    public void Configure(EntityTypeBuilder<DownloadMonitorBatchRun> builder)
+    {
+        builder.ToTable("DownloadMonitorBatchRuns");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.HangfireJobId).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => x.StartedAt);
+        builder.Property(x => x.RowVersion).IsRowVersion();
+    }
+}
+
 public sealed class AdminInterventionNotificationConfiguration : IEntityTypeConfiguration<AdminInterventionNotification>
 {
     public void Configure(EntityTypeBuilder<AdminInterventionNotification> builder)
