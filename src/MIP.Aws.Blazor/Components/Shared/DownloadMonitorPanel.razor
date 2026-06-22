@@ -47,6 +47,13 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
                 Refresh
             </MudButton>
+            @if (_workloads?.HasActiveWork == true)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Cancel"
+                           OnClick="AbortActiveWorkAsync" Disabled="_aborting || _loading">
+                    Abort active downloads
+                </MudButton>
+            }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
                        OnClick="ExecuteBatchAsync" Disabled="@(_batchExecuting || _batchProgress?.IsActive == true)">
                 Execute PDF download Task
@@ -109,6 +116,64 @@
                             + @(_batchProgress.Activities.Count - 12) more sources
                         </MudText>
                     }
+                }
+            </MudStack>
+        </MudPaper>
+    }
+
+    @if (_workloads?.HasActiveWork == true)
+    {
+        <MudPaper Outlined="true" Class="pa-4">
+            <MudStack Spacing="2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Active download work</MudText>
+                    @if (_workloads.PendingHangfireDownloadJobs > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">
+                            @_workloads.PendingHangfireDownloadJobs queued in Hangfire
+                        </MudChip>
+                    }
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Cancel"
+                               OnClick="AbortActiveWorkAsync" Disabled="_aborting">
+                        Abort all &amp; reset
+                    </MudButton>
+                </MudStack>
+                @if (_workloads.ActiveJobs.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        No in-progress database jobs, but queued Hangfire work or a running batch orchestrator may still be active.
+                        Use abort to clear everything before starting a fresh batch.
+                    </MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                <th>Source</th>
+                                <th>Status</th>
+                                <th>Activity</th>
+                                <th>Since</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var job in _workloads.ActiveJobs)
+                            {
+                                <tr>
+                                    <td>@job.SourceName</td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="@BatchStateColor(job.Status)" Variant="Variant.Outlined">
+                                            @job.Status
+                                        </MudChip>
+                                    </td>
+                                    <td>@job.Activity</td>
+                                    <td>@UserTz.Format(job.StartedAt ?? job.CreatedAt)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
                 }
             </MudStack>
         </MudPaper>
@@ -305,9 +370,11 @@
 
     private bool _loading = true;
     private bool _batchExecuting;
+    private bool _aborting;
     private DateTime? _selectedDate = DateTime.UtcNow.Date;
     private DownloadMonitorDto? _monitor;
     private DownloadMonitorBatchProgressResult? _batchProgress;
+    private DownloadMonitorWorkloadSnapshot? _workloads;
     private DateTimeOffset? _batchStartedAt;
     private CancellationTokenSource? _pollCts;
 
@@ -317,6 +384,7 @@
         {
             await LoadAsync();
             await RefreshBatchProgressAsync();
+            await RefreshWorkloadsAsync();
             if (_batchProgress?.IsActive == true)
             {
                 StartBatchPolling();
@@ -366,6 +434,7 @@
             if (SelfLoad)
             {
                 await RefreshBatchProgressAsync();
+                await RefreshWorkloadsAsync();
                 if (_batchProgress?.IsActive == true && _pollCts is null)
                 {
                     StartBatchPolling();
@@ -443,6 +512,7 @@
                     await RefreshBatchProgressAsync(skipReconciliation: true);
                     if (_batchProgress?.IsComplete == true)
                     {
+                        await RefreshWorkloadsAsync();
                         await LoadAsync();
                         Snackbar.Add("PDF download batch finished.", Severity.Info);
                     }
@@ -465,6 +535,54 @@
         catch (OperationCanceledException)
         {
             // Polling stopped.
+        }
+    }
+
+    private async Task RefreshWorkloadsAsync()
+    {
+        try
+        {
+            _workloads = await Mediator.Send(new GetDownloadMonitorWorkloadQuery());
+        }
+        catch (Exception)
+        {
+            _workloads = null;
+        }
+    }
+
+    private async Task AbortActiveWorkAsync()
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = "Abort active downloads",
+            Message = "This cancels in-progress download jobs, removes queued Hangfire downloads, and stops the batch orchestrator if it is still running. Use this before starting a fresh batch. Continue?",
+            YesText = "Abort all",
+            CancelText = "Cancel"
+        });
+        if (confirm != true)
+        {
+            return;
+        }
+
+        _aborting = true;
+        StateHasChanged();
+        try
+        {
+            var actorId = await ResolveActorUserIdAsync();
+            var result = await Mediator.Send(new AbortDownloadMonitorWorkCommand(actorId));
+            Snackbar.Add(result.Summary, Severity.Warning);
+            await RefreshBatchProgressAsync();
+            await RefreshWorkloadsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Abort failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _aborting = false;
+            StateHasChanged();
         }
     }
 
@@ -509,6 +627,8 @@
         "Failed" => Color.Error,
         "AutoRecovery" => Color.Info,
         "InProgress" => Color.Primary,
+        "Waiting" => Color.Warning,
+        "Skipped" => Color.Secondary,
         _ => Color.Default
     };
 

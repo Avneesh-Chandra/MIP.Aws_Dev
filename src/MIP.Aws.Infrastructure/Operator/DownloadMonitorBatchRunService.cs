@@ -277,11 +277,23 @@ public sealed class DownloadMonitorBatchRunService(
             }
             else
             {
-                waitingCount++;
-                activities.Add(new DownloadMonitorBatchActivityResult(
-                    source.Name,
-                    DescribeWaitingActivity(sourceIndex, interval, entry.StartedAt, elapsed, anyJobCreated),
-                    "Waiting"));
+                if (elapsed > staggerWindow)
+                {
+                    failedCount++;
+                    activities.Add(new DownloadMonitorBatchActivityResult(
+                        source.Name,
+                        "Not scheduled before batch ended",
+                        "Skipped"));
+                }
+                else
+                {
+                    waitingCount++;
+                    activities.Add(new DownloadMonitorBatchActivityResult(
+                        source.Name,
+                        DescribeWaitingActivity(sourceIndex, interval, entry.StartedAt, elapsed, anyJobCreated),
+                        "Waiting"));
+                }
+
                 continue;
             }
 

@@ -32,3 +32,38 @@ public sealed class GetDownloadMonitorBatchProgressQueryHandler(IDownloadMonitor
         CancellationToken cancellationToken) =>
         service.GetProgressAsync(request.BatchStartedAt, request.SkipReconciliation, cancellationToken);
 }
+
+public sealed class GetDownloadMonitorWorkloadQueryHandler(IDownloadMonitorWorkloadService service)
+    : IRequestHandler<GetDownloadMonitorWorkloadQuery, DownloadMonitorWorkloadSnapshot>
+{
+    public Task<DownloadMonitorWorkloadSnapshot> Handle(
+        GetDownloadMonitorWorkloadQuery request,
+        CancellationToken cancellationToken) =>
+        service.GetSnapshotAsync(cancellationToken);
+}
+
+public sealed class AbortDownloadMonitorWorkCommandHandler(
+    IDownloadMonitorWorkloadService service,
+    IAuditService audit)
+    : IRequestHandler<AbortDownloadMonitorWorkCommand, AbortDownloadMonitorWorkResult>
+{
+    public async Task<AbortDownloadMonitorWorkResult> Handle(
+        AbortDownloadMonitorWorkCommand request,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.AbortActiveWorkAsync(cancellationToken).ConfigureAwait(false);
+        await audit.RecordAdminActionAsync(
+            OperatorAuditEvents.BatchWorkAborted,
+            "DownloadMonitor",
+            null,
+            new
+            {
+                request.ActorUserId,
+                result.DownloadJobsCancelled,
+                result.HangfireJobsRemoved,
+                result.BatchOrchestratorStopped
+            },
+            cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+}

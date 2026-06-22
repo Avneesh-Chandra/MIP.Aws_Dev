@@ -11,4 +11,5 @@ public static class OperatorAuditEvents
     public const string AdminAcknowledged = "Operator.AdminAcknowledged";
     public const string AdminResolved = "Operator.AdminResolved";
     public const string BatchExecutionStarted = "Operator.BatchExecutionStarted";
+    public const string BatchWorkAborted = "Operator.BatchWorkAborted";
 }

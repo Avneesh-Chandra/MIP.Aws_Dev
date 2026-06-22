@@ -148,6 +148,7 @@ public static class DependencyInjection
         services.AddSingleton<IIntelligenceJobScheduler, NoopIntelligenceJobScheduler>();
         services.AddScoped<IOperatorDownloadMonitorService, OperatorDownloadMonitorService>();
         services.AddSingleton<IDownloadMonitorBatchRunService, DownloadMonitorBatchRunService>();
+        services.AddSingleton<IDownloadMonitorWorkloadService, DownloadMonitorWorkloadService>();
         services.AddScoped<IDownloadMonitorDailyStatusEmailService, DownloadMonitorDailyStatusEmailService>();
 
         services.AddMipAwsAi(configuration, environment);

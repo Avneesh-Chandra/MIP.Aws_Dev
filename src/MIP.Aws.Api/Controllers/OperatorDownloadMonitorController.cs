@@ -61,6 +61,26 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
             : Ok(ApiResponse<DownloadMonitorBatchProgressResult>.Ok(result));
     }
 
+    [HttpGet("download-monitor/active-workloads")]
+    [ProducesResponseType(typeof(ApiResponse<DownloadMonitorWorkloadSnapshot>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<DownloadMonitorWorkloadSnapshot>>> GetActiveWorkloadsAsync(
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new GetDownloadMonitorWorkloadQuery(), cancellationToken).ConfigureAwait(false);
+        return Ok(ApiResponse<DownloadMonitorWorkloadSnapshot>.Ok(result));
+    }
+
+    [HttpPost("download-monitor/abort-active-work")]
+    [ProducesResponseType(typeof(ApiResponse<AbortDownloadMonitorWorkResult>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<AbortDownloadMonitorWorkResult>>> AbortActiveWorkAsync(
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new AbortDownloadMonitorWorkCommand(GetActorUserId()),
+            cancellationToken).ConfigureAwait(false);
+        return Ok(ApiResponse<AbortDownloadMonitorWorkResult>.Ok(result, result.Summary));
+    }
+
     [HttpGet("sources/{id:guid}/download-status")]
     [ProducesResponseType(typeof(ApiResponse<SourceDownloadStatusDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
