@@ -223,7 +223,7 @@
         _busy = true;
         try
         {
-            await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(null));
+            await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(null, _statusEmailRecipient));
             Snackbar.Add("Status email sent.", Severity.Success);
             await ReloadAsync();
         }

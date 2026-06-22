@@ -70,13 +70,117 @@ public sealed class ReportEmailDispatcher(
         var safe = safety.Apply(to, message.Subject, message.HtmlBody, effective);
         var cc = message.Cc?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList() ?? [];
         var bcc = message.Bcc?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList() ?? [];
-        var redirected = safe.OriginalRecipients is not null
-            && !string.Equals(string.Join(";", safe.To), safe.OriginalRecipients, StringComparison.OrdinalIgnoreCase);
+
+        if (safe.To.Count <= 1)
+        {
+            return await SendToRecipientsAsync(
+                    message,
+                    safe.To,
+                    safe.Subject,
+                    safe.HtmlBody,
+                    safe.OriginalRecipients,
+                    cc,
+                    bcc,
+                    from,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var aggregatedDelivered = new List<string>();
+        var aggregatedLogIds = new List<Guid>();
+        string? lastMessageId = null;
+        string? lastOperationId = null;
+        DateTimeOffset? lastSentAt = null;
+        var failures = new List<string>();
+
+        foreach (var recipient in safe.To)
+        {
+            var result = await SendToRecipientsAsync(
+                    message,
+                    [recipient],
+                    safe.Subject,
+                    safe.HtmlBody,
+                    safe.OriginalRecipients,
+                    cc,
+                    bcc,
+                    from,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (result.Success)
+            {
+                aggregatedDelivered.AddRange(result.DeliveredTo);
+                aggregatedLogIds.AddRange(result.EmailLogIds);
+                lastMessageId = result.MessageId;
+                lastOperationId = result.OperationId;
+                lastSentAt = result.SentAt;
+            }
+            else if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            {
+                failures.Add($"{recipient}: {result.ErrorMessage}");
+            }
+        }
+
+        if (aggregatedDelivered.Count == 0)
+        {
+            return new ReportEmailSendResult(
+                false,
+                "aws-ses",
+                from,
+                [],
+                aggregatedLogIds,
+                null,
+                null,
+                failures.Count > 0 ? string.Join(" | ", failures) : "All recipients failed.",
+                EmailSendOutcome.Failed);
+        }
+
+        if (failures.Count > 0)
+        {
+            logger.LogWarning(
+                "Mail sent to {DeliveredCount}/{TotalCount} recipients. Failures: {Failures}",
+                aggregatedDelivered.Count,
+                safe.To.Count,
+                string.Join(" | ", failures));
+        }
+
+        return new ReportEmailSendResult(
+            true,
+            "aws-ses",
+            from,
+            aggregatedDelivered,
+            aggregatedLogIds,
+            lastMessageId,
+            lastOperationId,
+            failures.Count > 0 ? string.Join(" | ", failures) : null,
+            EmailSendOutcome.Sent,
+            lastSentAt);
+    }
+
+    private async Task<ReportEmailSendResult> SendToRecipientsAsync(
+        ReportEmailMessage message,
+        IReadOnlyList<string> recipients,
+        string subject,
+        string htmlBody,
+        string? originalRecipients,
+        IReadOnlyList<string> cc,
+        IReadOnlyList<string> bcc,
+        string from,
+        CancellationToken cancellationToken)
+    {
+        if (recipients.Count == 0)
+        {
+            return new ReportEmailSendResult(false, "aws-ses", from, [], [], null, null,
+                "No recipients.", EmailSendOutcome.SkippedNoRecipients);
+        }
+
+        var redirected = originalRecipients is not null
+            && !string.Equals(string.Join(";", recipients), originalRecipients, StringComparison.OrdinalIgnoreCase);
 
         var sendMessage = new ReportEmailMessage(
-            safe.To,
-            safe.Subject,
-            safe.HtmlBody,
+            recipients,
+            subject,
+            htmlBody,
             message.Attachments,
             message.ReportId,
             message.ReportScheduleId,
@@ -88,10 +192,10 @@ public sealed class ReportEmailDispatcher(
         if (!sendResult.Success)
         {
             var logIds = new List<Guid>();
-            foreach (var recipient in safe.To)
+            foreach (var recipient in recipients)
             {
                 var id = await WriteLogAsync(message, sendResult.Provider, sendResult.FromEmail, recipient,
-                    EmailDeliveryStatus.Failed, sendResult.ErrorMessage, null, null, safe.OriginalRecipients,
+                    EmailDeliveryStatus.Failed, sendResult.ErrorMessage, null, null, originalRecipients,
                     cancellationToken, cc, bcc).ConfigureAwait(false);
                 logIds.Add(id);
             }
@@ -102,16 +206,16 @@ public sealed class ReportEmailDispatcher(
         var sentAt = DateTimeOffset.UtcNow;
         var status = redirected ? EmailDeliveryStatus.RedirectedBySafety : EmailDeliveryStatus.Sent;
         var successLogIds = new List<Guid>();
-        foreach (var recipient in safe.To)
+        foreach (var recipient in recipients)
         {
             var id = await WriteLogAsync(message, sendResult.Provider, sendResult.FromEmail, recipient, status,
-                null, sendResult.MessageId, sendResult.OperationId, safe.OriginalRecipients, cancellationToken, cc, bcc, sentAt)
+                null, sendResult.MessageId, sendResult.OperationId, originalRecipients, cancellationToken, cc, bcc, sentAt)
                 .ConfigureAwait(false);
             successLogIds.Add(id);
         }
 
-        logger.LogInformation("Mail sent via {Provider} to {Count} recipients.", sendResult.Provider, safe.To.Count);
-        return sendResult with { DeliveredTo = safe.To, EmailLogIds = successLogIds, SentAt = sentAt };
+        logger.LogInformation("Mail sent via {Provider} to {Recipients}.", sendResult.Provider, string.Join(", ", recipients));
+        return sendResult with { DeliveredTo = recipients, EmailLogIds = successLogIds, SentAt = sentAt };
     }
 
     public Task<int> RetryFailedAsync(CancellationToken cancellationToken) => Task.FromResult(0);

@@ -48,7 +48,9 @@ public sealed record UpdateMailSchedulerSettingsCommand(
     string? StatusEmailRecipient,
     bool MailAutomationEnabled) : IRequest;
 
-public sealed record SendDownloadMonitorStatusEmailCommand(DateOnly? MonitorDate) : IRequest<bool>;
+public sealed record SendDownloadMonitorStatusEmailCommand(
+    DateOnly? MonitorDate,
+    string? RecipientOverride = null) : IRequest<bool>;
 
 public sealed record GetMailSettingsQuery : IRequest<MailSettingsDto>;
 
@@ -157,8 +159,27 @@ public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonito
 {
     public async Task<bool> Handle(SendDownloadMonitorStatusEmailCommand request, CancellationToken cancellationToken)
     {
-        await statusEmail.SendDailyStatusEmailAsync(request.MonitorDate, cancellationToken).ConfigureAwait(false);
+        await statusEmail.SendDailyStatusEmailAsync(
+                request.MonitorDate,
+                cancellationToken,
+                ParseRecipientOverride(request.RecipientOverride))
+            .ConfigureAwait(false);
         return true;
+    }
+
+    private static IReadOnlyList<string>? ParseRecipientOverride(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var recipients = value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return recipients.Count == 0 ? null : recipients;
     }
 }
 

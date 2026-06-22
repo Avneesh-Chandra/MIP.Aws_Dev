@@ -28,7 +28,10 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
 {
 
-    public async Task SendDailyStatusEmailAsync(DateOnly? monitorDate, CancellationToken cancellationToken)
+    public async Task SendDailyStatusEmailAsync(
+        DateOnly? monitorDate,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? recipientOverride = null)
 
     {
 
@@ -46,7 +49,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
 
 
-        var recipients = ParseRecipients(scheduler.StatusEmailRecipient);
+        var recipients = recipientOverride is { Count: > 0 }
+            ? recipientOverride
+            : ParseRecipients(scheduler.StatusEmailRecipient);
         if (recipients.Count == 0)
         {
             logger.LogWarning("Download monitor status email skipped: StatusEmailRecipient is not configured.");
