@@ -198,7 +198,18 @@ public sealed class DownloadMonitorBatchRunService(
         bool skipReconciliation,
         CancellationToken cancellationToken)
     {
-        if (!skipReconciliation)
+        if (skipReconciliation)
+        {
+            await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                    db,
+                    recoveryOrchestrator,
+                    autoAiEnqueue,
+                    logger,
+                    cancellationToken,
+                    requeueDownloads: false)
+                .ConfigureAwait(false);
+        }
+        else
         {
             await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
         }

@@ -199,6 +199,7 @@ public static class DependencyInjection
                         o.WorkerCount = queueOptions.WorkerCount.Value;
                     }
                 });
+                services.AddHostedService<DownloadJobWorkerStartupReconciliationHostedService>();
             }
         }
 

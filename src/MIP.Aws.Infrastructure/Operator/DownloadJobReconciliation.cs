@@ -23,11 +23,55 @@ internal static class DownloadJobReconciliation
         ISourceRecoveryOrchestrator recoveryOrchestrator,
         IAutoAiDownloadRecoveryEnqueueService? autoAiEnqueue,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requeueDownloads = true)
     {
-        await ReconcileRunningAndPendingAsync(db, recoveryOrchestrator, autoAiEnqueue, logger, cancellationToken)
+        await ReconcileRunningAndPendingAsync(
+                db,
+                recoveryOrchestrator,
+                autoAiEnqueue,
+                logger,
+                requeueDownloads,
+                cancellationToken)
             .ConfigureAwait(false);
         await ReconcileStaleAutoRecoveryJobsAsync(db, logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Marks download jobs that were still Running/Pending when a worker container restarted.
+    /// </summary>
+    public static async Task ReconcileWorkerRestartOrphansAsync(
+        IApplicationDbContext db,
+        DateTimeOffset workerStartedAt,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var orphanCutoff = workerStartedAt.AddSeconds(-30);
+        var orphans = await db.DownloadJobs
+            .Where(j => !j.IsDeleted
+                        && (j.Status == DownloadJobStatus.Running || j.Status == DownloadJobStatus.Pending)
+                        && (j.StartedAt ?? j.CreatedAt) < orphanCutoff)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (orphans.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var job in orphans)
+        {
+            job.Status = DownloadJobStatus.Failed;
+            job.ErrorMessage ??= "Download was interrupted when the background worker restarted.";
+            job.CompletedAt ??= DateTimeOffset.UtcNow;
+            job.ModifiedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogWarning(
+            "Marked {Count} orphan download job(s) failed after worker restart (started before {Cutoff:u}).",
+            orphans.Count,
+            orphanCutoff);
     }
 
     private static async Task ReconcileRunningAndPendingAsync(
@@ -35,6 +79,7 @@ internal static class DownloadJobReconciliation
         ISourceRecoveryOrchestrator recoveryOrchestrator,
         IAutoAiDownloadRecoveryEnqueueService? autoAiEnqueue,
         ILogger logger,
+        bool requeueDownloads,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -127,6 +172,11 @@ internal static class DownloadJobReconciliation
             {
                 logger.LogWarning(ex, "Could not finalize recovery attempt for stale job {JobId}.", job.Id);
             }
+        }
+
+        if (!requeueDownloads)
+        {
+            return;
         }
 
         foreach (var job in staleJobs.Where(j =>
