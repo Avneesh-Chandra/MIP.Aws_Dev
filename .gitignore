@@ -31,6 +31,12 @@ appsettings.*.local.json
 secrets.json
 *.pfx
 *.publishsettings
+infra/terraform/terraform.tfvars
+infra/terraform/terraform.tfvars.bak
+infra/terraform/deploy.auto.tfvars
+
+# Local API runtime data (keys, downloaded PDFs)
+**/App_Data/
 
 # Data (repo-root only — do not use bare storage/ or Abstractions/Storage is excluded)
 /storage/

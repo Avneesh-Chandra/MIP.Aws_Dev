@@ -65,9 +65,9 @@ variable "tags" { type = map(string) }
 locals {
   default_conn = "Server=${var.db_endpoint};Database=${var.db_name};User Id=${var.db_username};Password=${var.db_password};TrustServerCertificate=True;MultipleActiveResultSets=true"
   # RDS SQL Server Express allows only one user database per instance — share MIPAws with Hangfire.
-  hangfire_conn       = local.default_conn
+  hangfire_conn = local.default_conn
   # When no dedicated worker task is running, the API must host the Hangfire job server.
-  api_runs_hangfire   = var.worker_desired_count <= 0
+  api_runs_hangfire = var.worker_desired_count <= 0
 }
 
 resource "aws_ecs_cluster" "this" {
