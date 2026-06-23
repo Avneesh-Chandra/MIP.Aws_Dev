@@ -117,7 +117,7 @@ public sealed class DownloadMonitorBatchRunService(
 
             if (latest is not null)
             {
-                return new BatchEntry(latest.StartedAt, latest.TotalSources, latest.HangfireJobId);
+                return new BatchEntry(latest.StartedAt, latest.TotalSources, latest.HangfireJobId, latest.AbortedAt);
             }
         }
         catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
@@ -175,7 +175,7 @@ public sealed class DownloadMonitorBatchRunService(
 
                 if (row is not null)
                 {
-                    return new BatchEntry(row.StartedAt, row.TotalSources, row.HangfireJobId);
+                    return new BatchEntry(row.StartedAt, row.TotalSources, row.HangfireJobId, row.AbortedAt);
                 }
             }
             catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
@@ -234,6 +234,10 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         var sourceIds = sources.Select(s => s.Id).ToHashSet();
+        var orchestratorProcessing = HangfireBatchOrchestratorState.IsBatchOrchestratorJobProcessing(entry.HangfireJobId);
+        var pendingHangfire = HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds);
+        var batchStoppedExternally = entry.AbortedAt is not null
+                                     || (!orchestratorProcessing && pendingHangfire == 0);
 
         var jobs = await db.DownloadJobs.AsNoTracking()
             .Where(j => !j.IsDeleted
@@ -284,7 +288,17 @@ public sealed class DownloadMonitorBatchRunService(
             }
             else
             {
-                if (elapsed > staggerWindow)
+                if (batchStoppedExternally)
+                {
+                    failedCount++;
+                    activities.Add(new DownloadMonitorBatchActivityResult(
+                        source.Name,
+                        entry.AbortedAt is not null
+                            ? "Cancelled by operator before download ran"
+                            : "Batch stopped before download ran",
+                        "Skipped"));
+                }
+                else if (elapsed > staggerWindow)
                 {
                     failedCount++;
                     activities.Add(new DownloadMonitorBatchActivityResult(
@@ -605,5 +619,9 @@ public sealed class DownloadMonitorBatchRunService(
             .ConfigureAwait(false);
     }
 
-    private sealed record BatchEntry(DateTimeOffset StartedAt, int TotalSources, string HangfireJobId);
+    private sealed record BatchEntry(
+        DateTimeOffset StartedAt,
+        int TotalSources,
+        string HangfireJobId,
+        DateTimeOffset? AbortedAt = null);
 }
