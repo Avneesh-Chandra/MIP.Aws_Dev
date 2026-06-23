@@ -8,8 +8,11 @@ public sealed class PdfEditionSchedulerOptions
     /// <summary>UTC time when the first monitored source download is scheduled (24h, e.g. 04:30).</summary>
     public string FirstSourceScheduleTimeUtc { get; set; } = "04:30";
 
-    /// <summary>Minutes between each monitored source download (e.g. 5 → five sources finish by 04:55 when starting 04:30).</summary>
-    public int StaggerIntervalMinutes { get; set; } = 5;
+    /// <summary>Minutes between each monitored source download. Use 1 when Playwright serializes downloads; 0 enqueues all immediately.</summary>
+    public int StaggerIntervalMinutes { get; set; } = 1;
+
+    /// <summary>Target wall-clock duration for a full batch including status email (minutes).</summary>
+    public int MaxBatchDurationMinutes { get; set; } = 30;
 
     /// <summary>
     /// UTC time for the legacy fixed-time status email cron (24h, e.g. 05:00).

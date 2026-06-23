@@ -213,10 +213,11 @@ public sealed class DownloadMonitorBatchRunService(
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
-        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 0, 60);
         var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + DownloadMonitorBatchTiming.BatchWaitGracePeriod;
-        var orchestratorWait = DownloadMonitorBatchTiming.ResolveOrchestratorWaitTimeout(total, interval);
+        var opt = schedulerOptions.Value;
+        var orchestratorWait = DownloadMonitorBatchTiming.ResolveOrchestratorWaitTimeout(opt, total);
+        var staggerWindow = DownloadMonitorBatchTiming.ResolveStaggerWindow(total, interval);
         var batchExpired = elapsed > orchestratorWait;
 
         if (batchExpired)
@@ -266,7 +267,12 @@ public sealed class DownloadMonitorBatchRunService(
             {
                 (state, activity) = DescribeJob(job);
             }
-            else if (await DownloadMonitorBatchOutcomeHelper.HasSuccessfulPdfEditionSinceBatchAsync(
+            else if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
+                             db,
+                             source.Id,
+                             cancellationToken)
+                         .ConfigureAwait(false)
+                     || await DownloadMonitorBatchOutcomeHelper.HasSuccessfulPdfEditionSinceBatchAsync(
                              db,
                              source.Id,
                              entry.StartedAt,

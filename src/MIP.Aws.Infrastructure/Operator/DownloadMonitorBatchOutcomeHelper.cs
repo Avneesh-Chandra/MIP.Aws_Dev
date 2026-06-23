@@ -25,6 +25,11 @@ public static class DownloadMonitorBatchOutcomeHelper
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
+        if (await HasTodaysDownloadedEditionAsync(db, sourceId, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
         if (await HasSuccessfulPdfEditionSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
@@ -43,6 +48,11 @@ public static class DownloadMonitorBatchOutcomeHelper
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
+        if (await HasTodaysDownloadedEditionAsync(db, sourceId, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
         if (await HasSuccessfulPdfEditionSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
@@ -53,6 +63,46 @@ public static class DownloadMonitorBatchOutcomeHelper
             .ConfigureAwait(false);
 
         return latestJob is not null && IsSuccessfulDownloadStatus(latestJob.Status);
+    }
+
+    /// <summary>True when today's edition is already stored (any earlier batch today counts as satisfied).</summary>
+    public static async Task<bool> HasTodaysDownloadedEditionAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        CancellationToken cancellationToken)
+    {
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dayStart = new DateTimeOffset(editionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+
+        var hasPdfEdition = await db.PdfEditionDownloads.AsNoTracking()
+            .AnyAsync(
+                x => !x.IsDeleted
+                     && x.NewsSourceId == sourceId
+                     && (x.Status == PdfEditionStatus.Downloaded
+                         || x.Status == PdfEditionStatus.SkippedDuplicate
+                         || x.Status == PdfEditionStatus.Validated)
+                     && (x.EditionDate == editionDate
+                         || (x.DownloadedAt >= dayStart && x.DownloadedAt < dayEnd)),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (hasPdfEdition)
+        {
+            return true;
+        }
+
+        return await db.DownloadJobs.AsNoTracking()
+            .AnyAsync(
+                j => !j.IsDeleted
+                     && j.NewsSourceId == sourceId
+                     && (j.Status == DownloadJobStatus.Succeeded
+                         || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery)
+                     && j.CompletedAt >= dayStart
+                     && j.CompletedAt < dayEnd
+                     && db.DownloadedFiles.Any(f => !f.IsDeleted && f.DownloadJobId == j.Id),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task<bool> HasSuccessfulPdfEditionSinceBatchAsync(
