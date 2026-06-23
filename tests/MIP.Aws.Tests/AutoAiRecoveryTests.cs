@@ -34,6 +34,56 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
+    public void AlAyam_heuristic_is_safe_for_auto_apply_when_blocked()
+    {
+        var context = new SourceRecoveryAnalysisContext(
+            Guid.NewGuid(),
+            AlAyamPublicPdfBaseline.SourceName,
+            Guid.NewGuid(),
+            SourceRecoveryFailureTypes.AccessDenied,
+            "AccessBlocked",
+            "Publisher blocked automated access (Cloudflare/bot protection) on the e-paper page.",
+            AlAyamPublicPdfBaseline.EpaperUrl,
+            AlAyamPublicPdfBaseline.EpaperUrl,
+            null,
+            0,
+            DateTimeOffset.UtcNow,
+            "{}",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            [],
+            [],
+            []);
+
+        var options = SourceRecoveryHeuristicBuilder.MergePublisherHeuristics(
+            context,
+            []);
+        Assert.Single(options);
+        Assert.True(options[0].Patch.UseHeadlessBrowser);
+        Assert.Equal(AlAyamPublicPdfBaseline.PdfLinkSelector, options[0].Patch.PdfLinkSelector);
+
+        var settings = new AutoAiDownloadRecoveryOptions
+        {
+            MinimumConfidence = 0.70,
+            MaximumRiskAllowed = "Medium"
+        };
+
+        Assert.True(
+            AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(options[0], settings, out var reason),
+            reason);
+        Assert.True(
+            PublisherRecoveryBaseline.ShouldRetainConfigAfterFailedRetry(
+                new NewsSource { ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey },
+                options[0]));
+    }
+
+    [Fact]
     public void PressReader_heuristic_is_safe_for_auto_apply()
     {
         var context = new SourceRecoveryAnalysisContext(

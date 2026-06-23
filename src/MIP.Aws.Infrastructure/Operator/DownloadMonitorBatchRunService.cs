@@ -224,6 +224,7 @@ public sealed class DownloadMonitorBatchRunService(
             HangfireExpiredBatchJobCleanup.TryCancelExpiredOperatorBatchJobs(logger);
             await FailExpiredBatchActiveJobsAsync(
                     db,
+                    autoAiEnqueue,
                     entry.StartedAt,
                     sources.Select(s => s.Id).ToList(),
                     logger,
@@ -553,6 +554,7 @@ public sealed class DownloadMonitorBatchRunService(
 
     private static async Task FailExpiredBatchActiveJobsAsync(
         IApplicationDbContext db,
+        IAutoAiDownloadRecoveryEnqueueService autoAiEnqueue,
         DateTimeOffset batchStartedAt,
         IReadOnlyList<Guid> sourceIds,
         ILogger logger,
@@ -588,6 +590,13 @@ public sealed class DownloadMonitorBatchRunService(
             "Marked {Count} active download job(s) failed after batch expiry (started {BatchStartedAt:u}).",
             activeJobs.Count,
             batchStartedAt);
+
+        await DownloadJobReconciliation.EnqueueAutoRecoveryForFailedJobsAsync(
+                autoAiEnqueue,
+                activeJobs,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private sealed record BatchEntry(DateTimeOffset StartedAt, int TotalSources, string HangfireJobId);

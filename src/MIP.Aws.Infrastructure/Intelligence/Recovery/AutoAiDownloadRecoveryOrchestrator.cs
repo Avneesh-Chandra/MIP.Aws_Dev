@@ -8,6 +8,7 @@ using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
+using MIP.Aws.Infrastructure.Browser;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -218,7 +219,17 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
             using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.AutoAiRecovery))
             {
-                await downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken).ConfigureAwait(false);
+                if (source.PdfDiscoveryEnabled
+                    && source.SourceType is NewsSourceType.PublicPdf or NewsSourceType.PublicHtml)
+                {
+                    await PlaywrightDownloadConcurrencyGate.RunAsync(
+                        () => downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             var finalize = await recoveryOrchestrator.FinalizeAttemptAsync(attempt.Id, cancellationToken).ConfigureAwait(false);

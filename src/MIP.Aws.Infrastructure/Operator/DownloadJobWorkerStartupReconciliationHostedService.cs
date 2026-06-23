@@ -34,6 +34,7 @@ public sealed class DownloadJobWorkerStartupReconciliationHostedService(
         await DownloadJobReconciliation.ReconcileWorkerRestartOrphansAsync(
                 db,
                 workerStartedAt,
+                autoAiEnqueue,
                 logger,
                 cancellationToken)
             .ConfigureAwait(false);

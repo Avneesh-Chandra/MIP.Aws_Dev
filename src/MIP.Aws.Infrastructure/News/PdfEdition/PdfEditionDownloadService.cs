@@ -269,6 +269,30 @@ public sealed class PdfEditionDownloadService(
                 throw new InvalidOperationException("PDF discovery is not enabled for this source.");
             }
 
+            if (download)
+            {
+                await WithDbContextAsync(async (db, ct) =>
+                {
+                    var tracked = await db.NewsSources
+                        .FirstOrDefaultAsync(s => s.Id == newsSourceId && !s.IsDeleted, ct)
+                        .ConfigureAwait(false);
+                    if (tracked is not null)
+                    {
+                        await AlAyamSourceBaselineGuard.EnsureKnownGoodConfigurationAsync(
+                                db,
+                                tracked,
+                                logger,
+                                ct)
+                            .ConfigureAwait(false);
+                    }
+
+                    return true;
+                }, cancellationToken).ConfigureAwait(false);
+
+                source = await LoadSourceAsync(newsSourceId, cancellationToken).ConfigureAwait(false)
+                         ?? throw new InvalidOperationException("News source not found.");
+            }
+
             await audit.RecordAdminActionAsync(
                 PdfEditionAuditEvents.DiscoveryStarted,
                 "NewsSource",

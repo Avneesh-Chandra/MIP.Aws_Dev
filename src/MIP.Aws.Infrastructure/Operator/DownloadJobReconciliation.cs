@@ -43,6 +43,7 @@ internal static class DownloadJobReconciliation
     public static async Task ReconcileWorkerRestartOrphansAsync(
         IApplicationDbContext db,
         DateTimeOffset workerStartedAt,
+        IAutoAiDownloadRecoveryEnqueueService? autoAiEnqueue,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -72,6 +73,13 @@ internal static class DownloadJobReconciliation
             "Marked {Count} orphan download job(s) failed after worker restart (started before {Cutoff:u}).",
             orphans.Count,
             orphanCutoff);
+
+        await EnqueueAutoRecoveryForFailedJobsAsync(
+                autoAiEnqueue,
+                orphans,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static async Task ReconcileRunningAndPendingAsync(
@@ -174,27 +182,25 @@ internal static class DownloadJobReconciliation
             }
         }
 
+        var failedStaleJobs = staleJobs
+            .Where(j => j.Status == DownloadJobStatus.Failed
+                        && !sourcesWithDownloadedEditionToday.Contains(j.NewsSourceId))
+            .ToList();
+
+        await EnqueueAutoRecoveryForFailedJobsAsync(
+                autoAiEnqueue,
+                failedStaleJobs,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
+
         if (!requeueDownloads)
         {
             return;
         }
 
-        foreach (var job in staleJobs.Where(j =>
-                     j.Status == DownloadJobStatus.Failed
-                     && !sourcesWithDownloadedEditionToday.Contains(j.NewsSourceId)))
+        foreach (var job in failedStaleJobs)
         {
-            if (autoAiEnqueue is not null)
-            {
-                try
-                {
-                    await autoAiEnqueue.TryEnqueueAfterFailureAsync(job, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Could not enqueue auto AI recovery for reconciled job {JobId}.", job.Id);
-                }
-            }
-
             if (sourcesById.TryGetValue(job.NewsSourceId, out var source)
                 && source.PdfDiscoveryEnabled
                 && source.SourceType is NewsSourceType.PublicHtml or NewsSourceType.PublicPdf)
@@ -204,6 +210,30 @@ internal static class DownloadJobReconciliation
                     "Re-queued PDF edition download for {Source} after stale job {JobId} was reconciled.",
                     source.Name,
                     job.Id);
+            }
+        }
+    }
+
+    internal static async Task EnqueueAutoRecoveryForFailedJobsAsync(
+        IAutoAiDownloadRecoveryEnqueueService? autoAiEnqueue,
+        IEnumerable<DownloadJob> jobs,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (autoAiEnqueue is null)
+        {
+            return;
+        }
+
+        foreach (var job in jobs.Where(j => j.Status == DownloadJobStatus.Failed))
+        {
+            try
+            {
+                await autoAiEnqueue.TryEnqueueAfterFailureAsync(job, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not enqueue auto AI recovery for reconciled job {JobId}.", job.Id);
             }
         }
     }
