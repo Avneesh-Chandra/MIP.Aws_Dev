@@ -24,6 +24,7 @@ public sealed class PdfEditionDownloadService(
     IPdfEditionDiscoveryService discovery,
     PdfEditionValidator validator,
     PdfEditionContentFetcher contentFetcher,
+    ISourcePageEditionDateVerifier sourcePageEditionDateVerifier,
     IHttpClientFactory httpClientFactory,
     IPdfEditionFailureArtifactService failureArtifacts,
     IPdfEditionDownloadProgressTracker progress,
@@ -505,6 +506,28 @@ public sealed class PdfEditionDownloadService(
 
         try
         {
+            progress.Report(newsSourceId, 64, "Verifying edition date on source page…");
+            if (ShouldVerifyEditionDateOnSourcePage(source, best))
+            {
+                var editionDateCheck = await sourcePageEditionDateVerifier.VerifyByNavigationAsync(
+                    source,
+                    ResolveWarmUpUrl(source),
+                    editionDate,
+                    cancellationToken).ConfigureAwait(false);
+                if (editionDateCheck.BlocksDownload)
+                {
+                    return await PersistRowAsync(
+                        source.Id,
+                        best,
+                        PdfEditionStatus.Failed,
+                        editionDateCheck.FailureMessage ?? "Edition date verification failed.",
+                        candidateDtos,
+                        updateLastPdfUrl: true,
+                        warmUpUrl?.ToString(),
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             byte[]? bytes = prevalidated?.ValidatedPdfBytes;
             if (bytes is null || bytes.Length == 0)
             {
@@ -1138,6 +1161,21 @@ public sealed class PdfEditionDownloadService(
 
         return $"{_storage.NewspapersRelativePath.TrimEnd('/')}/{safe}/{editionDate:yyyy-MM-dd}/today-edition.pdf"
             .Replace('\\', '/');
+    }
+
+    private static bool ShouldVerifyEditionDateOnSourcePage(NewsSource source, PdfEditionCandidate best)
+    {
+        if ((AawsatFullPublicationPdf.UsesClickPath(source) || AlAyamFullEditionPdf.UsesClickPath(source))
+            && best.Method is PdfDiscoveryMethod.ConfiguredDownloadSelector
+                or PdfDiscoveryMethod.ConfiguredLinkSelector
+                or PdfDiscoveryMethod.ManualOverride
+                or PdfDiscoveryMethod.PlaywrightClick
+                or PdfDiscoveryMethod.PlaywrightPopup)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static PdfEditionDownloadOutcome MapOutcome(PdfEditionDownload row, IReadOnlyList<PdfEditionCandidateDto>? candidates) =>

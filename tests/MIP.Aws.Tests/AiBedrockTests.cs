@@ -288,7 +288,7 @@ public sealed class StatusEmailSummaryTests
     {
         var monitor = new DownloadMonitorDto(
             DateOnly.FromDateTime(DateTime.UtcNow),
-            new DownloadMonitorSummaryDto(5, 4, 1, 0, 4, 0, []),
+            new DownloadMonitorSummaryDto(5, 4, 1, 0, 4, 0, 0, []),
             []);
 
         var summary = DownloadMonitorStatusSummaryService.BuildDeterministicSummary(monitor);
@@ -304,7 +304,7 @@ public sealed class StatusEmailSummaryTests
 
         var monitor = new DownloadMonitorDto(
             DateOnly.FromDateTime(DateTime.UtcNow),
-            new DownloadMonitorSummaryDto(2, 1, 1, 0, 1, 0, []),
+            new DownloadMonitorSummaryDto(2, 1, 1, 0, 1, 0, 0, []),
             []);
 
         var summary = await service.BuildSummaryAsync(monitor, CancellationToken.None);

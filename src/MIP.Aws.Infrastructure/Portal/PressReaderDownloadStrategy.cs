@@ -2,10 +2,12 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Storage;
+using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Portal;
 using MIP.Aws.Domain.Entities;
+using MIP.Aws.Infrastructure.News.PdfEdition;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
@@ -19,6 +21,7 @@ public sealed class PressReaderDownloadStrategy(
     IApplicationDbContext db,
     IFileStorageService fileStorage,
     IOptions<StorageOptions> storageOptions,
+    ISourcePageEditionDateVerifier sourcePageEditionDateVerifier,
     ILogger<PressReaderDownloadStrategy> logger) : IPortalDownloadStrategy
 {
     /// <summary>UAE Al Khaleej + Economy share one PressReader subscriber; serialize downloads.</summary>
@@ -240,6 +243,23 @@ public sealed class PressReaderDownloadStrategy(
                 false,
                 "PressReader Sign in modal is still open; subscriber is not authenticated on the edition page.",
                 "LoginRequired");
+        }
+
+        var expectedEditionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (sourcePageEditionDateVerifier.IsSupported(source))
+        {
+            var editionCheck = await SourcePageEditionDatePageVerifier.VerifyAsync(
+                page,
+                source,
+                expectedEditionDate,
+                cancellationToken).ConfigureAwait(false);
+            if (editionCheck.BlocksDownload)
+            {
+                return new PortalEditionDownloadStepResult(
+                    false,
+                    editionCheck.FailureMessage ?? "Edition date on PressReader does not match today's expected edition.",
+                    "EditionDateMismatch");
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(source.DownloadSelector))

@@ -133,6 +133,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IPdfEditionDownloadProgressTracker, PdfEditionDownloadProgressTracker>();
         services.AddScoped<IPdfEditionDiscoveryService, PlaywrightPdfEditionDiscoveryService>();
+        services.AddScoped<ISourcePageEditionDateVerifier, SourcePageEditionDateVerifier>();
         services.AddScoped<PdfEditionContentFetcher>();
         services.AddScoped<PdfEditionValidator>();
         services.AddScoped<IPdfEditionDownloadService, PdfEditionDownloadService>();

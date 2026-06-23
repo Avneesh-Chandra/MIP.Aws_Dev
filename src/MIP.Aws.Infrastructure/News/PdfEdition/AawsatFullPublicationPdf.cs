@@ -192,6 +192,23 @@ public static class AawsatFullPublicationPdf
                 new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs }).ConfigureAwait(false);
             await Task.Delay(1_500, cancellationToken).ConfigureAwait(false);
 
+            if (source is not null)
+            {
+                var editionCheck = await SourcePageEditionDatePageVerifier.VerifyAsync(
+                    page,
+                    source,
+                    DateOnly.FromDateTime(DateTime.UtcNow),
+                    cancellationToken).ConfigureAwait(false);
+                if (editionCheck.BlocksDownload)
+                {
+                    logger.LogWarning(
+                        "Aawsat edition date verification failed for {Url}: {Message}",
+                        startPageUrl,
+                        editionCheck.FailureMessage);
+                    return null;
+                }
+            }
+
             var issuePage = await OpenIssuePageAsync(page, startPageUrl, timeoutMs, cancellationToken).ConfigureAwait(false);
             if (issuePage is null)
             {

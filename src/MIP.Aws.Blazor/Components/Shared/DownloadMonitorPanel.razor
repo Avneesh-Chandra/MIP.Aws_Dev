@@ -218,6 +218,14 @@
             </MudItem>
             <MudItem xs="6" sm="4" md="2">
                 <MudPaper Class="pa-3" Outlined="true">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Edition date mismatches</MudText>
+                    <MudText Typo="Typo.h5" Color="@(_monitor.Summary.EditionDateMismatchCount > 0 ? Color.Warning : Color.Success)">
+                        @_monitor.Summary.EditionDateMismatchCount
+                    </MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="4" md="2">
+                <MudPaper Class="pa-3" Outlined="true">
                     <MudText Typo="Typo.caption" Color="Color.Secondary">Admin alerts pending</MudText>
                     <MudText Typo="Typo.h5" Color="Color.Info">@_monitor.Summary.AdminNotificationsPending</MudText>
                 </MudPaper>
@@ -248,6 +256,7 @@
                     <MudTh>Status</MudTh>
                     <MudTh>Last attempt</MudTh>
                     <MudTh>Last success</MudTh>
+                    <MudTh>Edition date</MudTh>
                     <MudTh>Latest PDF</MudTh>
                     <MudTh>Intervention</MudTh>
                     <MudTh Style="text-align:right;">Actions</MudTh>
@@ -295,6 +304,29 @@
                     </MudTd>
                     <MudTd DataLabel="Last attempt">@FormatWhen(row.LastDownloadTime)</MudTd>
                     <MudTd DataLabel="Last success">@FormatWhen(row.LastSuccessfulDownload)</MudTd>
+                    <MudTd DataLabel="Edition date">
+                        @if (row.LatestPdfFileId is null)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Tertiary">—</MudText>
+                        }
+                        else if (row.LatestPdfEditionDate is not DateOnly editionDate)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Unknown</MudChip>
+                        }
+                        else if (row.EditionDateMatchesMonitor)
+                        {
+                            <MudText Typo="Typo.body2">@editionDate.ToString("yyyy-MM-dd")</MudText>
+                        }
+                        else
+                        {
+                            <MudStack Spacing="0">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">Mismatch</MudChip>
+                                <MudText Typo="Typo.caption" Color="Color.Warning">
+                                    PDF @editionDate.ToString("yyyy-MM-dd") · monitor @_monitor.MonitorDate.ToString("yyyy-MM-dd")
+                                </MudText>
+                            </MudStack>
+                        }
+                    </MudTd>
                     <MudTd DataLabel="Latest PDF">
                         @if (row.LatestPdfFileId is not null)
                         {

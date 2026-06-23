@@ -6,6 +6,7 @@ public sealed record DownloadMonitorSummaryDto(
     int FailedToday,
     int PendingManualIntervention,
     int PdfsDownloadedToday,
+    int EditionDateMismatchCount,
     int AdminNotificationsPending,
     IReadOnlyList<AttentionSourceDto> SourcesRequiringAttention);
 
@@ -33,7 +34,9 @@ public sealed record DownloadMonitorSourceRowDto(
     bool AdminInformed,
     bool InformAdminDisabled,
     string? SuggestedIntervention,
-    Guid? AiRecoveryAttemptId = null);
+    Guid? AiRecoveryAttemptId = null,
+    DateOnly? LatestPdfEditionDate = null,
+    bool EditionDateMatchesMonitor = true);
 
 public sealed record AiRecoveryConfigurationChangeDto(
     string Field,

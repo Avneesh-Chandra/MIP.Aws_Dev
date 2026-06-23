@@ -275,6 +275,23 @@ public static class AlAyamFullEditionPdf
                 // continue polling
             }
 
+            if (source is not null)
+            {
+                var editionCheck = await SourcePageEditionDatePageVerifier.VerifyAsync(
+                    page,
+                    source,
+                    DateOnly.FromDateTime(DateTime.UtcNow),
+                    cancellationToken).ConfigureAwait(false);
+                if (editionCheck.BlocksDownload)
+                {
+                    logger.LogWarning(
+                        "Al Ayam edition date verification failed for {Url}: {Message}",
+                        epaperUri,
+                        editionCheck.FailureMessage);
+                    return null;
+                }
+            }
+
             var resolve = await ResolvePdfUrlAsync(page, epaperUri, timeoutMs, logger, cancellationToken)
                 .ConfigureAwait(false);
             if (resolve.AccessBlocked)

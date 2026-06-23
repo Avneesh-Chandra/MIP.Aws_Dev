@@ -65,7 +65,7 @@ public static class DatabaseBootstrap
     }
 
     /// <summary>
-    /// Production first-deploy: set Database:AutoMigrateOnStartup=true in ECS env (dev only).
+    /// Applies pending EF Core migrations in production when enabled (ECS API startup).
     /// </summary>
     public static async Task ApplyProductionMigrationIfRequestedAsync(
         IHostEnvironment environment,
@@ -90,6 +90,13 @@ public static class DatabaseBootstrap
         }
 
         await EnsureAuxiliarySqlCatalogAsync(configuration, cancellationToken).ConfigureAwait(false);
-        await services.MigrateMediaIntelligenceAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MediaIntelligenceDbContext>();
+        var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken).ConfigureAwait(false)).ToList();
+        if (pending.Count > 0)
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 }

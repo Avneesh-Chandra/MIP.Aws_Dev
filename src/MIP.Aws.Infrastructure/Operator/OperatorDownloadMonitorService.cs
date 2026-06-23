@@ -56,7 +56,8 @@ public sealed class OperatorDownloadMonitorService(
 
         var interventionJobIds = await LoadActiveInterventionJobIdsAsync(cancellationToken).ConfigureAwait(false);
 
-        var fileIdByJobId = await LoadLatestFileIdBySucceededJobIdAsync(jobs, cancellationToken).ConfigureAwait(false);
+        var fileIdByJobId = await LoadLatestFileBySucceededJobIdAsync(jobs, cancellationToken).ConfigureAwait(false);
+        var blobUriByJobId = fileIdByJobId.ToDictionary(kv => kv.Key, kv => kv.Value.BlobUri);
         var recoveryRetryJobAttemptIds = await LoadRecoveryRetryJobAttemptIdsAsync(jobs, cancellationToken)
             .ConfigureAwait(false);
 
@@ -66,10 +67,21 @@ public sealed class OperatorDownloadMonitorService(
         var failedCount = 0;
         var manualCount = 0;
         var pdfCount = 0;
+        var editionDateMismatchCount = 0;
 
         foreach (var source in sources)
         {
-            var row = BuildSourceRow(source, date, dayStart, dayEnd, jobs, pdfRows, interventionJobIds, fileIdByJobId, recoveryRetryJobAttemptIds);
+            var row = BuildSourceRow(
+                source,
+                date,
+                dayStart,
+                dayEnd,
+                jobs,
+                pdfRows,
+                interventionJobIds,
+                fileIdByJobId,
+                blobUriByJobId,
+                recoveryRetryJobAttemptIds);
             rows.Add(row);
 
             if (DownloadMonitorStatusLabels.IsSuccessful(row.LastDownloadStatus))
@@ -91,6 +103,15 @@ public sealed class OperatorDownloadMonitorService(
                     row.SuggestedIntervention ?? "Inform Admin for manual review."));
             }
 
+            if (row.LatestPdfFileId is not null
+                && DownloadMonitorStatusLabels.IsSuccessful(row.LastDownloadStatus)
+                && !row.EditionDateMatchesMonitor)
+            {
+                editionDateMismatchCount++;
+                var (issue, action) = DownloadMonitorEditionDateHelper.BuildMismatchAttention(date, row.LatestPdfEditionDate);
+                attention.Add(new AttentionSourceDto(source.Id, source.Name, issue, action));
+            }
+
             if (row.LatestPdfFileId is not null && DownloadMonitorStatusLabels.IsSuccessful(row.LastDownloadStatus))
             {
                 pdfCount++;
@@ -105,6 +126,7 @@ public sealed class OperatorDownloadMonitorService(
             failedCount,
             manualCount,
             pdfCount,
+            editionDateMismatchCount,
             pendingNotifications,
             attention.OrderBy(a => a.SourceName).ToList());
 
@@ -142,10 +164,21 @@ public sealed class OperatorDownloadMonitorService(
 
         var interventionJobIds = await LoadActiveInterventionJobIdsAsync(cancellationToken).ConfigureAwait(false);
 
-        var fileIdByJobId = await LoadLatestFileIdBySucceededJobIdAsync(jobs, cancellationToken).ConfigureAwait(false);
+        var fileIdByJobId = await LoadLatestFileBySucceededJobIdAsync(jobs, cancellationToken).ConfigureAwait(false);
+        var blobUriByJobId = fileIdByJobId.ToDictionary(kv => kv.Key, kv => kv.Value.BlobUri);
         var recoveryRetryJobAttemptIds = await LoadRecoveryRetryJobAttemptIdsAsync(jobs, cancellationToken)
             .ConfigureAwait(false);
-        var row = BuildSourceRow(source, date, dayStart, dayEnd, jobs, pdfRows, interventionJobIds, fileIdByJobId, recoveryRetryJobAttemptIds);
+        var row = BuildSourceRow(
+            source,
+            date,
+            dayStart,
+            dayEnd,
+            jobs,
+            pdfRows,
+            interventionJobIds,
+            fileIdByJobId,
+            blobUriByJobId,
+            recoveryRetryJobAttemptIds);
         var timeline = jobs.Select(j => new DownloadAttemptTimelineDto(
                 j.Id,
                 MapJobStatus(j.Status),
@@ -778,7 +811,9 @@ public sealed class OperatorDownloadMonitorService(
                 });
     }
 
-    private async Task<IReadOnlyDictionary<Guid, Guid>> LoadLatestFileIdBySucceededJobIdAsync(
+    private sealed record SucceededJobFile(Guid FileId, string BlobUri);
+
+    private async Task<IReadOnlyDictionary<Guid, SucceededJobFile>> LoadLatestFileBySucceededJobIdAsync(
         IReadOnlyList<DownloadJob> jobs,
         CancellationToken cancellationToken)
     {
@@ -789,19 +824,23 @@ public sealed class OperatorDownloadMonitorService(
 
         if (succeededJobIds.Count == 0)
         {
-            return new Dictionary<Guid, Guid>();
+            return new Dictionary<Guid, SucceededJobFile>();
         }
 
         var files = await db.DownloadedFiles.AsNoTracking()
             .Where(f => !f.IsDeleted && succeededJobIds.Contains(f.DownloadJobId))
             .OrderByDescending(f => f.CreatedAt)
-            .Select(f => new { f.DownloadJobId, f.Id })
+            .Select(f => new { f.DownloadJobId, f.Id, f.BlobUri })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
         return files
             .GroupBy(f => f.DownloadJobId)
-            .ToDictionary(g => g.Key, g => g.First().Id);
+            .ToDictionary(g => g.Key, g =>
+            {
+                var first = g.First();
+                return new SucceededJobFile(first.Id, first.BlobUri);
+            });
     }
 
     private static DownloadMonitorSourceRowDto BuildSourceRow(
@@ -812,7 +851,8 @@ public sealed class OperatorDownloadMonitorService(
         IReadOnlyList<DownloadJob> allDayJobs,
         IReadOnlyList<PdfEditionDownload> allDayPdfs,
         (HashSet<Guid> PendingInterventionJobIds, HashSet<Guid> AcknowledgedInterventionJobIds) interventionJobIds,
-        IReadOnlyDictionary<Guid, Guid> fileIdByJobId,
+        IReadOnlyDictionary<Guid, SucceededJobFile> fileByJobId,
+        IReadOnlyDictionary<Guid, string> blobUriByJobId,
         IReadOnlyDictionary<Guid, RecoveryRetryJobLink> recoveryRetryJobAttemptIds)
     {
         var sourceJobs = allDayJobs.Where(j => j.NewsSourceId == source.Id).OrderByDescending(j => j.CreatedAt).ToList();
@@ -915,9 +955,9 @@ public sealed class OperatorDownloadMonitorService(
 
             if (latestFileId is null
                 && latestJobId is Guid succeededJobId
-                && fileIdByJobId.TryGetValue(succeededJobId, out var portalFileId))
+                && fileByJobId.TryGetValue(succeededJobId, out var portalFile))
             {
-                latestFileId = portalFileId;
+                latestFileId = portalFile.FileId;
             }
 
             if (IsAiRecoverySuccess(sourceJobs, latestJobId, recoveryRetryJobAttemptIds)
@@ -966,6 +1006,18 @@ public sealed class OperatorDownloadMonitorService(
             aiRecoveryAttemptId = recoveryLink.AttemptId;
         }
 
+        var hasPdfForEditionCheck = latestFileId is not null && DownloadMonitorStatusLabels.IsSuccessful(status);
+        var latestPdfEditionDate = DownloadMonitorEditionDateHelper.ResolveLatestPdfEditionDate(
+            downloadedForDay,
+            sourcePdfs,
+            latestFileId,
+            latestJobId,
+            blobUriByJobId);
+        var editionDateMatchesMonitor = DownloadMonitorEditionDateHelper.EditionDateMatchesMonitor(
+            date,
+            latestPdfEditionDate,
+            hasPdfForEditionCheck);
+
         return new DownloadMonitorSourceRowDto(
             source.Id,
             source.Name,
@@ -984,7 +1036,9 @@ public sealed class OperatorDownloadMonitorService(
             adminInformed,
             informAdminDisabled,
             suggested,
-            aiRecoveryAttemptId);
+            aiRecoveryAttemptId,
+            latestPdfEditionDate,
+            editionDateMatchesMonitor);
     }
 
     private static Guid? ResolveInterventionJobId(

@@ -28,21 +28,32 @@ internal static class DownloadMonitorBatchRunPersistence
         {
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsMissingBatchRunsTable(ex))
+        catch (Exception ex) when (IsBatchRunsSchemaNotReady(ex))
         {
             logger.LogWarning(
                 ex,
-                "DownloadMonitorBatchRuns table is missing; batch {HangfireJobId} will run but progress metadata was not persisted. Apply pending EF migrations.",
+                "DownloadMonitorBatchRuns schema is not up to date; batch {HangfireJobId} will run but progress metadata was not persisted. Apply pending EF migrations.",
                 hangfireJobId);
         }
     }
 
-    internal static bool IsMissingBatchRunsTable(Exception ex)
+    internal static bool IsBatchRunsSchemaNotReady(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
         {
-            if (current is SqlException { Number: 208 } sql
+            if (current is not SqlException sql)
+            {
+                continue;
+            }
+
+            if (sql.Number == 208
                 && sql.Message.Contains("DownloadMonitorBatchRuns", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (sql.Number == 207
+                && sql.Message.Contains("AbortedAt", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

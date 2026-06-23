@@ -30,6 +30,7 @@ public sealed class DownloadMonitorStatusSummaryService(
             FailedToday: {monitor.Summary.FailedToday}
             ManualIntervention: {monitor.Summary.PendingManualIntervention}
             PdfsDownloadedToday: {monitor.Summary.PdfsDownloadedToday}
+            EditionDateMismatches: {monitor.Summary.EditionDateMismatchCount}
             AttentionSources: {string.Join("; ", monitor.Summary.SourcesRequiringAttention.Select(s => $"{s.SourceName}: {s.Issue}"))}
             """;
 
@@ -45,6 +46,10 @@ public sealed class DownloadMonitorStatusSummaryService(
     public static string BuildDeterministicSummary(DownloadMonitorDto monitor)
     {
         var s = monitor.Summary;
-        return $"Daily download monitor for {monitor.MonitorDate:yyyy-MM-dd}: {s.SuccessfulToday} of {s.TotalSources} sources succeeded, {s.FailedToday} failed, {s.PendingManualIntervention} require manual intervention, and {s.PdfsDownloadedToday} PDFs were stored.";
+        return $"Daily download monitor for {monitor.MonitorDate:yyyy-MM-dd}: {s.SuccessfulToday} of {s.TotalSources} sources succeeded, {s.FailedToday} failed, {s.PendingManualIntervention} require manual intervention, {s.PdfsDownloadedToday} PDFs were stored"
+               + (s.EditionDateMismatchCount > 0
+                   ? $", and {s.EditionDateMismatchCount} PDF(s) have an edition date that does not match the monitor date."
+                   : ", and all stored PDF edition dates match the monitor date.")
+               + ".";
     }
 }

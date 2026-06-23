@@ -120,7 +120,7 @@ public sealed class DownloadMonitorBatchRunService(
                 return new BatchEntry(latest.StartedAt, latest.TotalSources, latest.HangfireJobId, latest.AbortedAt);
             }
         }
-        catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
+        catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsBatchRunsSchemaNotReady(ex))
         {
             // Table not migrated yet — fall through to job inference.
         }
@@ -178,7 +178,7 @@ public sealed class DownloadMonitorBatchRunService(
                     return new BatchEntry(row.StartedAt, row.TotalSources, row.HangfireJobId, row.AbortedAt);
                 }
             }
-            catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsMissingBatchRunsTable(ex))
+            catch (Exception ex) when (DownloadMonitorBatchRunPersistence.IsBatchRunsSchemaNotReady(ex))
             {
                 // Table not migrated yet.
             }

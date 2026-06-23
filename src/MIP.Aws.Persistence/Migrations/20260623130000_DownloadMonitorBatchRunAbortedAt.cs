@@ -5,7 +5,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MIP.Aws.Persistence.Migrations;
 
 /// <inheritdoc />
-public partial class DownloadMonitorBatchRunAbortedAt : Migration
+    /// <inheritdoc />
+    public partial class DownloadMonitorBatchRunAbortedAt : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)

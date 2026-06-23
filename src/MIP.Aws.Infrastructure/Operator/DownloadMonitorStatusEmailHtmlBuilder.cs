@@ -42,6 +42,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         AppendMetricCard(sb, "Failed today", s.FailedToday.ToString(), "#b91c1c");
         AppendMetricCard(sb, "Manual intervention", s.PendingManualIntervention.ToString(), "#b45309");
         AppendMetricCard(sb, "PDFs today", s.PdfsDownloadedToday.ToString(), "#1f2937");
+        AppendMetricCard(sb, "Edition date mismatches", s.EditionDateMismatchCount.ToString(), s.EditionDateMismatchCount > 0 ? "#b45309" : "#15803d");
         AppendMetricCard(sb, "Admin alerts pending", s.AdminNotificationsPending.ToString(), "#0369a1");
         sb.Append("</tr></table>");
     }
@@ -91,7 +92,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
     {
         sb.Append("<table style=\"border-collapse:collapse;width:100%;font-size:13px;\">");
         sb.Append("<thead><tr style=\"background:#f3f4f6;\">");
-        foreach (var header in new[] { "Source", "Type", "Country", "Status", "Last attempt", "Last success", "Latest PDF", "Intervention", "Actions" })
+        foreach (var header in new[] { "Source", "Type", "Country", "Status", "Last attempt", "Last success", "Edition date", "Latest PDF", "Intervention", "Actions" })
         {
             sb.Append("<th style=\"text-align:left;padding:8px;border:1px solid #e5e7eb;\">")
                 .Append(WebUtility.HtmlEncode(header))
@@ -120,6 +121,9 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
                 .Append(FormatLocal(row.LastSuccessfulDownload))
+                .Append("</td>");
+            sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
+                .Append(EditionDateCell(row, monitor.MonitorDate))
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;\">")
                 .Append(LatestPdfCell(row, portalBaseUrl))
@@ -163,6 +167,28 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         var text = row.SuggestedIntervention ?? "Review source configuration and recent portal/PDF audit logs.";
         return "<span style=\"display:inline-block;padding:2px 8px;border-radius:4px;background:#ffedd5;color:#9a3412;font-weight:600;font-size:11px;margin-right:6px;\">Required</span>"
                + WebUtility.HtmlEncode(text);
+    }
+
+    private static string EditionDateCell(DownloadMonitorSourceRowDto row, DateOnly monitorDate)
+    {
+        if (row.LatestPdfFileId is null)
+        {
+            return "—";
+        }
+
+        if (row.LatestPdfEditionDate is not DateOnly editionDate)
+        {
+            return "<span style=\"display:inline-block;padding:2px 8px;border-radius:4px;background:#ffedd5;color:#9a3412;font-weight:600;font-size:11px;\">Unknown</span>";
+        }
+
+        var label = WebUtility.HtmlEncode(editionDate.ToString("yyyy-MM-dd"));
+        if (row.EditionDateMatchesMonitor)
+        {
+            return label;
+        }
+
+        return $"<span style=\"display:inline-block;padding:2px 8px;border-radius:4px;background:#ffedd5;color:#9a3412;font-weight:600;font-size:11px;\">Mismatch</span> {label}"
+               + $" <span style=\"color:#6b7280;font-size:11px;\">(monitor {WebUtility.HtmlEncode(monitorDate.ToString("yyyy-MM-dd"))})</span>";
     }
 
     private static string LatestPdfCell(DownloadMonitorSourceRowDto row, string portalBaseUrl)
