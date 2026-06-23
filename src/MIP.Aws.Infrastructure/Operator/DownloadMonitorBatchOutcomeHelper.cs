@@ -93,7 +93,7 @@ public static class DownloadMonitorBatchOutcomeHelper
             .ConfigureAwait(false);
     }
 
-    public static async Task WaitForSourcesSettledAsync(
+    public static async Task<bool> WaitForSourcesSettledAsync(
         IApplicationDbContext db,
         IReadOnlyList<Guid> sourceIds,
         DateTimeOffset batchStartedAt,
@@ -118,10 +118,12 @@ public static class DownloadMonitorBatchOutcomeHelper
 
             if (allSettled)
             {
-                return;
+                return true;
             }
 
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
         }
+
+        return false;
     }
 }

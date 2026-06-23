@@ -20,7 +20,6 @@ public sealed class DownloadMonitorBatchRunService(
     ILogger<DownloadMonitorBatchRunService> logger) : IDownloadMonitorBatchRunService
 {
     private static readonly TimeSpan BatchRetention = TimeSpan.FromHours(8);
-    private static readonly TimeSpan BatchWaitGracePeriod = TimeSpan.FromMinutes(50);
     private static readonly TimeSpan InferredBatchWindow = TimeSpan.FromHours(3);
 
     public async Task<DownloadMonitorBatchRunResult> StartBatchAsync(CancellationToken cancellationToken)
@@ -216,8 +215,9 @@ public sealed class DownloadMonitorBatchRunService(
         var total = entry.TotalSources > 0 ? entry.TotalSources : sources.Count;
         var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
         var elapsed = DateTimeOffset.UtcNow - entry.StartedAt;
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + BatchWaitGracePeriod;
-        var batchExpired = elapsed > staggerWindow + TimeSpan.FromMinutes(30);
+        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, total - 1) * interval) + DownloadMonitorBatchTiming.BatchWaitGracePeriod;
+        var orchestratorWait = DownloadMonitorBatchTiming.ResolveOrchestratorWaitTimeout(total, interval);
+        var batchExpired = elapsed > orchestratorWait;
 
         if (batchExpired)
         {
@@ -363,6 +363,10 @@ public sealed class DownloadMonitorBatchRunService(
                 db,
                 entry.StartedAt,
                 isComplete,
+                entry.HangfireJobId,
+                inProgressCount,
+                waitingCount,
+                autoRecoveryCount,
                 logger,
                 cancellationToken)
             .ConfigureAwait(false);

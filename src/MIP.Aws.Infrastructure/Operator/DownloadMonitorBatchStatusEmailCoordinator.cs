@@ -1,6 +1,7 @@
 using Hangfire;
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Jobs;
 using Microsoft.EntityFrameworkCore;
@@ -18,11 +19,43 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         IApplicationDbContext db,
         DateTimeOffset batchStartedAt,
         bool isComplete,
+        string? hangfireJobId,
+        int inProgressCount,
+        int waitingCount,
+        int autoRecoveryCount,
         ILogger logger,
         CancellationToken cancellationToken)
     {
         if (!isComplete)
         {
+            return;
+        }
+
+        if (inProgressCount > 0 || waitingCount > 0 || autoRecoveryCount > 0)
+        {
+            logger.LogDebug(
+                "Skipping premature batch status email for {BatchStartedAt:u} ({InProgress} in progress, {Waiting} waiting, {AutoRecovery} in auto recovery).",
+                batchStartedAt,
+                inProgressCount,
+                waitingCount,
+                autoRecoveryCount);
+            return;
+        }
+
+        if (HangfireBatchOrchestratorState.IsBatchOrchestratorJobProcessing(hangfireJobId))
+        {
+            logger.LogDebug(
+                "Skipping batch status email for {BatchStartedAt:u} because Hangfire orchestrator {JobId} is still processing.",
+                batchStartedAt,
+                hangfireJobId);
+            return;
+        }
+
+        if (!await AreAllSourcesSettledForBatchAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false))
+        {
+            logger.LogDebug(
+                "Skipping batch status email for {BatchStartedAt:u} because one or more sources have not reached a terminal state.",
+                batchStartedAt);
             return;
         }
 
@@ -38,6 +71,38 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         logger.LogInformation(
             "Enqueued download monitor status email for completed batch started at {BatchStartedAt:u}.",
             batchStartedAt);
+    }
+
+    private static async Task<bool> AreAllSourcesSettledForBatchAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var sources = await db.NewsSources.AsNoTracking()
+            .Where(s => !s.IsDeleted && s.IsEnabled)
+            .OrderBy(s => s.Name)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var monitoredSourceIds = sources
+            .Where(PdfManagementSourceRules.IsPdfDownloadMonitoredSource)
+            .Select(s => s.Id)
+            .ToList();
+
+        foreach (var sourceId in monitoredSourceIds)
+        {
+            if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSettledAsync(
+                    db,
+                    sourceId,
+                    batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return monitoredSourceIds.Count > 0;
     }
 
     public static async Task<bool> ShouldSendStatusEmailAsync(

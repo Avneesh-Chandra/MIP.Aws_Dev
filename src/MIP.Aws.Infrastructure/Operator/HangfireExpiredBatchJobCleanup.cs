@@ -67,9 +67,10 @@ internal static class HangfireExpiredBatchJobCleanup
 
                     if (batchStartedAt is not null)
                     {
-                        BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                        BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
                             HangfireQueueOptions.Names.Email,
-                            j => j.SendCompletedBatchStatusEmailAsync(batchStartedAt.Value));
+                            j => j.SendCompletedBatchStatusEmailWhenReadyAsync(batchStartedAt.Value, 0),
+                            DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
                     }
                 }
                 else

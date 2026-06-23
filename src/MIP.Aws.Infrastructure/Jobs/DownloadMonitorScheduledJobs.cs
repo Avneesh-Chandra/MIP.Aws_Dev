@@ -24,13 +24,12 @@ public sealed class DownloadMonitorScheduledJobs(
     ILogger<DownloadMonitorScheduledJobs> logger)
 {
     [Queue(HangfireQueueOptions.Names.Critical)]
-    [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
+    [DisableConcurrentExecution(timeoutInSeconds: 6 * 60 * 60)]
     [AutomaticRetry(Attempts = 1, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task ScheduleStaggeredDailyDownloadsAsync(PerformContext? context)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
         var opt = schedulerOptions.Value;
         var interval = Math.Clamp(opt.StaggerIntervalMinutes, 1, 60);
         var batchStartedAt = DateTimeOffset.UtcNow;
@@ -66,22 +65,36 @@ public sealed class DownloadMonitorScheduledJobs(
             batchStartedAt,
             interval);
 
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         for (var index = 0; index < sources.Count; index++)
         {
             var delay = TimeSpan.FromMinutes(index * interval);
             ScheduleSourceDownload(sources[index], delay);
         }
 
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, sources.Count - 1) * interval);
-        var waitTimeout = staggerWindow + TimeSpan.FromMinutes(50);
+        await FinishBatchAndSendStatusEmailAsync(
+                db,
+                sources,
+                batchStartedAt,
+                interval,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+    }
 
-        await DownloadMonitorBatchOutcomeHelper.WaitForSourcesSettledAsync(
+    private async Task FinishBatchAndSendStatusEmailAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<NewsSource> sources,
+        DateTimeOffset batchStartedAt,
+        int interval,
+        CancellationToken cancellationToken)
+    {
+        var opt = schedulerOptions.Value;
+        var waitTimeout = DownloadMonitorBatchTiming.ResolveOrchestratorWaitTimeout(sources.Count, interval);
+        var allSettled = await DownloadMonitorBatchOutcomeHelper.WaitForSourcesSettledAsync(
                 db,
                 sources.Select(s => s.Id).ToList(),
                 batchStartedAt,
                 waitTimeout,
-                CancellationToken.None)
+                cancellationToken)
             .ConfigureAwait(false);
 
         var successCount = 0;
@@ -91,7 +104,7 @@ public sealed class DownloadMonitorScheduledJobs(
                     db,
                     source.Id,
                     batchStartedAt,
-                    CancellationToken.None)
+                    cancellationToken)
                 .ConfigureAwait(false))
             {
                 successCount++;
@@ -99,19 +112,29 @@ public sealed class DownloadMonitorScheduledJobs(
         }
 
         logger.LogInformation(
-            "Daily download monitor batch finished waiting for {Count} source(s): {SuccessCount} succeeded.",
+            "Download monitor batch finished waiting for {Count} source(s): {SuccessCount} succeeded (all settled={AllSettled}).",
             sources.Count,
-            successCount);
+            successCount,
+            allSettled);
 
-        if (opt.StatusEmailEnabled)
+        if (!opt.StatusEmailEnabled)
         {
-            await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
-            logger.LogInformation(
-                "Daily download monitor batch sent status email for {MonitorDate} ({SuccessCount}/{Total} succeeded).",
-                monitorDate,
-                successCount,
-                sources.Count);
+            return;
         }
+
+        if (allSettled)
+        {
+            await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+            return;
+        }
+
+        logger.LogWarning(
+            "Download monitor batch started at {BatchStartedAt:u} timed out before all sources settled; deferring status email.",
+            batchStartedAt);
+        BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+            HangfireQueueOptions.Names.Email,
+            j => j.SendCompletedBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
+            DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
@@ -127,14 +150,13 @@ public sealed class DownloadMonitorScheduledJobs(
     /// Operator "Execute PDF download task": stagger all monitored sources, wait for completion, send status email.
     /// </summary>
     [Queue(HangfireQueueOptions.Names.Critical)]
-    [DisableConcurrentExecution(timeoutInSeconds: 90 * 60)]
+    [DisableConcurrentExecution(timeoutInSeconds: 6 * 60 * 60)]
     [AutomaticRetry(Attempts = 2, DelaysInSeconds = [120, 300], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task ExecuteOperatorPdfBatchAsync(DateTimeOffset batchStartedAt)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var opt = schedulerOptions.Value;
-        var interval = Math.Clamp(opt.StaggerIntervalMinutes, 1, 60);
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
 
         var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
         if (sources.Count == 0)
@@ -154,37 +176,13 @@ public sealed class DownloadMonitorScheduledJobs(
             ScheduleSourceDownload(sources[index], delay);
         }
 
-        var staggerWindow = TimeSpan.FromMinutes(Math.Max(0, sources.Count - 1) * interval);
-        var waitTimeout = staggerWindow + TimeSpan.FromMinutes(50);
-
-        await DownloadMonitorBatchOutcomeHelper.WaitForSourcesSettledAsync(
+        await FinishBatchAndSendStatusEmailAsync(
                 db,
-                sources.Select(s => s.Id).ToList(),
+                sources,
                 batchStartedAt,
-                waitTimeout,
+                interval,
                 CancellationToken.None)
             .ConfigureAwait(false);
-
-        var successCount = 0;
-        foreach (var source in sources)
-        {
-            if (await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
-                    db,
-                    source.Id,
-                    batchStartedAt,
-                    CancellationToken.None)
-                .ConfigureAwait(false))
-            {
-                successCount++;
-            }
-        }
-
-        logger.LogInformation(
-            "Operator PDF batch finished waiting for {Count} source(s): {SuccessCount} succeeded.",
-            sources.Count,
-            successCount);
-
-        await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
@@ -194,6 +192,30 @@ public sealed class DownloadMonitorScheduledJobs(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+
+        var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
+        if (sources.Count > 0)
+        {
+            foreach (var source in sources)
+            {
+                if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSettledAsync(
+                        db,
+                        source.Id,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false))
+                {
+                    logger.LogInformation(
+                        "Download monitor batch {BatchStartedAt:u} not fully settled; deferring status email.",
+                        batchStartedAt);
+                    BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                        HangfireQueueOptions.Names.Email,
+                        j => j.SendCompletedBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
+                        DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+                    return;
+                }
+            }
+        }
 
         if (!await DownloadMonitorBatchStatusEmailCoordinator.ShouldSendStatusEmailAsync(
                 db,
@@ -229,6 +251,67 @@ public sealed class DownloadMonitorScheduledJobs(
                 batchStartedAt);
             throw;
         }
+    }
+
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 3, DelaysInSeconds = [300, 600, 900], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task SendCompletedBatchStatusEmailWhenReadyAsync(DateTimeOffset batchStartedAt, int attempt)
+    {
+        if (DateTimeOffset.UtcNow - batchStartedAt > DownloadMonitorBatchTiming.MaxBatchLifecycle)
+        {
+            logger.LogWarning(
+                "Sending final download monitor status email for batch {BatchStartedAt:u} after max lifecycle elapsed.",
+                batchStartedAt);
+            await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+            return;
+        }
+
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var interval = Math.Clamp(schedulerOptions.Value.StaggerIntervalMinutes, 1, 60);
+        var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
+        if (sources.Count == 0)
+        {
+            return;
+        }
+
+        var remaining = DownloadMonitorBatchTiming.MaxBatchLifecycle - (DateTimeOffset.UtcNow - batchStartedAt);
+        var waitBudget = remaining < DownloadMonitorBatchTiming.DeferredEmailRetryInterval * 2
+            ? remaining
+            : TimeSpan.FromMinutes(30);
+
+        var allSettled = await DownloadMonitorBatchOutcomeHelper.WaitForSourcesSettledAsync(
+                db,
+                sources.Select(s => s.Id).ToList(),
+                batchStartedAt,
+                waitBudget,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        if (allSettled)
+        {
+            await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+            return;
+        }
+
+        if (attempt + 1 >= DownloadMonitorBatchTiming.MaxDeferredEmailAttempts)
+        {
+            logger.LogWarning(
+                "Download monitor batch {BatchStartedAt:u} still not fully settled after deferred email attempts; sending best-effort status email.",
+                batchStartedAt);
+            await SendCompletedBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+            return;
+        }
+
+        logger.LogInformation(
+            "Download monitor batch {BatchStartedAt:u} not fully settled; deferring status email (attempt {Attempt}).",
+            batchStartedAt,
+            attempt + 1);
+
+        BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+            HangfireQueueOptions.Names.Email,
+            j => j.SendCompletedBatchStatusEmailWhenReadyAsync(batchStartedAt, attempt + 1),
+            DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
     }
 
     private void ScheduleSourceDownload(NewsSource source, TimeSpan delay)
