@@ -1,4 +1,6 @@
 using MIP.Aws.Application.Abstractions;
+using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Features.AutoAiRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +9,11 @@ namespace MIP.Aws.Infrastructure.Operator;
 
 public static class DownloadMonitorBatchOutcomeHelper
 {
+    public static bool IsAutoRecoveryInProgressStatus(DownloadJobStatus status) =>
+        status is DownloadJobStatus.AutoAiRecoveryAnalyzing
+            or DownloadJobStatus.AutoAiRecoveryApplying
+            or DownloadJobStatus.AutoAiRecoveryRetrying;
+
     public static bool IsTerminalDownloadStatus(DownloadJobStatus status) =>
         status is DownloadJobStatus.Succeeded
             or DownloadJobStatus.SuccessWithAutoAiRecovery
@@ -19,6 +26,9 @@ public static class DownloadMonitorBatchOutcomeHelper
     public static bool IsSuccessfulDownloadStatus(DownloadJobStatus status) =>
         status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery;
 
+    /// <summary>
+    /// True when the source has a final outcome for this batch, including after required auto AI recovery finishes.
+    /// </summary>
     public static async Task<bool> IsSourceSettledAsync(
         IApplicationDbContext db,
         Guid sourceId,
@@ -36,10 +46,130 @@ public static class DownloadMonitorBatchOutcomeHelper
             return true;
         }
 
+        if (await HasIncompleteAutoRecoveryRunSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return false;
+        }
+
         var latestJob = await GetLatestJobSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
             .ConfigureAwait(false);
 
-        return latestJob is not null && IsTerminalDownloadStatus(latestJob.Status);
+        if (latestJob is null)
+        {
+            return false;
+        }
+
+        if (IsAutoRecoveryInProgressStatus(latestJob.Status))
+        {
+            return false;
+        }
+
+        if (latestJob.Status == DownloadJobStatus.Failed
+            && !await IsRequiredAutoRecoveryCompleteAsync(db, latestJob, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        return IsTerminalDownloadStatus(latestJob.Status);
+    }
+
+    /// <summary>All monitored sources settled, including any in-flight or pending auto AI recovery.</summary>
+    public static async Task<bool> IsBatchReadyForStatusEmailAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        foreach (var sourceId in sourceIds)
+        {
+            if (!await IsSourceSettledAsync(db, sourceId, batchStartedAt, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return sourceIds.Count > 0;
+    }
+
+    public static async Task<bool> IsRequiredAutoRecoveryCompleteAsync(
+        IApplicationDbContext db,
+        DownloadJob failedJob,
+        CancellationToken cancellationToken)
+    {
+        if (failedJob.Status != DownloadJobStatus.Failed)
+        {
+            return true;
+        }
+
+        if (!AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(failedJob))
+        {
+            return true;
+        }
+
+        var settings = await GetEffectiveAutoRecoverySettingsAsync(db, cancellationToken).ConfigureAwait(false);
+        if (!settings.Enabled
+            || !AutoAiRecoveryEligibility.ShouldRunForTrigger(failedJob.Trigger, settings))
+        {
+            return true;
+        }
+
+        var source = await db.NewsSources.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == failedJob.NewsSourceId && !s.IsDeleted, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (source is null || !AutoAiRecoveryEligibility.IsSourceTypeAllowed(source, settings))
+        {
+            return true;
+        }
+
+        var run = await db.AutoAiRecoveryRuns.AsNoTracking()
+            .Where(r => !r.IsDeleted && r.FailedDownloadJobId == failedJob.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (run is null)
+        {
+            return false;
+        }
+
+        return run.CompletedAt is not null;
+    }
+
+    private static async Task<bool> HasIncompleteAutoRecoveryRunSinceBatchAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var notBefore = batchStartedAt.AddMinutes(-1);
+
+        return await db.AutoAiRecoveryRuns.AsNoTracking()
+            .AnyAsync(
+                r => !r.IsDeleted
+                     && r.NewsSourceId == sourceId
+                     && r.CreatedAt >= notBefore
+                     && r.CompletedAt == null,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<AutoAiDownloadRecoveryOptions> GetEffectiveAutoRecoverySettingsAsync(
+        IApplicationDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var row = await db.AutoAiDownloadRecoverySettings.AsNoTracking()
+            .Where(s => !s.IsDeleted)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new AutoAiDownloadRecoveryOptions
+        {
+            Enabled = row?.Enabled ?? true,
+            RunAfterScheduledFailure = row?.RunAfterScheduledFailure ?? true,
+            RunAfterManualFailure = row?.RunAfterManualFailure ?? true
+        };
     }
 
     public static async Task<bool> IsSourceSuccessfulAsync(

@@ -102,7 +102,31 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             }
         }
 
-        return monitoredSourceIds.Count > 0;
+        return monitoredSourceIds.Count > 0
+               && !await HasIncompleteAutoRecoveryForMonitoredSourcesAsync(
+                       db,
+                       monitoredSourceIds,
+                       batchStartedAt,
+                       cancellationToken)
+                   .ConfigureAwait(false);
+    }
+
+    private static async Task<bool> HasIncompleteAutoRecoveryForMonitoredSourcesAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var notBefore = batchStartedAt.AddMinutes(-1);
+
+        return await db.AutoAiRecoveryRuns.AsNoTracking()
+            .AnyAsync(
+                r => !r.IsDeleted
+                     && sourceIds.Contains(r.NewsSourceId)
+                     && r.CreatedAt >= notBefore
+                     && r.CompletedAt == null,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task<bool> ShouldSendStatusEmailAsync(

@@ -9,8 +9,9 @@ internal static class DownloadMonitorBatchTiming
     internal static readonly TimeSpan BatchWaitGracePeriod = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan EmailSendBuffer = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan DeferredEmailRetryInterval = TimeSpan.FromMinutes(2);
-    internal static readonly TimeSpan MaxBatchLifecycle = TimeSpan.FromHours(2);
-    internal static readonly int MaxDeferredEmailAttempts = 8;
+    /// <summary>Upper bound for deferred status-email polling (auto recovery may extend past batch download target).</summary>
+    internal static readonly TimeSpan MaxStatusEmailWaitLifecycle = TimeSpan.FromHours(3);
+    internal static readonly int MaxDeferredEmailAttempts = 90;
 
     /// <summary>
     /// How long the batch orchestrator waits for all sources to reach a terminal state before deferring email.
