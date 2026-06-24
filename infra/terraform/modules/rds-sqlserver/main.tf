@@ -62,6 +62,10 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot     = true
   license_model           = "license-included"
   tags                    = var.tags
+
+  lifecycle {
+    ignore_changes = [instance_class, allocated_storage]
+  }
 }
 
 output "endpoint" { value = aws_db_instance.this.address }

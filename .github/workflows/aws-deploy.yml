@@ -117,7 +117,7 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_bedrock_region: ${{ vars.BEDROCK_REGION || env.AWS_REGION }}
           TF_VAR_bedrock_model_id: ${{ vars.BEDROCK_MODEL_ID }}
-        run: terraform plan -out=tfplan
+        run: terraform plan -var-file=terraform.aws-dev.tfvars -out=tfplan
 
       - name: Terraform Apply
         if: github.event.inputs.apply_terraform == 'true'
