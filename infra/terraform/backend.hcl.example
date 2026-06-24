@@ -1,0 +1,7 @@
+# Copy to backend.hcl (same folder) or pass these flags to: terraform init -backend-config=backend.hcl
+# State lives in the existing MIP S3 bucket so local CLI and GitHub Actions share one state file.
+
+bucket  = "aviaws-mip-eun1-dev-9094"
+key     = "mip/terraform/terraform.tfstate"
+region  = "eu-north-1"
+encrypt = true

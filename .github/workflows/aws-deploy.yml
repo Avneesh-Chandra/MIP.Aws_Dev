@@ -92,7 +92,14 @@ jobs:
       - name: Terraform Init
         if: github.event.inputs.apply_terraform == 'true'
         working-directory: infra/terraform
-        run: terraform init
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_VAR_mip_bucket_name || secrets.TF_VAR_MIP_BUCKET_NAME }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+            -backend-config="key=mip/terraform/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
 
       - name: Terraform Plan
         if: github.event.inputs.apply_terraform == 'true'
