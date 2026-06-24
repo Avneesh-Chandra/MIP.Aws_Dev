@@ -421,7 +421,6 @@ var app = builder.Build();
 
 
 await DatabaseBootstrap.ApplyDevelopmentDatabaseAsync(app.Environment, app.Services, app.Configuration).ConfigureAwait(false);
-await DatabaseBootstrap.ApplyProductionMigrationIfRequestedAsync(app.Environment, app.Services, app.Configuration).ConfigureAwait(false);
 
 
 
@@ -484,12 +483,12 @@ app.MapRazorComponents<App>()
 
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "MIP.Aws.Api" }))
-
-    .AllowAnonymous();
+    .AllowAnonymous()
+    .DisableAntiforgery();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "alive", service = "MIP.Aws.Api" }))
-
-    .AllowAnonymous();
+    .AllowAnonymous()
+    .DisableAntiforgery();
 
 
 
@@ -500,16 +499,6 @@ app.UseHangfireDashboard("/hangfire", new DashboardOptions
     Authorization = [new HangfireDashboardAuthorizationFilter()]
 
 });
-
-
-
-// Hangfire recurring jobs require a reachable SQL catalog (shared with EF on RDS Express).
-await DatabaseBootstrap.EnsureAuxiliarySqlCatalogAsync(app.Configuration).ConfigureAwait(false);
-
-using (var scope = app.Services.CreateScope())
-{
-    scope.ServiceProvider.GetRequiredService<IScheduledJobRegistry>().RegisterRecurringJobs();
-}
 
 
 

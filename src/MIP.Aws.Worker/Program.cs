@@ -11,11 +11,4 @@ builder.Services.AddMipAwsInfrastructure(builder.Configuration, builder.Environm
 
 var host = builder.Build();
 
-await DatabaseBootstrap.EnsureAuxiliarySqlCatalogAsync(builder.Configuration).ConfigureAwait(false);
-
-using (var scope = host.Services.CreateScope())
-{
-    scope.ServiceProvider.GetRequiredService<IScheduledJobRegistry>().RegisterRecurringJobs();
-}
-
 await host.RunAsync().ConfigureAwait(false);

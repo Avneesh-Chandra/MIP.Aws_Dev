@@ -46,6 +46,8 @@ public static class DependencyInjection
         services.AddHostedService<NewspaperCatalogSeedHostedService>();
         services.AddHostedService<AutoAiDownloadRecoverySettingsSeedHostedService>();
         services.AddHostedService<DarAlKhaleejPressReaderCredentialStartupSyncHostedService>();
+        services.AddHostedService<ProductionDatabaseMigrationHostedService>();
+        services.AddHostedService<HangfireRecurringJobsHostedService>();
 
         return services;
     }

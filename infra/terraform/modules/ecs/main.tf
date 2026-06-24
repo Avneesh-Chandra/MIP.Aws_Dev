@@ -147,8 +147,8 @@ resource "aws_ecs_task_definition" "api" {
         command     = ["CMD-SHELL", "wget --spider -q http://localhost:8080/health/live || exit 1"]
         interval    = 30
         timeout     = 10
-        retries     = 3
-        startPeriod = 240
+        retries     = 5
+        startPeriod = 420
       }
     }
   ])
@@ -229,7 +229,7 @@ resource "aws_ecs_service" "api" {
   task_definition                   = aws_ecs_task_definition.api.arn
   desired_count                     = var.api_desired_count
   launch_type                       = "FARGATE"
-  health_check_grace_period_seconds = 300
+  health_check_grace_period_seconds = 420
 
   network_configuration {
     subnets          = var.subnet_ids
