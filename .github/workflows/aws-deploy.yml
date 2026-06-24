@@ -33,7 +33,19 @@ jobs:
             echo "Use the same IAM access key as your local mip-dev profile (IAM → Users → Security credentials → Create access key)."
             exit 1
           fi
-          echo "AWS secrets present."
+          missing=""
+          if [ -z "${{ secrets.TF_VAR_db_username }}" ]; then missing="$missing TF_VAR_db_username"; fi
+          if [ -z "${{ secrets.TF_VAR_db_password }}" ]; then missing="$missing TF_VAR_db_password"; fi
+          if [ -z "${{ secrets.TF_VAR_mip_bucket_name }}" ]; then missing="$missing TF_VAR_mip_bucket_name"; fi
+          if [ -z "${{ secrets.TF_VAR_jwt_signing_key }}" ]; then missing="$missing TF_VAR_jwt_signing_key"; fi
+          if [ -z "${{ secrets.TF_VAR_identity_default_admin_password }}" ]; then missing="$missing TF_VAR_identity_default_admin_password"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing GitHub Actions secrets:$missing"
+            echo "Add them under Settings → Secrets and variables → Actions → Repository secrets."
+            echo "TF_VAR_identity_default_admin_password must match identity_default_admin_password in infra/terraform/terraform.tfvars."
+            exit 1
+          fi
+          echo "AWS and Terraform secrets present."
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -86,11 +98,13 @@ jobs:
         if: github.event.inputs.apply_terraform == 'true'
         working-directory: infra/terraform
         env:
+          TF_INPUT: "0"
           TF_VAR_db_username: ${{ secrets.TF_VAR_db_username }}
           TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
           TF_VAR_mip_bucket_name: ${{ secrets.TF_VAR_mip_bucket_name }}
           TF_VAR_ses_sender_email: ${{ secrets.TF_VAR_ses_sender_email }}
           TF_VAR_jwt_signing_key: ${{ secrets.TF_VAR_jwt_signing_key }}
+          TF_VAR_identity_default_admin_password: ${{ secrets.TF_VAR_identity_default_admin_password }}
           TF_VAR_api_image_tag: ${{ env.IMAGE_TAG }}
           TF_VAR_worker_image_tag: ${{ env.IMAGE_TAG }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
