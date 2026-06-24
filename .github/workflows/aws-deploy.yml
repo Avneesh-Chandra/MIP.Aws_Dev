@@ -12,7 +12,7 @@ on:
           - "false"
           - "true"
       image_tag:
-        description: "Docker image tag"
+        description: "Docker image tag (use 'latest' to deploy this commit SHA)"
         required: false
         default: "latest"
 
@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+      IMAGE_TAG: ${{ (github.event.inputs.image_tag == 'latest' || github.event.inputs.image_tag == '') && github.sha || github.event.inputs.image_tag }}
     steps:
       - uses: actions/checkout@v6
 
@@ -53,23 +54,25 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           ECR_REPOSITORY: mip-aws-dev-api
-          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           docker build -f Dockerfile.Api \
             --build-arg SOURCE_REVISION=${{ github.sha }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Build and push Worker image
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           ECR_REPOSITORY: mip-aws-dev-worker
-          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           docker build -f Dockerfile.Worker \
             --build-arg SOURCE_REVISION=${{ github.sha }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - uses: hashicorp/setup-terraform@v4
         if: github.event.inputs.apply_terraform == 'true'
@@ -88,8 +91,8 @@ jobs:
           TF_VAR_mip_bucket_name: ${{ secrets.TF_VAR_mip_bucket_name }}
           TF_VAR_ses_sender_email: ${{ secrets.TF_VAR_ses_sender_email }}
           TF_VAR_jwt_signing_key: ${{ secrets.TF_VAR_jwt_signing_key }}
-          TF_VAR_api_image_tag: ${{ github.event.inputs.image_tag }}
-          TF_VAR_worker_image_tag: ${{ github.event.inputs.image_tag }}
+          TF_VAR_api_image_tag: ${{ env.IMAGE_TAG }}
+          TF_VAR_worker_image_tag: ${{ env.IMAGE_TAG }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_bedrock_region: ${{ vars.BEDROCK_REGION || env.AWS_REGION }}
           TF_VAR_bedrock_model_id: ${{ vars.BEDROCK_MODEL_ID }}

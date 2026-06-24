@@ -41,6 +41,7 @@
             <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Large" Color="Color.Primary" />
             <MudText Typo="Typo.h4" Style="font-weight:700;">Download Monitor</MudText>
             <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">Newspaper acquisition supervision</MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">Build @AppBuildId</MudChip>
             <MudSpacer />
             <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Monitor date" Variant="Variant.Outlined"
                            Margin="Margin.Dense" MaxDate="DateTime.Today" />
@@ -409,6 +410,31 @@
     private DownloadMonitorWorkloadSnapshot? _workloads;
     private DateTimeOffset? _batchStartedAt;
     private CancellationTokenSource? _pollCts;
+    private static readonly string AppBuildId = ResolveAppBuildId();
+
+    private static string ResolveAppBuildId()
+    {
+        var revision = Environment.GetEnvironmentVariable("SOURCE_REVISION");
+        if (!string.IsNullOrWhiteSpace(revision))
+        {
+            return revision.Length <= 8 ? revision : revision[..8];
+        }
+
+        var informational = typeof(DownloadMonitorPanel).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()
+            ?.InformationalVersion;
+
+        if (string.IsNullOrWhiteSpace(informational))
+        {
+            return "local";
+        }
+
+        var plus = informational.IndexOf('+', StringComparison.Ordinal);
+        var hash = plus >= 0 ? informational[(plus + 1)..] : informational;
+        return hash.Length <= 8 ? hash : hash[..8];
+    }
 
     protected override async Task OnInitializedAsync()
     {

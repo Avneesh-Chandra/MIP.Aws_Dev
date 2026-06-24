@@ -131,6 +131,12 @@ public static class DownloadMonitorBatchOutcomeHelper
 
         if (run is null)
         {
+            var failedAt = failedJob.CompletedAt ?? failedJob.CreatedAt;
+            if (DateTimeOffset.UtcNow - failedAt > TimeSpan.FromMinutes(20))
+            {
+                return true;
+            }
+
             return false;
         }
 

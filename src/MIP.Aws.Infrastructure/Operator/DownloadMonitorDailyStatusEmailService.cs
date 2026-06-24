@@ -1,53 +1,28 @@
 using MIP.Aws.Application.Abstractions.Operator;
-
 using MIP.Aws.Application.Abstractions.Reporting;
-
 using MIP.Aws.Application.Configuration;
-
 using Microsoft.Extensions.Logging;
-
-using Microsoft.Extensions.Options;
-
-
 
 namespace MIP.Aws.Infrastructure.Operator;
 
-
-
 public sealed class DownloadMonitorDailyStatusEmailService(
-
     IOperatorDownloadMonitorService monitorService,
-
     IReportEmailSender emailSender,
-
     IDownloadMonitorStatusSummaryService summaryService,
-
     IMailSettingsService mailSettings,
-
     ILogger<DownloadMonitorDailyStatusEmailService> logger) : IDownloadMonitorDailyStatusEmailService
-
 {
-
-    public async Task SendDailyStatusEmailAsync(
+    public async Task<bool> SendDailyStatusEmailAsync(
         DateOnly? monitorDate,
         CancellationToken cancellationToken,
         IReadOnlyList<string>? recipientOverride = null)
-
     {
-
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
-
         if (!scheduler.StatusEmailEnabled)
-
         {
-
             logger.LogInformation("Download monitor status email skipped (StatusEmailEnabled=false).");
-
-            return;
-
+            return false;
         }
-
-
 
         var recipients = recipientOverride is { Count: > 0 }
             ? recipientOverride
@@ -55,7 +30,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         if (recipients.Count == 0)
         {
             logger.LogWarning("Download monitor status email skipped: StatusEmailRecipient is not configured.");
-            return;
+            return false;
         }
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
@@ -75,26 +50,15 @@ public sealed class DownloadMonitorDailyStatusEmailService(
                 "Download monitor status email sent to {Recipient} for {Date}.",
                 string.Join(", ", recipients),
                 date);
-
+            return true;
         }
 
-        else
-
-        {
-
-            logger.LogWarning(
-
-                "Download monitor status email failed for {Date}: {Error}",
-
-                date,
-
-                send.ErrorMessage ?? send.Outcome.ToString());
-
-        }
-
+        logger.LogWarning(
+            "Download monitor status email failed for {Date}: {Error}",
+            date,
+            send.ErrorMessage ?? send.Outcome.ToString());
+        return false;
     }
-
-
 
     private static string ResolvePortalBaseUrl(string? configured) =>
         string.IsNullOrWhiteSpace(configured)
@@ -108,4 +72,3 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 }
-

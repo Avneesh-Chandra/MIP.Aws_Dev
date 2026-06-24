@@ -59,6 +59,16 @@ public sealed class UpdateNewsSourceCommandHandler(IApplicationDbContext db, INe
             try
             {
                 await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await DarAlKhaleejPressReaderCredentialSync.MirrorToSiblingEditionAsync(
+                        db,
+                        entity,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (db is DbContext mirrorContext && mirrorContext.ChangeTracker.HasChanges())
+                {
+                    await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 return Unit.Value;
             }
             catch (DbUpdateConcurrencyException) when (attempt < 2)

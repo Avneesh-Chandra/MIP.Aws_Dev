@@ -229,15 +229,25 @@ public sealed class DownloadMonitorScheduledJobs(
 
         try
         {
-            await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
-            await DownloadMonitorBatchStatusEmailCoordinator.MarkStatusEmailSentAsync(
-                    db,
-                    batchStartedAt,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            logger.LogInformation(
-                "Download monitor status email sent for completed batch started at {BatchStartedAt:u}.",
-                batchStartedAt);
+            var sent = await email.SendDailyStatusEmailAsync(monitorDate, CancellationToken.None).ConfigureAwait(false);
+            if (sent)
+            {
+                await DownloadMonitorBatchStatusEmailCoordinator.MarkStatusEmailSentAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                logger.LogInformation(
+                    "Download monitor status email sent for completed batch started at {BatchStartedAt:u}.",
+                    batchStartedAt);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Download monitor status email was not delivered for batch started at {BatchStartedAt:u}; will retry on next deferred attempt.",
+                    batchStartedAt);
+                throw new InvalidOperationException("Download monitor status email was not delivered.");
+            }
         }
         catch (Exception ex)
         {

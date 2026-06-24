@@ -8,7 +8,11 @@ public sealed record SourcePageEditionDateCheck(
     string? ExtractedSnippet,
     string? FailureMessage)
 {
-    public bool BlocksDownload => WasChecked && !Passed;
+    /// <summary>Only a confirmed date mismatch blocks download; unparseable headers log a warning only.</summary>
+    public bool BlocksDownload => ParsedEditionDate is DateOnly parsed
+                                    && parsed != ExpectedEditionDate;
+
+    public bool IsVerifiedMismatch => BlocksDownload;
 
     public static SourcePageEditionDateCheck Skipped(DateOnly expected) =>
         new(false, true, expected, null, null, null);
@@ -34,9 +38,9 @@ public sealed record SourcePageEditionDateCheck(
     public static SourcePageEditionDateCheck Unparseable(DateOnly expected, string? snippet) =>
         new(
             true,
-            false,
+            true,
             expected,
             null,
             snippet,
-            "Could not read the edition date from the source page header to verify today's newspaper.");
+            "Could not read the edition date from the source page header; download was allowed without date verification.");
 }

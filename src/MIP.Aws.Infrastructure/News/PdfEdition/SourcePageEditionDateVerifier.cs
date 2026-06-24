@@ -151,6 +151,40 @@ public static class SourcePageEditionDatePageVerifier
             // fall through
         }
 
+        if (SourcePageEditionDateProfiles.IsPressReaderSource(source))
+        {
+            try
+            {
+                var title = await page.TitleAsync().ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    return title;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            try
+            {
+                var headerText = await page.EvaluateAsync<string>(
+                        @"() => {
+                            const nav = document.querySelector('header, nav, [role=""banner""]');
+                            return nav ? nav.innerText : (document.body?.innerText ?? '').slice(0, 4000);
+                        }")
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(headerText))
+                {
+                    return headerText;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         try
         {
             return await page.Locator("body").InnerTextAsync().ConfigureAwait(false);
@@ -192,6 +226,10 @@ internal static class SourcePageEditionDateProfiles
                || host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase)
                || host.Contains("pressreader.com", StringComparison.OrdinalIgnoreCase);
     }
+
+    public static bool IsPressReaderSource(NewsSource source) =>
+        string.Equals(source.ConnectorKey, DarAlKhaleejPressReaderBaseline.ConnectorKey, StringComparison.OrdinalIgnoreCase)
+        || HostFrom(source).Contains("pressreader.com", StringComparison.OrdinalIgnoreCase);
 
     public static Uri? ResolveVerificationUrl(NewsSource source)
     {

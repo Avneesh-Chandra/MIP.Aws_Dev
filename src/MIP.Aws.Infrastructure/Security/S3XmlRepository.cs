@@ -60,9 +60,22 @@ public sealed class S3XmlRepository : IXmlRepository
             }
             while (response.IsTruncated);
         }
+        catch (AmazonS3Exception ex) when (ex.ErrorCode is "AccessDenied" or "AllAccessDisabled")
+        {
+            _logger.LogError(
+                ex,
+                "Access denied loading DataProtection keys from s3://{Bucket}/{Prefix}. Portal credentials cannot be decrypted until this is fixed.",
+                _bucket,
+                _prefix);
+            throw;
+        }
         catch (AmazonS3Exception ex)
         {
-            _logger.LogWarning(ex, "Could not list DataProtection keys from s3://{Bucket}/{Prefix}", _bucket, _prefix);
+            _logger.LogError(
+                ex,
+                "Could not list DataProtection keys from s3://{Bucket}/{Prefix}",
+                _bucket,
+                _prefix);
         }
 
         return elements;

@@ -45,6 +45,7 @@ public static class DependencyInjection
         services.AddHostedService<NewsSourceTemplateSeedHostedService>();
         services.AddHostedService<NewspaperCatalogSeedHostedService>();
         services.AddHostedService<AutoAiDownloadRecoverySettingsSeedHostedService>();
+        services.AddHostedService<DarAlKhaleejPressReaderCredentialStartupSyncHostedService>();
 
         return services;
     }
