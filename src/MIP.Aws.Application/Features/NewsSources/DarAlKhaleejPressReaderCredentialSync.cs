@@ -30,15 +30,17 @@ public static class DarAlKhaleejPressReaderCredentialSync
             return;
         }
 
-        var siblings = await db.NewsSources
+        var candidates = await db.NewsSources
             .Include(s => s.Credential)
             .Where(s => !s.IsDeleted
                         && s.Id != updated.Id
-                        && s.SourceType == NewsSourceType.WebPortalLogin
-                        && (s.EditionUrl != null && s.EditionUrl.Contains("pressreader.com", StringComparison.OrdinalIgnoreCase)
-                            || s.BaseUrl != null && s.BaseUrl.Contains("pressreader.com", StringComparison.OrdinalIgnoreCase)))
+                        && s.SourceType == NewsSourceType.WebPortalLogin)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        var siblings = candidates
+            .Where(s => ContainsPressReaderHost(s.EditionUrl) || ContainsPressReaderHost(s.BaseUrl))
+            .ToList();
 
         foreach (var sibling in siblings)
         {
@@ -69,4 +71,8 @@ public static class DarAlKhaleejPressReaderCredentialSync
             sibling.Credential.ModifiedAt = DateTimeOffset.UtcNow;
         }
     }
+
+    private static bool ContainsPressReaderHost(string? url) =>
+        !string.IsNullOrWhiteSpace(url)
+        && url.Contains("pressreader.com", StringComparison.OrdinalIgnoreCase);
 }

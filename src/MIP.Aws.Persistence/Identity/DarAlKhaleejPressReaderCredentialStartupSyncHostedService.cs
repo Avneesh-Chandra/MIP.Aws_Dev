@@ -17,44 +17,51 @@ public sealed class DarAlKhaleejPressReaderCredentialStartupSyncHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-
-        var sources = await db.NewsSources
-            .Include(s => s.Credential)
-            .Where(s => !s.IsDeleted
-                        && s.SourceType == NewsSourceType.WebPortalLogin
-                        && s.Credential != null
-                        && s.Credential.ProtectedCredentialPayload != null)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var mirrored = 0;
-        foreach (var source in sources)
+        try
         {
-            if (!DarAlKhaleejPressReaderBaseline.IsPressReaderSource(
-                    source.ConnectorKey,
-                    source.PortalStrategyKey,
-                    source.EditionUrl,
-                    source.BaseUrl))
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+
+            var sources = await db.NewsSources
+                .Include(s => s.Credential)
+                .Where(s => !s.IsDeleted
+                            && s.SourceType == NewsSourceType.WebPortalLogin
+                            && s.Credential != null
+                            && s.Credential.ProtectedCredentialPayload != null)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var mirrored = 0;
+            foreach (var source in sources)
             {
-                continue;
+                if (!DarAlKhaleejPressReaderBaseline.IsPressReaderSource(
+                        source.ConnectorKey,
+                        source.PortalStrategyKey,
+                        source.EditionUrl,
+                        source.BaseUrl))
+                {
+                    continue;
+                }
+
+                await DarAlKhaleejPressReaderCredentialSync.MirrorToSiblingEditionAsync(
+                        db,
+                        source,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                mirrored++;
             }
 
-            await DarAlKhaleejPressReaderCredentialSync.MirrorToSiblingEditionAsync(
-                    db,
-                    source,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            mirrored++;
+            if (db is DbContext context && context.ChangeTracker.HasChanges())
+            {
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                logger.LogInformation(
+                    "Mirrored Dar Al Khaleej PressReader credentials from {Count} source(s) to sibling edition(s).",
+                    mirrored);
+            }
         }
-
-        if (db is DbContext context && context.ChangeTracker.HasChanges())
+        catch (Exception ex)
         {
-            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            logger.LogInformation(
-                "Mirrored Dar Al Khaleej PressReader credentials from {Count} source(s) to sibling edition(s).",
-                mirrored);
+            logger.LogError(ex, "PressReader credential startup sync failed; worker will continue starting.");
         }
     }
 
