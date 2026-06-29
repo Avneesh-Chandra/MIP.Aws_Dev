@@ -257,11 +257,13 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 };
             }
 
-            if (status == SourceRecoveryAttemptStatus.RetryEnqueued
-                && resultSummary == "Download retry in progress."
-                && actual == 100)
+            if (status == SourceRecoveryAttemptStatus.Succeeded && actual == 100)
             {
                 resultSummary = "Download retry succeeded; candidate configuration activated.";
+            }
+            else if (status == SourceRecoveryAttemptStatus.Failed && actual == 0)
+            {
+                resultSummary ??= a.ResultSummary ?? autoAiRun?.ResultSummary ?? "Download retry failed.";
             }
 
             return new SourceRecoveryHistoryItemDto(

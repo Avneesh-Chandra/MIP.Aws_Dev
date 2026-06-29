@@ -135,22 +135,24 @@
     }
 
     private static bool IsAiRecoverySuccess(SourceRecoveryHistoryItemDto item) =>
-        item.Status == SourceRecoveryAttemptStatus.Succeeded;
+        ResolveDisplayStatus(item) == SourceRecoveryAttemptStatus.Succeeded;
 
     private static bool IsAutoAiRecoveryFailure(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
-        && item.Status is SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack;
+        && ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Failed
+            or SourceRecoveryAttemptStatus.RolledBack;
 
     private static bool ShowsRecoveryDetails(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
             ? IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item)
-            : item.Status is SourceRecoveryAttemptStatus.Succeeded
+            : ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Succeeded
                 or SourceRecoveryAttemptStatus.Failed
                 or SourceRecoveryAttemptStatus.RolledBack
                 or SourceRecoveryAttemptStatus.RetryEnqueued;
 
     private static Color RecoveryDetailsInfoColor(SourceRecoveryHistoryItemDto item) =>
-        item.Status is SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack
+        ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Failed
+            or SourceRecoveryAttemptStatus.RolledBack
             || IsAutoAiRecoveryFailure(item)
             ? Color.Error
             : Color.Success;
@@ -201,31 +203,55 @@
             ? ViewAutoAiRecoveryFailureDetailsAsync(item)
             : ViewAiRecoverySuccessDetailsAsync(item);
 
-    private static string FormatStatus(SourceRecoveryHistoryItemDto item) =>
-        item.Status switch
+    private static SourceRecoveryAttemptStatus ResolveDisplayStatus(SourceRecoveryHistoryItemDto item)
+    {
+        if (item.Status == SourceRecoveryAttemptStatus.RetryEnqueued)
+        {
+            return item.ActualSuccessPercent switch
+            {
+                100 => SourceRecoveryAttemptStatus.Succeeded,
+                0 => SourceRecoveryAttemptStatus.Failed,
+                _ => item.Status
+            };
+        }
+
+        return item.Status;
+    }
+
+    private static string FormatStatus(SourceRecoveryHistoryItemDto item)
+    {
+        var status = ResolveDisplayStatus(item);
+        return status switch
         {
             SourceRecoveryAttemptStatus.Succeeded => FormatSuccessStatus(item),
             SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack when item.IsAutomatic
                 => FailedAfterAutoAiRecovery,
-            _ => System.Text.RegularExpressions.Regex.Replace(item.Status.ToString(), "([a-z])([A-Z])", "$1 $2")
+            SourceRecoveryAttemptStatus.Failed => "Failed",
+            _ => System.Text.RegularExpressions.Regex.Replace(status.ToString(), "([a-z])([A-Z])", "$1 $2")
         };
+    }
 
-    private static Color StatusColor(SourceRecoveryAttemptStatus status) => status switch
+    private static Color StatusColor(SourceRecoveryHistoryItemDto item)
     {
-        SourceRecoveryAttemptStatus.Succeeded => Color.Success,
-        SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack => Color.Error,
-        SourceRecoveryAttemptStatus.PendingAdminApproval => Color.Warning,
-        _ => Color.Info
-    };
+        if (IsAutoAiRecoveryFailure(item))
+        {
+            return Color.Error;
+        }
 
-    private static Color StatusColor(SourceRecoveryHistoryItemDto item) =>
-        IsAutoAiRecoveryFailure(item) ? Color.Error : StatusColor(item.Status);
+        return ResolveDisplayStatus(item) switch
+        {
+            SourceRecoveryAttemptStatus.Succeeded => Color.Success,
+            SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack => Color.Error,
+            SourceRecoveryAttemptStatus.PendingAdminApproval => Color.Warning,
+            _ => Color.Info
+        };
+    }
 
     private static string FormatActualSuccessPercent(SourceRecoveryHistoryItemDto item) =>
         item.ActualSuccessPercent switch
         {
             int actual => $"{actual}%",
-            null when item.Status == SourceRecoveryAttemptStatus.RetryEnqueued => "pending",
+            null when ResolveDisplayStatus(item) == SourceRecoveryAttemptStatus.RetryEnqueued => "pending",
             _ => "—"
         };
 
