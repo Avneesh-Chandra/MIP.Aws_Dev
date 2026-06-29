@@ -91,7 +91,18 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
         GetSourceRecoveryHistoryQuery request,
         CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+        if (request.ReconcileAttempts)
+        {
+            try
+            {
+                await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // History should still load if reconciliation fails for one attempt.
+            }
+        }
 
         var attemptsQuery = db.SourceRecoveryAttempts.AsNoTracking()
             .Include(a => a.NewsSource)
@@ -147,6 +158,24 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 .ToDictionaryAsync(j => j.Id, j => j.Status, cancellationToken)
                 .ConfigureAwait(false);
 
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var editionDayStart = new DateTimeOffset(editionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var editionDayEnd = editionDayStart.AddDays(1);
+        var sourceIds = attempts.Select(a => a.NewsSourceId).Distinct().ToList();
+        var sourcesWithEditionToday = sourceIds.Count == 0
+            ? new HashSet<Guid>()
+            : await db.PdfEditionDownloads.AsNoTracking()
+                .Where(x => !x.IsDeleted
+                            && sourceIds.Contains(x.NewsSourceId)
+                            && (x.Status == PdfEditionStatus.Downloaded
+                                || x.Status == PdfEditionStatus.SkippedDuplicate
+                                || x.Status == PdfEditionStatus.Validated)
+                            && (x.EditionDate == editionDate
+                                || (x.DownloadedAt >= editionDayStart && x.DownloadedAt < editionDayEnd)))
+                .Select(x => x.NewsSourceId)
+                .ToHashSetAsync(cancellationToken)
+                .ConfigureAwait(false);
+
         return attempts.Select(a =>
         {
             IReadOnlyList<SourceRecoveryOptionDto> options;
@@ -170,7 +199,9 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 ? "Automatic AI Recovery"
                 : a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
                     ? user.Email ?? user.UserName ?? uid.ToString()
-                    : "Manual AI Recovery";
+                    : a.AppliedAt is not null
+                        ? "Manual AI Recovery"
+                        : "—";
 
             autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
             var resultSummary = a.ResultSummary
@@ -195,6 +226,14 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 };
             }
 
+            if (actual is null
+                && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
+                && a.AppliedAt is not null
+                && sourcesWithEditionToday.Contains(a.NewsSourceId))
+            {
+                actual = 100;
+            }
+
             if (actual is null && autoAiRun?.CompletedAt is not null)
             {
                 actual = autoAiRun.Status switch
@@ -207,6 +246,24 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 };
             }
 
+            var status = a.Status;
+            if (status == SourceRecoveryAttemptStatus.RetryEnqueued)
+            {
+                status = actual switch
+                {
+                    100 => SourceRecoveryAttemptStatus.Succeeded,
+                    0 => SourceRecoveryAttemptStatus.Failed,
+                    _ => status
+                };
+            }
+
+            if (status == SourceRecoveryAttemptStatus.RetryEnqueued
+                && resultSummary == "Download retry in progress."
+                && actual == 100)
+            {
+                resultSummary = "Download retry succeeded; candidate configuration activated.";
+            }
+
             return new SourceRecoveryHistoryItemDto(
                 a.Id,
                 a.NewsSourceId,
@@ -216,7 +273,7 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 a.FailureType,
                 title,
                 appliedBy,
-                a.Status,
+                status,
                 resultSummary,
                 predicted,
                 actual,

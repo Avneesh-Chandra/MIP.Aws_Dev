@@ -28,9 +28,15 @@ public sealed class OperatorDownloadMonitorService(
     IOptions<MailAutomationOptions> mailAutomation,
     ILogger<OperatorDownloadMonitorService> logger) : IOperatorDownloadMonitorService
 {
-    public async Task<DownloadMonitorDto> GetMonitorAsync(DateOnly? monitorDate, CancellationToken cancellationToken)
+    public async Task<DownloadMonitorDto> GetMonitorAsync(
+        DateOnly? monitorDate,
+        bool skipReconciliation,
+        CancellationToken cancellationToken)
     {
-        await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+        if (!skipReconciliation)
+        {
+            await recoveryOrchestrator.ReconcileAllAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var (dayStart, dayEnd) = DayBounds(date);

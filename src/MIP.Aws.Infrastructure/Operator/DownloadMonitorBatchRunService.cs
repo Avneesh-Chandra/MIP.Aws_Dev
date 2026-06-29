@@ -197,17 +197,17 @@ public sealed class DownloadMonitorBatchRunService(
         bool skipReconciliation,
         CancellationToken cancellationToken)
     {
-        await DownloadJobReconciliation.ReconcileStaleJobsAsync(
-                db,
-                recoveryOrchestrator,
-                autoAiEnqueue,
-                logger,
-                cancellationToken,
-                requeueDownloads: false)
-            .ConfigureAwait(false);
-
         if (!skipReconciliation)
         {
+            await DownloadJobReconciliation.ReconcileStaleJobsAsync(
+                    db,
+                    recoveryOrchestrator,
+                    autoAiEnqueue,
+                    logger,
+                    cancellationToken,
+                    requeueDownloads: false)
+                .ConfigureAwait(false);
+
             await recoveryOrchestrator.ReconcileUnfinalizedAttemptsAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -248,6 +248,10 @@ public sealed class DownloadMonitorBatchRunService(
         {
             latestJobBySource.TryAdd(job.NewsSourceId, job);
         }
+
+        var editionSatisfaction = await DownloadMonitorBatchOutcomeHelper
+            .LoadBatchEditionSatisfactionAsync(db, sourceIds, entry.StartedAt, cancellationToken)
+            .ConfigureAwait(false);
 
         var anyJobCreated = latestJobBySource.Count > 0;
         var pendingHangfire = HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds);
@@ -292,50 +296,48 @@ public sealed class DownloadMonitorBatchRunService(
             {
                 (state, activity) = DescribeJob(job);
             }
-            else if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
-                             db,
-                             source.Id,
-                             cancellationToken)
-                         .ConfigureAwait(false)
-                     || await DownloadMonitorBatchOutcomeHelper.HasSuccessfulPdfEditionSinceBatchAsync(
-                             db,
-                             source.Id,
-                             entry.StartedAt,
-                             cancellationToken)
-                         .ConfigureAwait(false))
+            else if (editionSatisfaction.HasTodaysEdition(source.Id)
+                     || editionSatisfaction.HasEditionSinceBatch(source.Id))
             {
                 state = "Success";
                 activity = "Today's edition already downloaded";
             }
+            else if (batchExpired)
+            {
+                failedCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    "Batch window expired before download ran",
+                    "Skipped"));
+                continue;
+            }
+            else if (batchStoppedExternally)
+            {
+                failedCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    entry.AbortedAt is not null
+                        ? "Cancelled by operator before download ran"
+                        : "Batch stopped before download ran",
+                    "Skipped"));
+                continue;
+            }
+            else if (elapsed > staggerWindow)
+            {
+                failedCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    "Not scheduled before batch ended",
+                    "Skipped"));
+                continue;
+            }
             else
             {
-                if (batchStoppedExternally)
-                {
-                    failedCount++;
-                    activities.Add(new DownloadMonitorBatchActivityResult(
-                        source.Name,
-                        entry.AbortedAt is not null
-                            ? "Cancelled by operator before download ran"
-                            : "Batch stopped before download ran",
-                        "Skipped"));
-                }
-                else if (elapsed > staggerWindow)
-                {
-                    failedCount++;
-                    activities.Add(new DownloadMonitorBatchActivityResult(
-                        source.Name,
-                        "Not scheduled before batch ended",
-                        "Skipped"));
-                }
-                else
-                {
-                    waitingCount++;
-                    activities.Add(new DownloadMonitorBatchActivityResult(
-                        source.Name,
-                        DescribeWaitingActivity(sourceIndex, interval, entry.StartedAt, elapsed, anyJobCreated),
-                        "Waiting"));
-                }
-
+                waitingCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    DescribeWaitingActivity(sourceIndex, interval, entry.StartedAt, elapsed, anyJobCreated),
+                    "Waiting"));
                 continue;
             }
 

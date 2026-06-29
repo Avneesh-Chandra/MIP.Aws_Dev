@@ -2,7 +2,9 @@ namespace MIP.Aws.Application.Abstractions.Operator;
 
 public interface IDownloadMonitorWorkloadService
 {
-    Task<DownloadMonitorWorkloadSnapshot> GetSnapshotAsync(CancellationToken cancellationToken);
+    Task<DownloadMonitorWorkloadSnapshot> GetSnapshotAsync(
+        bool skipReconciliation,
+        CancellationToken cancellationToken);
 
     Task<AbortDownloadMonitorWorkResult> AbortActiveWorkAsync(CancellationToken cancellationToken);
 }

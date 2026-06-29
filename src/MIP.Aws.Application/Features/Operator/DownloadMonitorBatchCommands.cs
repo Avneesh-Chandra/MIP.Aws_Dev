@@ -11,6 +11,7 @@ public sealed record GetDownloadMonitorBatchProgressQuery(
     bool SkipReconciliation = false)
     : IRequest<DownloadMonitorBatchProgressResult?>;
 
-public sealed record GetDownloadMonitorWorkloadQuery : IRequest<DownloadMonitorWorkloadSnapshot>;
+public sealed record GetDownloadMonitorWorkloadQuery(bool SkipReconciliation = true)
+    : IRequest<DownloadMonitorWorkloadSnapshot>;
 
 public sealed record AbortDownloadMonitorWorkCommand(Guid ActorUserId) : IRequest<AbortDownloadMonitorWorkResult>;

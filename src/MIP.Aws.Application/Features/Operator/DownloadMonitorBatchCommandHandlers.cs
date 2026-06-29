@@ -39,7 +39,7 @@ public sealed class GetDownloadMonitorWorkloadQueryHandler(IDownloadMonitorWorkl
     public Task<DownloadMonitorWorkloadSnapshot> Handle(
         GetDownloadMonitorWorkloadQuery request,
         CancellationToken cancellationToken) =>
-        service.GetSnapshotAsync(cancellationToken);
+        service.GetSnapshotAsync(request.SkipReconciliation, cancellationToken);
 }
 
 public sealed class AbortDownloadMonitorWorkCommandHandler(

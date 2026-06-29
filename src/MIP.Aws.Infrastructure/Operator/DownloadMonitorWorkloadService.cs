@@ -14,13 +14,15 @@ public sealed class DownloadMonitorWorkloadService(
     IDownloadMonitorBatchRunService batchRunService,
     ILogger<DownloadMonitorWorkloadService> logger) : IDownloadMonitorWorkloadService
 {
-    public async Task<DownloadMonitorWorkloadSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    public async Task<DownloadMonitorWorkloadSnapshot> GetSnapshotAsync(
+        bool skipReconciliation,
+        CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
 
         var batchProgress = await batchRunService
-            .GetProgressAsync(null, skipReconciliation: false, cancellationToken)
+            .GetProgressAsync(null, skipReconciliation, cancellationToken)
             .ConfigureAwait(false);
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);

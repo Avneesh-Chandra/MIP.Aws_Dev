@@ -378,6 +378,75 @@ public static class DownloadMonitorBatchOutcomeHelper
         return latestJob is not null && IsSuccessfulDownloadStatus(latestJob.Status);
     }
 
+    public sealed record BatchEditionSatisfactionSnapshot(
+        HashSet<Guid> TodaysEditionSourceIds,
+        HashSet<Guid> EditionSinceBatchSourceIds)
+    {
+        public bool HasTodaysEdition(Guid sourceId) => TodaysEditionSourceIds.Contains(sourceId);
+
+        public bool HasEditionSinceBatch(Guid sourceId) => EditionSinceBatchSourceIds.Contains(sourceId);
+    }
+
+    public static async Task<BatchEditionSatisfactionSnapshot> LoadBatchEditionSatisfactionAsync(
+        IApplicationDbContext db,
+        IReadOnlyCollection<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (sourceIds.Count == 0)
+        {
+            return new BatchEditionSatisfactionSnapshot([], []);
+        }
+
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dayStart = new DateTimeOffset(editionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+        var notBefore = batchStartedAt.AddMinutes(-1);
+
+        var todaysEditionSourceIds = await db.PdfEditionDownloads.AsNoTracking()
+            .Where(x => !x.IsDeleted
+                        && sourceIds.Contains(x.NewsSourceId)
+                        && (x.Status == PdfEditionStatus.Downloaded
+                            || x.Status == PdfEditionStatus.SkippedDuplicate
+                            || x.Status == PdfEditionStatus.Validated)
+                        && (x.EditionDate == editionDate
+                            || (x.DownloadedAt >= dayStart && x.DownloadedAt < dayEnd)))
+            .Select(x => x.NewsSourceId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var succeededJobSourceIds = await db.DownloadJobs.AsNoTracking()
+            .Where(j => !j.IsDeleted
+                        && sourceIds.Contains(j.NewsSourceId)
+                        && (j.Status == DownloadJobStatus.Succeeded
+                            || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery)
+                        && j.CompletedAt >= dayStart
+                        && j.CompletedAt < dayEnd
+                        && db.DownloadedFiles.Any(f => !f.IsDeleted && f.DownloadJobId == j.Id))
+            .Select(j => j.NewsSourceId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var editionSinceBatchSourceIds = await db.PdfEditionDownloads.AsNoTracking()
+            .Where(x => !x.IsDeleted
+                        && sourceIds.Contains(x.NewsSourceId)
+                        && x.EditionDate == editionDate
+                        && (x.Status == PdfEditionStatus.Downloaded
+                            || x.Status == PdfEditionStatus.SkippedDuplicate)
+                        && x.CreatedAt >= notBefore)
+            .Select(x => x.NewsSourceId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var todays = todaysEditionSourceIds
+            .Concat(succeededJobSourceIds)
+            .ToHashSet();
+        return new BatchEditionSatisfactionSnapshot(todays, editionSinceBatchSourceIds.ToHashSet());
+    }
+
     /// <summary>True when today's edition is already stored (any earlier batch today counts as satisfied).</summary>
     public static async Task<bool> HasTodaysDownloadedEditionAsync(
         IApplicationDbContext db,

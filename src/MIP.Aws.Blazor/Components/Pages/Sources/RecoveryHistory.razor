@@ -19,7 +19,7 @@
         <MudSpacer />
         <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Date" Variant="Variant.Outlined"
                        Margin="Margin.Dense" MaxDate="DateTime.Today" Clearable="true" />
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshAsync" Disabled="_loading">
             Refresh
         </MudButton>
     </MudStack>
@@ -104,21 +104,24 @@
     private DateTime? _selectedDate = DateTime.UtcNow.Date;
     private IReadOnlyList<SourceRecoveryHistoryItemDto> _items = Array.Empty<SourceRecoveryHistoryItemDto>();
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync() => await LoadAsync(reconcile: true);
+
+    private Task RefreshAsync() => LoadAsync(reconcile: true);
 
     private async Task OnDateChanged(DateTime? value)
     {
         _selectedDate = value;
-        await LoadAsync();
+        await LoadAsync(reconcile: false);
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(bool reconcile = true)
     {
         _loading = true;
+        StateHasChanged();
         try
         {
             var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
-            _items = await Mediator.Send(new GetSourceRecoveryHistoryQuery(100, date));
+            _items = await Mediator.Send(new GetSourceRecoveryHistoryQuery(100, date, reconcile));
         }
         catch (Exception ex)
         {
@@ -127,6 +130,7 @@
         finally
         {
             _loading = false;
+            StateHasChanged();
         }
     }
 

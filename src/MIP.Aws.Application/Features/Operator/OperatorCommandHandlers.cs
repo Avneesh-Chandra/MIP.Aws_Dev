@@ -11,7 +11,9 @@ public sealed class GetDownloadMonitorQueryHandler(
 {
     public async Task<DownloadMonitorDto> Handle(GetDownloadMonitorQuery request, CancellationToken cancellationToken)
     {
-        var result = await service.GetMonitorAsync(request.MonitorDate, cancellationToken).ConfigureAwait(false);
+        var result = await service
+            .GetMonitorAsync(request.MonitorDate, request.SkipReconciliation, cancellationToken)
+            .ConfigureAwait(false);
         await audit.RecordAdminActionAsync(
             OperatorAuditEvents.DashboardViewed,
             "DownloadMonitor",

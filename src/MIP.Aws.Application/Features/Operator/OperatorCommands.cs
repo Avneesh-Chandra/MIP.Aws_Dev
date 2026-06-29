@@ -2,7 +2,8 @@ using MediatR;
 
 namespace MIP.Aws.Application.Features.Operator;
 
-public sealed record GetDownloadMonitorQuery(DateOnly? MonitorDate = null) : IRequest<DownloadMonitorDto>;
+public sealed record GetDownloadMonitorQuery(DateOnly? MonitorDate = null, bool SkipReconciliation = false)
+    : IRequest<DownloadMonitorDto>;
 
 public sealed record GetSourceDownloadStatusQuery(Guid SourceId, DateOnly? MonitorDate = null) : IRequest<SourceDownloadStatusDto?>;
 

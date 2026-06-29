@@ -236,8 +236,44 @@ public sealed class SourceRecoveryOrchestrator(
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+        if (job is not null && IsRetryStillInProgress(job.Status))
+        {
+            var supersedingSuccess = await jobQuery
+                .Where(j => j.CreatedAt >= attempt.AppliedAt
+                            && (j.Status == DownloadJobStatus.Succeeded
+                                || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery))
+                .OrderByDescending(j => j.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (supersedingSuccess is not null)
+            {
+                job = supersedingSuccess;
+            }
+        }
+
         if (job is null || IsRetryStillInProgress(job.Status))
         {
+            if (attempt.CandidateVersionId is not null
+                && await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
+                        db,
+                        attempt.NewsSourceId,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                attempt.NewsSource = await ReloadMutableSourceAsync(attempt.NewsSourceId, cancellationToken)
+                    .ConfigureAwait(false);
+                await ActivateCandidateAsync(attempt, cancellationToken).ConfigureAwait(false);
+                await TryRecordKnowledgeAsync(attempt, success: true, cancellationToken).ConfigureAwait(false);
+                attempt.Status = SourceRecoveryAttemptStatus.Succeeded;
+                attempt.CompletedAt = DateTimeOffset.UtcNow;
+                attempt.ActualSuccessPercent = 100;
+                attempt.ResultSummary =
+                    "Today's edition is available; recovery configuration kept active.";
+                await SaveChangesWithRecoveryConcurrencyRetryAsync(cancellationToken).ConfigureAwait(false);
+                await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
+                return ToApplyResult(attempt);
+            }
+
             return new SourceRecoveryApplyResultDto(
                 attempt.Id,
                 attempt.CandidateVersionId ?? Guid.Empty,
@@ -317,6 +353,19 @@ public sealed class SourceRecoveryOrchestrator(
     public async Task ReconcileUnfinalizedAttemptsAsync(CancellationToken cancellationToken)
     {
         var attemptIds = new HashSet<Guid>();
+
+        var openApplied = await db.SourceRecoveryAttempts.AsNoTracking()
+            .Where(a => !a.IsDeleted
+                        && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
+                        && a.AppliedAt != null)
+            .Select(a => a.Id)
+            .Take(100)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var attemptId in openApplied)
+        {
+            attemptIds.Add(attemptId);
+        }
 
         var pending = await db.SourceRecoveryAttempts.AsNoTracking()
             .Where(a => !a.IsDeleted

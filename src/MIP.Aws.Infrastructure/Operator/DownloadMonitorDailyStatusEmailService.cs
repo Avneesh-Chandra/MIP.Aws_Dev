@@ -41,7 +41,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         }
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var monitor = await monitorService.GetMonitorAsync(date, cancellationToken).ConfigureAwait(false);
+        var monitor = await monitorService
+            .GetMonitorAsync(date, skipReconciliation: false, cancellationToken)
+            .ConfigureAwait(false);
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
         var summary = await summaryService.BuildSummaryAsync(monitor, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(executiveSummaryPrefix))
@@ -113,7 +115,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         }
 
         var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        var monitor = await monitorService.GetMonitorAsync(monitorDate, cancellationToken).ConfigureAwait(false);
+        var monitor = await monitorService
+            .GetMonitorAsync(monitorDate, skipReconciliation: false, cancellationToken)
+            .ConfigureAwait(false);
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
         var summary = await summaryService.BuildSummaryAsync(monitor, cancellationToken).ConfigureAwait(false);
 

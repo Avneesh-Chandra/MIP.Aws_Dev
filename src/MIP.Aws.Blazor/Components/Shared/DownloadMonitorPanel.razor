@@ -22,7 +22,7 @@
             <div class="mi-exec-download-monitor-toolbar">
                 <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Monitor date" Variant="Variant.Outlined"
                                Margin="Margin.Dense" MaxDate="DateTime.Today" />
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshAsync" Disabled="_loading">
                     Refresh
                 </MudButton>
                 <AuthorizeView Policy="@AuthPolicies.OperatorDownloadMonitor">
@@ -45,7 +45,7 @@
             <MudSpacer />
             <MudDatePicker Date="_selectedDate" DateChanged="OnDateChanged" Label="Monitor date" Variant="Variant.Outlined"
                            Margin="Margin.Dense" MaxDate="DateTime.Today" />
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshAsync" Disabled="_loading">
                 Refresh
             </MudButton>
             @if (CanAbortBatch)
@@ -462,9 +462,7 @@
     {
         if (SelfLoad)
         {
-            await LoadAsync();
-            await RefreshBatchProgressAsync();
-            await RefreshWorkloadsAsync();
+            await LoadAsync(reconcile: true);
             if (_batchProgress?.IsActive == true)
             {
                 StartBatchPolling();
@@ -503,22 +501,33 @@
         await LoadAsync();
     }
 
-    private async Task LoadAsync()
+    private Task RefreshAsync() => LoadAsync(reconcile: true);
+
+    private async Task LoadAsync(bool reconcile = false)
     {
         _loading = true;
         StateHasChanged();
         try
         {
             var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
-            _monitor = await Mediator.Send(new GetDownloadMonitorQuery(date));
-            if (SelfLoad)
+            var skipReconcile = !reconcile;
+            var monitorTask = Mediator.Send(new GetDownloadMonitorQuery(date, skipReconcile));
+            var batchTask = Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt, skipReconcile));
+            var workloadTask = Mediator.Send(new GetDownloadMonitorWorkloadQuery(skipReconcile));
+
+            await Task.WhenAll(monitorTask, batchTask, workloadTask).ConfigureAwait(false);
+
+            _monitor = await monitorTask.ConfigureAwait(false);
+            _batchProgress = await batchTask.ConfigureAwait(false);
+            _workloads = await workloadTask.ConfigureAwait(false);
+            if (_batchProgress is not null)
             {
-                await RefreshBatchProgressAsync();
-                await RefreshWorkloadsAsync();
-                if (_batchProgress?.IsActive == true && _pollCts is null)
-                {
-                    StartBatchPolling();
-                }
+                _batchStartedAt ??= _batchProgress.StartedAt;
+            }
+
+            if (SelfLoad && _batchProgress?.IsActive == true && _pollCts is null)
+            {
+                StartBatchPolling();
             }
         }
         catch (Exception ex)
@@ -555,7 +564,7 @@
             _batchStartedAt = started.StartedAt;
             Snackbar.Add($"PDF download batch started for {started.TotalSources} monitored source(s).", Severity.Success);
             await RefreshBatchProgressAsync();
-            await LoadAsync();
+            await LoadAsync(reconcile: true);
             StartBatchPolling();
         }
         catch (Exception ex)
@@ -589,24 +598,31 @@
                 await Task.Delay(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
                 await InvokeAsync(async () =>
                 {
-                    await RefreshBatchProgressAsync(skipReconciliation: true);
-                    if (_batchProgress?.IsComplete == true)
+                    try
                     {
-                        await RefreshWorkloadsAsync();
-                        await LoadAsync();
-                        Snackbar.Add("PDF download batch finished.", Severity.Info);
-                    }
-                    else if (_batchProgress?.IsActive == true)
-                    {
-                        await RefreshWorkloadsAsync();
-                        if (DateTimeOffset.UtcNow - _lastMonitorRefreshAt >= TimeSpan.FromSeconds(30))
+                        await RefreshBatchProgressAsync(skipReconciliation: true);
+                        if (_batchProgress?.IsComplete == true)
                         {
+                            await RefreshWorkloadsAsync();
                             await LoadAsync();
-                            _lastMonitorRefreshAt = DateTimeOffset.UtcNow;
+                            Snackbar.Add("PDF download batch finished.", Severity.Info);
                         }
-                    }
+                        else if (_batchProgress?.IsActive == true)
+                        {
+                            await RefreshWorkloadsAsync();
+                            if (DateTimeOffset.UtcNow - _lastMonitorRefreshAt >= TimeSpan.FromSeconds(30))
+                            {
+                                await LoadAsync();
+                                _lastMonitorRefreshAt = DateTimeOffset.UtcNow;
+                            }
+                        }
 
-                    StateHasChanged();
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Snackbar.Add($"Batch progress update failed: {ex.Message}", Severity.Warning);
+                    }
                 });
 
                 if (_batchProgress is not { IsActive: true })
@@ -625,7 +641,7 @@
     {
         try
         {
-            _workloads = await Mediator.Send(new GetDownloadMonitorWorkloadQuery());
+            _workloads = await Mediator.Send(new GetDownloadMonitorWorkloadQuery(SkipReconciliation: true));
         }
         catch (Exception)
         {
@@ -656,7 +672,7 @@
             Snackbar.Add(result.Summary, Severity.Warning);
             await RefreshBatchProgressAsync();
             await RefreshWorkloadsAsync();
-            await LoadAsync();
+            await LoadAsync(reconcile: true);
         }
         catch (Exception ex)
         {

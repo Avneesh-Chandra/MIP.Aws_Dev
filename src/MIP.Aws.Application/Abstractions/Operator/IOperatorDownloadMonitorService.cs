@@ -4,7 +4,10 @@ namespace MIP.Aws.Application.Abstractions.Operator;
 
 public interface IOperatorDownloadMonitorService
 {
-    Task<DownloadMonitorDto> GetMonitorAsync(DateOnly? monitorDate, CancellationToken cancellationToken);
+    Task<DownloadMonitorDto> GetMonitorAsync(
+        DateOnly? monitorDate,
+        bool skipReconciliation,
+        CancellationToken cancellationToken);
 
     Task<SourceDownloadStatusDto?> GetSourceStatusAsync(Guid sourceId, DateOnly? monitorDate, CancellationToken cancellationToken);
 

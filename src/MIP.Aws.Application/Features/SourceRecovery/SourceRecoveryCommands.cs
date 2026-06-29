@@ -14,7 +14,10 @@ public sealed record FinalizeSourceRecoveryAttemptCommand(Guid AttemptId) : IReq
 
 public sealed record RollbackSourceRecoveryCommand(Guid AttemptId, string Reason) : IRequest<Unit>;
 
-public sealed record GetSourceRecoveryHistoryQuery(int Take = 50, DateOnly? MonitorDate = null)
+public sealed record GetSourceRecoveryHistoryQuery(
+    int Take = 50,
+    DateOnly? MonitorDate = null,
+    bool ReconcileAttempts = true)
     : IRequest<IReadOnlyList<SourceRecoveryHistoryItemDto>>;
 
 public sealed record GetRecoveryCenterFailuresQuery(DateOnly? MonitorDate = null)
