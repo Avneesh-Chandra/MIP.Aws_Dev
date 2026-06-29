@@ -99,6 +99,7 @@ else if (_status is not null)
         AutoAiRecoveryRunStatus.SkippedUnsafe
             or AutoAiRecoveryRunStatus.SkippedCooldown
             or AutoAiRecoveryRunStatus.SkippedNoSuggestions
+            or AutoAiRecoveryRunStatus.SkippedRepeatedBaseline
             or AutoAiRecoveryRunStatus.SkippedIneligible => Color.Warning,
         _ => Color.Info
     };
@@ -118,6 +119,7 @@ else if (_status is not null)
         AutoAiRecoveryRunStatus.SkippedUnsafe => "Skipped — unsafe",
         AutoAiRecoveryRunStatus.SkippedCooldown => "Skipped — cooldown",
         AutoAiRecoveryRunStatus.SkippedNoSuggestions => "Skipped — no suggestions",
+        AutoAiRecoveryRunStatus.SkippedRepeatedBaseline => "Skipped — baseline already active",
         AutoAiRecoveryRunStatus.SkippedIneligible => "Skipped — ineligible",
         _ => status.ToString()
     };

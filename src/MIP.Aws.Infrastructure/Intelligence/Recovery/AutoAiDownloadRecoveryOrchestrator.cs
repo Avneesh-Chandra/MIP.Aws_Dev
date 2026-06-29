@@ -137,6 +137,20 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             return await CompleteSkippedAsync(run, job, AutoAiRecoveryRunStatus.SkippedCooldown, "Cooldown or daily auto-recovery limit reached.", cancellationToken).ConfigureAwait(false);
         }
 
+        if (PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
+                source,
+                auditRow?.FailureCode,
+                job.ErrorMessage))
+        {
+            return await CompleteSkippedAsync(
+                    run,
+                    job,
+                    AutoAiRecoveryRunStatus.SkippedRepeatedBaseline,
+                    PublisherRepeatedRecoveryGuard.SkipSummary,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.Started,
             "AutoAiRecoveryRun",
@@ -169,6 +183,9 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         run.SourceRecoveryAttemptId = attempt.Id;
 
         var ranked = ranker.RankForAutoRecovery(analysis.Options, settings);
+        ranked = ranked
+            .Where(o => !PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, o))
+            .ToList();
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.SuggestionRanked,
             "AutoAiRecoveryRun",
@@ -178,16 +195,33 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
         if (ranked.Count == 0)
         {
+            var noSuggestionsSummary = PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
+                ? PublisherRepeatedRecoveryGuard.SkipSummary
+                : "No safe AI recovery suggestions met confidence and risk thresholds.";
+            var noSuggestionsStatus = PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
+                ? AutoAiRecoveryRunStatus.SkippedRepeatedBaseline
+                : AutoAiRecoveryRunStatus.SkippedNoSuggestions;
             return await CompleteSkippedAsync(
-                run,
-                job,
-                AutoAiRecoveryRunStatus.SkippedNoSuggestions,
-                "No safe AI recovery suggestions met confidence and risk thresholds.",
-                cancellationToken).ConfigureAwait(false);
+                    run,
+                    job,
+                    noSuggestionsStatus,
+                    noSuggestionsSummary,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         foreach (var option in ranked)
         {
+            if (PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, option))
+            {
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    "Suggestion skipped",
+                    "Known-good baseline already active; skipping duplicate publisher patch.",
+                    succeeded: false);
+                continue;
+            }
+
             if (!AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(option, settings, out var rejectReason))
             {
                 await audit.RecordAdminActionAsync(
@@ -378,21 +412,8 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         return await CompleteFailureAsync(run, job, "All safe AI recovery suggestions were tried without success.", cancellationToken).ConfigureAwait(false);
     }
 
-    private static bool ShouldStopAfterFailedRetry(NewsSource source, DownloadJob retryJob)
-    {
-        var message = retryJob.ErrorMessage ?? string.Empty;
-        if (message.Contains("bot protection", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("AccessBlocked", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("datacenter egress", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Publisher blocked", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("could not download a PDF from i.alayam.com", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return source.Name.Contains("Al Ayam", StringComparison.OrdinalIgnoreCase)
-               && message.Contains("could not download a PDF", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool ShouldStopAfterFailedRetry(NewsSource source, DownloadJob retryJob) =>
+        PublisherRepeatedRecoveryGuard.IsNonRetriablePublisherFailure(null, retryJob.ErrorMessage);
 
     private static string BuildNonRetriableRecoverySummary(DownloadJob retryJob) =>
         "Auto AI recovery stopped: publisher access or network blocking cannot be fixed by selector changes. "
@@ -472,7 +493,8 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                 r => !r.IsDeleted
                      && r.NewsSourceId == sourceId
                      && r.CreatedAt >= dayStart
-                     && r.Status != AutoAiRecoveryRunStatus.SkippedIneligible,
+                     && r.Status != AutoAiRecoveryRunStatus.SkippedIneligible
+                     && r.Status != AutoAiRecoveryRunStatus.SkippedRepeatedBaseline,
                 cancellationToken)
             .ConfigureAwait(false);
 

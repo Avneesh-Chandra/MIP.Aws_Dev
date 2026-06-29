@@ -402,6 +402,7 @@ public sealed class SourceRecoveryOrchestrator(
                             || r.Status == AutoAiRecoveryRunStatus.CompletedFailure
                             || r.Status == AutoAiRecoveryRunStatus.CandidateFailed
                             || r.Status == AutoAiRecoveryRunStatus.SkippedNoSuggestions
+                            || r.Status == AutoAiRecoveryRunStatus.SkippedRepeatedBaseline
                             || r.Status == AutoAiRecoveryRunStatus.SkippedIneligible))
             .Select(r => r.SourceRecoveryAttemptId!.Value)
             .Take(50)

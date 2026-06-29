@@ -278,4 +278,95 @@ public sealed class AutoAiRecoveryTests
         Assert.NotEmpty(ranked);
         Assert.Contains("newspaper spread", ranked[0].Title, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Should_skip_repeated_AlAyam_baseline_when_config_already_active_and_pdf_invalid()
+    {
+        var source = new NewsSource
+        {
+            Name = AlAyamPublicPdfBaseline.SourceName,
+            ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey,
+            UseHeadlessBrowser = true,
+            BaseUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            EditionUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfDiscoveryPageUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfLinkSelector = AlAyamPublicPdfBaseline.PdfLinkSelector
+        };
+
+        Assert.True(AlAyamPublicPdfBaseline.HasKnownGoodConfiguration(source));
+        Assert.True(PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
+            source,
+            "PdfValidationFailed",
+            "Response appears to be HTML instead of a PDF."));
+    }
+
+    [Fact]
+    public void Should_not_skip_AlAyam_recovery_when_baseline_not_yet_applied()
+    {
+        var source = new NewsSource
+        {
+            Name = AlAyamPublicPdfBaseline.SourceName,
+            ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey,
+            UseHeadlessBrowser = false,
+            PdfLinkSelector = AlAyamPublicPdfBaseline.Broken.PdfLinkSelector,
+            BaseUrl = AlAyamPublicPdfBaseline.Broken.EpaperUrl
+        };
+
+        Assert.False(AlAyamPublicPdfBaseline.HasKnownGoodConfiguration(source));
+        Assert.False(PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
+            source,
+            "PdfValidationFailed",
+            "Response appears to be HTML instead of a PDF."));
+    }
+
+    [Fact]
+    public void Redundant_baseline_option_filtered_when_AlAyam_already_configured()
+    {
+        var source = new NewsSource
+        {
+            ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey,
+            UseHeadlessBrowser = true,
+            BaseUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            EditionUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfDiscoveryPageUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfLinkSelector = AlAyamPublicPdfBaseline.PdfLinkSelector
+        };
+
+        var options = SourceRecoveryHeuristicBuilder.MergePublisherHeuristics(
+            new SourceRecoveryAnalysisContext(
+                source.Id,
+                AlAyamPublicPdfBaseline.SourceName,
+                Guid.NewGuid(),
+                SourceRecoveryFailureTypes.PdfValidationFailed,
+                "PdfValidationFailed",
+                "Response appears to be HTML instead of a PDF.",
+                AlAyamPublicPdfBaseline.EpaperUrl,
+                AlAyamPublicPdfBaseline.EpaperUrl,
+                null,
+                0,
+                DateTimeOffset.UtcNow,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                [],
+                [],
+                []),
+            []);
+        Assert.Single(options);
+        Assert.True(PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, options[0]));
+    }
+
+    [Fact]
+    public void IsNonRetriablePublisherFailure_detects_datacenter_block_messages()
+    {
+        Assert.True(PublisherRepeatedRecoveryGuard.IsNonRetriablePublisherFailure(
+            null,
+            "Publisher blocked automated access (Cloudflare/bot protection) on the e-paper page."));
+    }
 }

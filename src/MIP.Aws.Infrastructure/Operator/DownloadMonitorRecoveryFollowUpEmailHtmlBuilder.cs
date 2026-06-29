@@ -100,6 +100,7 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
         AutoAiRecoveryRunStatus.CompletedFailure => "Recovery failed",
         AutoAiRecoveryRunStatus.SkippedIneligible => "Skipped",
         AutoAiRecoveryRunStatus.SkippedNoSuggestions => "No safe suggestions",
+        AutoAiRecoveryRunStatus.SkippedRepeatedBaseline => "Skipped — baseline already active",
         AutoAiRecoveryRunStatus.SkippedCooldown => "Skipped (cooldown)",
         _ => status.ToString()
     };

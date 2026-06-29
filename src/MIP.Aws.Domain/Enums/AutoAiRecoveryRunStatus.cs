@@ -15,5 +15,7 @@ public enum AutoAiRecoveryRunStatus
     SkippedUnsafe = 10,
     SkippedCooldown = 11,
     SkippedNoSuggestions = 12,
-    SkippedIneligible = 13
+    SkippedIneligible = 13,
+    /// <summary>Baseline selectors/URLs already active; failure is not fixable by re-applying the same patch.</summary>
+    SkippedRepeatedBaseline = 14
 }
