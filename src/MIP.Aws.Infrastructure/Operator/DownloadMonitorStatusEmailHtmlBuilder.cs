@@ -7,12 +7,33 @@ namespace MIP.Aws.Infrastructure.Operator;
 
 public static class DownloadMonitorStatusEmailHtmlBuilder
 {
-    public static string Build(DownloadMonitorDto monitor, string portalBaseUrl, string? executiveSummary = null)
+    public static string Build(
+        DownloadMonitorDto monitor,
+        string portalBaseUrl,
+        string? executiveSummary = null,
+        IReadOnlyList<string>? pendingRecoveryNotices = null)
     {
         var monitorUrl = $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor";
         var sb = new StringBuilder();
         sb.Append("<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2937;max-width:1100px;\">");
         sb.Append("<h2 style=\"color:#0A2342;margin:0 0 16px;\">GFH Media Intelligence — Download Monitor</h2>");
+
+        if (pendingRecoveryNotices is { Count: > 0 })
+        {
+            sb.Append("<div style=\"border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin:0 0 16px;background:#fffbeb;\">");
+            sb.Append("<div style=\"font-weight:600;margin-bottom:6px;\">Auto-recovery still in progress</div>");
+            sb.Append("<ul style=\"margin:0;padding-left:20px;\">");
+            foreach (var notice in pendingRecoveryNotices)
+            {
+                sb.Append("<li style=\"margin-bottom:4px;\">")
+                    .Append(WebUtility.HtmlEncode(notice))
+                    .Append("</li>");
+            }
+
+            sb.Append("</ul><p style=\"margin:8px 0 0;font-size:13px;\">")
+                .Append("A follow-up email will be sent with the final auto-recovery outcome once finished.")
+                .Append("</p></div>");
+        }
 
         if (!string.IsNullOrWhiteSpace(executiveSummary))
         {

@@ -912,6 +912,9 @@ namespace MIP.Aws.Persistence.Migrations
                     b.Property<DateTimeOffset?>("StatusEmailSentAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("RecoveryFollowUpEmailSentAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset?>("AbortedAt")
                         .HasColumnType("datetimeoffset");
 

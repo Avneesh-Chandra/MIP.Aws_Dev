@@ -9,6 +9,7 @@ using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Browser;
+using MIP.Aws.Infrastructure.Operator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +25,55 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
     IAuditService audit,
     ILogger<AutoAiDownloadRecoveryOrchestrator> logger) : IAutoAiDownloadRecoveryOrchestrator
 {
+    private static readonly TimeSpan MaxRecoveryRunDuration = TimeSpan.FromMinutes(45);
+
     public async Task<AutoAiRecoveryResultDto> RecoverAsync(
+        Guid sourceId,
+        Guid failedDownloadJobId,
+        AutoAiRecoveryTrigger trigger,
+        CancellationToken cancellationToken)
+    {
+        using var recoveryTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        recoveryTimeout.CancelAfter(MaxRecoveryRunDuration);
+
+        try
+        {
+            return await RecoverCoreAsync(
+                sourceId,
+                failedDownloadJobId,
+                trigger,
+                recoveryTimeout.Token);
+        }
+        catch (OperationCanceledException) when (recoveryTimeout.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "Auto AI recovery timed out after {Minutes} minutes for source {SourceId}, job {JobId}.",
+                MaxRecoveryRunDuration.TotalMinutes,
+                sourceId,
+                failedDownloadJobId);
+
+            var timedOutRun = await db.AutoAiRecoveryRuns
+                .Include(r => r.FailedDownloadJob)
+                .Where(r => !r.IsDeleted && r.FailedDownloadJobId == failedDownloadJobId && r.CompletedAt == null)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (timedOutRun?.FailedDownloadJob is { } timedOutJob)
+            {
+                return await CompleteFailureAsync(
+                        timedOutRun,
+                        timedOutJob,
+                        $"Auto AI recovery timed out after {MaxRecoveryRunDuration.TotalMinutes:F0} minutes.",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<AutoAiRecoveryResultDto> RecoverCoreAsync(
         Guid sourceId,
         Guid failedDownloadJobId,
         AutoAiRecoveryTrigger trigger,
@@ -267,6 +316,7 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                     new { option.Title, retryJobId },
                     cancellationToken).ConfigureAwait(false);
 
+                await NotifyBatchRecoveryFollowUpAsync(failedDownloadJobId, cancellationToken).ConfigureAwait(false);
                 return ToResult(run, true);
             }
 
@@ -296,6 +346,7 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                     new { option.Title, retainedConfig = true },
                     cancellationToken).ConfigureAwait(false);
 
+                await NotifyBatchRecoveryFollowUpAsync(failedDownloadJobId, cancellationToken).ConfigureAwait(false);
                 return ToResult(run, true);
             }
 
@@ -312,9 +363,58 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                 new { option.Title, retryJob.ErrorMessage },
                 cancellationToken).ConfigureAwait(false);
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            if (ShouldStopAfterFailedRetry(source, retryJob))
+            {
+                return await CompleteFailureAsync(
+                        run,
+                        job,
+                        BuildNonRetriableRecoverySummary(retryJob),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         return await CompleteFailureAsync(run, job, "All safe AI recovery suggestions were tried without success.", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool ShouldStopAfterFailedRetry(NewsSource source, DownloadJob retryJob)
+    {
+        var message = retryJob.ErrorMessage ?? string.Empty;
+        if (message.Contains("bot protection", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("AccessBlocked", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("datacenter egress", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Publisher blocked", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("could not download a PDF from i.alayam.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return source.Name.Contains("Al Ayam", StringComparison.OrdinalIgnoreCase)
+               && message.Contains("could not download a PDF", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildNonRetriableRecoverySummary(DownloadJob retryJob) =>
+        "Auto AI recovery stopped: publisher access or network blocking cannot be fixed by selector changes. "
+        + (retryJob.ErrorMessage ?? "Retry failed.");
+
+    private async Task NotifyBatchRecoveryFollowUpAsync(
+        Guid failedDownloadJobId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueRecoveryFollowUpAfterRunAsync(
+                    db,
+                    failedDownloadJobId,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not enqueue recovery follow-up status email for job {JobId}.", failedDownloadJobId);
+        }
     }
 
     private async Task<bool> ValidateRetrySuccessAsync(
@@ -416,6 +516,7 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
         AutoAiRecoveryTimelineWriter.AddStep(run, "Skipped", summary, succeeded: false);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await NotifyBatchRecoveryFollowUpAsync(run.FailedDownloadJobId, cancellationToken).ConfigureAwait(false);
         return ToResult(run, false);
     }
 
@@ -442,6 +543,7 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             new { summary, run.SuggestionsTried },
             cancellationToken).ConfigureAwait(false);
 
+        await NotifyBatchRecoveryFollowUpAsync(run.FailedDownloadJobId, cancellationToken).ConfigureAwait(false);
         return ToResult(run, false);
     }
 

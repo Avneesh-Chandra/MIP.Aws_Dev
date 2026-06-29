@@ -48,7 +48,7 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
                 Refresh
             </MudButton>
-            @if (_workloads?.HasActiveWork == true)
+            @if (CanAbortActiveDownloads)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Cancel"
                            OnClick="AbortActiveWorkAsync" Disabled="_aborting || _loading">
@@ -72,6 +72,14 @@
                         @_batchProgress.CurrentPhase
                     </MudChip>
                     <MudSpacer />
+                    @if (CanAbortActiveDownloads)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Cancel"
+                                   OnClick="AbortActiveWorkAsync" Disabled="_aborting || _loading">
+                            Abort batch
+                        </MudButton>
+                    }
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         Started @UserTz.Format(_batchProgress.StartedAt)
                         @if (!string.IsNullOrWhiteSpace(_batchProgress.HangfireJobId))
@@ -122,7 +130,7 @@
         </MudPaper>
     }
 
-    @if (_workloads?.HasActiveWork == true)
+    @if (CanAbortActiveDownloads && _workloads?.HasActiveWork == true)
     {
         <MudPaper Outlined="true" Class="pa-4">
             <MudStack Spacing="2">
@@ -401,6 +409,10 @@
 
     private string RootClass => Embedded ? "mi-exec-download-monitor-panel" : null!;
 
+    private bool CanAbortActiveDownloads =>
+        _batchProgress?.IsActive == true
+        || _workloads?.HasActiveWork == true;
+
     private bool _loading = true;
     private bool _batchExecuting;
     private bool _aborting;
@@ -574,11 +586,14 @@
                         await LoadAsync();
                         Snackbar.Add("PDF download batch finished.", Severity.Info);
                     }
-                    else if (_batchProgress?.IsActive == true
-                             && DateTimeOffset.UtcNow - _lastMonitorRefreshAt >= TimeSpan.FromSeconds(30))
+                    else if (_batchProgress?.IsActive == true)
                     {
-                        await LoadAsync();
-                        _lastMonitorRefreshAt = DateTimeOffset.UtcNow;
+                        await RefreshWorkloadsAsync();
+                        if (DateTimeOffset.UtcNow - _lastMonitorRefreshAt >= TimeSpan.FromSeconds(30))
+                        {
+                            await LoadAsync();
+                            _lastMonitorRefreshAt = DateTimeOffset.UtcNow;
+                        }
                     }
 
                     StateHasChanged();

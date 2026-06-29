@@ -234,10 +234,6 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         var sourceIds = sources.Select(s => s.Id).ToHashSet();
-        var orchestratorProcessing = HangfireBatchOrchestratorState.IsBatchOrchestratorJobProcessing(entry.HangfireJobId);
-        var pendingHangfire = HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds);
-        var batchStoppedExternally = entry.AbortedAt is not null
-                                     || (!orchestratorProcessing && pendingHangfire == 0);
 
         var jobs = await db.DownloadJobs.AsNoTracking()
             .Where(j => !j.IsDeleted
@@ -253,13 +249,38 @@ public sealed class DownloadMonitorBatchRunService(
             latestJobBySource.TryAdd(job.NewsSourceId, job);
         }
 
+        var anyJobCreated = latestJobBySource.Count > 0;
+        var pendingHangfire = HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds);
+        var orchestratorProcessing = HangfireBatchOrchestratorState.IsBatchOrchestratorJobProcessing(entry.HangfireJobId);
+        var orchestratorAlive = HangfireBatchOrchestratorState.IsBatchOrchestratorJobAlive(entry.HangfireJobId);
+        var orchestratorStale = orchestratorProcessing && !anyJobCreated && elapsed > TimeSpan.FromMinutes(10);
+
+        if (entry.AbortedAt is null
+            && !string.IsNullOrWhiteSpace(entry.HangfireJobId)
+            && ((!orchestratorAlive && pendingHangfire == 0) || orchestratorStale))
+        {
+            await DownloadMonitorBatchRunPersistence.TryMarkAbortedAsync(
+                    db,
+                    entry.StartedAt,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            entry = entry with { AbortedAt = DateTimeOffset.UtcNow };
+            logger.LogWarning(
+                "Marked PDF download batch {HangfireJobId} (started {StartedAt:u}) as aborted because the Hangfire orchestrator is no longer active.",
+                entry.HangfireJobId,
+                entry.StartedAt);
+        }
+
+        var batchStoppedExternally = entry.AbortedAt is not null
+                                     || (!orchestratorAlive && pendingHangfire == 0);
+
         var activities = new List<DownloadMonitorBatchActivityResult>();
         var successCount = 0;
         var failedCount = 0;
         var inProgressCount = 0;
         var waitingCount = 0;
         var autoRecoveryCount = 0;
-        var anyJobCreated = latestJobBySource.Count > 0;
 
         for (var sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
         {
@@ -380,14 +401,14 @@ public sealed class DownloadMonitorBatchRunService(
             isComplete,
             batchExpired);
 
-        await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueCompletedBatchStatusEmailAsync(
+        var downloadInProgressCount = inProgressCount - autoRecoveryCount;
+        await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueInitialBatchStatusEmailAsync(
                 db,
                 entry.StartedAt,
                 isComplete,
                 entry.HangfireJobId,
-                inProgressCount,
+                downloadInProgressCount,
                 waitingCount,
-                autoRecoveryCount,
                 logger,
                 cancellationToken)
             .ConfigureAwait(false);

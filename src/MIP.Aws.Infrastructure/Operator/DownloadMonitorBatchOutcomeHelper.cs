@@ -74,7 +74,7 @@ public static class DownloadMonitorBatchOutcomeHelper
         return IsTerminalDownloadStatus(latestJob.Status);
     }
 
-    /// <summary>All monitored sources settled, including any in-flight or pending auto AI recovery.</summary>
+    /// <summary>All monitored sources settled, including any in-flight or pending auto AI recovery finishes.</summary>
     public static async Task<bool> IsBatchReadyForStatusEmailAsync(
         IApplicationDbContext db,
         IReadOnlyList<Guid> sourceIds,
@@ -91,6 +91,175 @@ public static class DownloadMonitorBatchOutcomeHelper
 
         return sourceIds.Count > 0;
     }
+
+    /// <summary>
+    /// True when every source has finished its batch download attempt (success, failure, or entered auto-recovery).
+    /// Does not wait for auto-recovery to complete.
+    /// </summary>
+    public static async Task<bool> IsBatchReadyForInitialStatusEmailAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        foreach (var sourceId in sourceIds)
+        {
+            if (!await IsBatchDownloadPhaseCompleteForSourceAsync(
+                    db,
+                    sourceId,
+                    batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return sourceIds.Count > 0;
+    }
+
+    public static async Task<bool> IsBatchDownloadPhaseCompleteForSourceAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (await HasTodaysDownloadedEditionAsync(db, sourceId, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        if (await HasSuccessfulPdfEditionSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        var latestJob = await GetLatestJobSinceBatchAsync(db, sourceId, batchStartedAt, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (latestJob is null)
+        {
+            return false;
+        }
+
+        if (latestJob.Status is DownloadJobStatus.Pending or DownloadJobStatus.Running)
+        {
+            return false;
+        }
+
+        return IsAutoRecoveryInProgressStatus(latestJob.Status) || IsTerminalDownloadStatus(latestJob.Status);
+    }
+
+    public static async Task<bool> HasPendingAutoRecoveryForBatchAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (sourceIds.Count == 0)
+        {
+            return false;
+        }
+
+        var notBefore = batchStartedAt.AddMinutes(-1);
+
+        return await db.AutoAiRecoveryRuns.AsNoTracking()
+            .AnyAsync(
+                r => !r.IsDeleted
+                     && sourceIds.Contains(r.NewsSourceId)
+                     && r.CreatedAt >= notBefore
+                     && r.CompletedAt == null,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<IReadOnlyList<PendingBatchRecoverySource>> GetPendingAutoRecoverySourcesForBatchAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (sourceIds.Count == 0)
+        {
+            return [];
+        }
+
+        var notBefore = batchStartedAt.AddMinutes(-1);
+        var runs = await db.AutoAiRecoveryRuns.AsNoTracking()
+            .Where(r => !r.IsDeleted
+                        && sourceIds.Contains(r.NewsSourceId)
+                        && r.CreatedAt >= notBefore
+                        && r.CompletedAt == null)
+            .Join(
+                db.NewsSources.AsNoTracking().Where(s => !s.IsDeleted),
+                r => r.NewsSourceId,
+                s => s.Id,
+                (r, s) => new PendingBatchRecoverySource(s.Id, s.Name, r.Status, r.FailedDownloadJobId))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return runs;
+    }
+
+    public static async Task<DateTimeOffset?> ResolveBatchForRecoveryFollowUpAsync(
+        IApplicationDbContext db,
+        Guid failedDownloadJobId,
+        CancellationToken cancellationToken)
+    {
+        var job = await db.DownloadJobs.AsNoTracking()
+            .Where(j => !j.IsDeleted && j.Id == failedDownloadJobId)
+            .Select(j => new { j.CreatedAt })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        var batch = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(b => !b.IsDeleted
+                        && b.StartedAt <= job.CreatedAt
+                        && b.StatusEmailSentAt != null
+                        && b.RecoveryFollowUpEmailSentAt == null)
+            .OrderByDescending(b => b.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return batch?.StartedAt;
+    }
+
+    public static async Task<bool> WaitForBatchDownloadPhaseCompleteAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (await IsBatchReadyForInitialStatusEmailAsync(db, sourceIds, batchStartedAt, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        }
+
+        return false;
+    }
+
+    public sealed record PendingBatchRecoverySource(
+        Guid SourceId,
+        string SourceName,
+        AutoAiRecoveryRunStatus Status,
+        Guid FailedDownloadJobId);
 
     public static async Task<bool> IsRequiredAutoRecoveryCompleteAsync(
         IApplicationDbContext db,

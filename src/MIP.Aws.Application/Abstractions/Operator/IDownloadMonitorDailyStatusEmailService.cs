@@ -6,5 +6,15 @@ public interface IDownloadMonitorDailyStatusEmailService
     Task<bool> SendDailyStatusEmailAsync(
         DateOnly? monitorDate,
         CancellationToken cancellationToken,
-        IReadOnlyList<string>? recipientOverride = null);
+        IReadOnlyList<string>? recipientOverride = null,
+        string? executiveSummaryPrefix = null);
+
+    Task<bool> SendInitialBatchStatusEmailAsync(
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken);
+
+    /// <returns>True when at least one recipient received the recovery follow-up email.</returns>
+    Task<bool> SendRecoveryFollowUpEmailAsync(
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken);
 }

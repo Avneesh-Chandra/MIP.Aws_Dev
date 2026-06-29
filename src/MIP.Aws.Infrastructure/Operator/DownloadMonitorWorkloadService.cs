@@ -20,7 +20,7 @@ public sealed class DownloadMonitorWorkloadService(
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
 
         var batchProgress = await batchRunService
-            .GetProgressAsync(null, skipReconciliation: true, cancellationToken)
+            .GetProgressAsync(null, skipReconciliation: false, cancellationToken)
             .ConfigureAwait(false);
 
         var sources = await LoadMonitoredSourcesAsync(db, cancellationToken).ConfigureAwait(false);
@@ -69,7 +69,14 @@ public sealed class DownloadMonitorWorkloadService(
             ? HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds)
             : 0;
 
+        var hasOrphanedBatch = batchProgress is not null
+                               && !batchProgress.IsComplete
+                               && !string.IsNullOrWhiteSpace(batchProgress.HangfireJobId)
+                               && !HangfireBatchOrchestratorState.IsBatchOrchestratorJobAlive(batchProgress.HangfireJobId)
+                               && pendingHangfire == 0;
+
         var hasActiveWork = batchProgress?.IsActive == true
+                            || hasOrphanedBatch
                             || jobResults.Count > 0
                             || pendingHangfire > 0;
 
@@ -135,7 +142,12 @@ public sealed class DownloadMonitorWorkloadService(
 
         if (batchProgress?.StartedAt is DateTimeOffset batchStartedAt)
         {
-            await MarkBatchAbortedAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
+            await DownloadMonitorBatchRunPersistence.TryMarkAbortedAsync(
+                    db,
+                    batchStartedAt,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var summary = $"Cancelled {activeJobs.Count} download job(s), removed {hangfireRemoved} queued Hangfire job(s)"
@@ -148,40 +160,6 @@ public sealed class DownloadMonitorWorkloadService(
             hangfireRemoved,
             orchestratorStopped,
             summary);
-    }
-
-    private static async Task MarkBatchAbortedAsync(
-        IApplicationDbContext db,
-        DateTimeOffset batchStartedAt,
-        CancellationToken cancellationToken)
-    {
-        var abortedAt = DateTimeOffset.UtcNow;
-        try
-        {
-            var updated = await db.DownloadMonitorBatchRuns
-                .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt && b.AbortedAt == null)
-                .ExecuteUpdateAsync(
-                    setters => setters.SetProperty(b => b.AbortedAt, abortedAt),
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            if (updated == 0)
-            {
-                var row = await db.DownloadMonitorBatchRuns
-                    .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
-                    .FirstOrDefaultAsync(cancellationToken)
-                    .ConfigureAwait(false);
-                if (row is not null && row.AbortedAt is null)
-                {
-                    row.AbortedAt = abortedAt;
-                    await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
-        catch
-        {
-            // AbortedAt column may not be migrated yet; BuildProgress still detects stopped orchestrator.
-        }
     }
 
     private static (string Status, string Activity) DescribeActiveJob(DownloadJobStatus status) => status switch
