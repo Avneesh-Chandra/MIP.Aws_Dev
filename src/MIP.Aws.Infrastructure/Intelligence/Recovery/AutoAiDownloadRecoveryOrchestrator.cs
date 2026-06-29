@@ -1,6 +1,5 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Auditing;
-using MIP.Aws.Application.Abstractions.Downloading;
 using MIP.Aws.Application.Abstractions.Intelligence;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.AutoAiRecovery;
@@ -8,7 +7,6 @@ using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
-using MIP.Aws.Infrastructure.Browser;
 using MIP.Aws.Infrastructure.Operator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -19,13 +17,14 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
     IApplicationDbContext db,
     ISourceRecoveryAnalysisService analysisService,
     ISourceRecoveryOrchestrator recoveryOrchestrator,
-    IDownloadManager downloadManager,
     IAiRecoverySuggestionRanker ranker,
     AutoAiDownloadRecoverySettingsProvider settingsProvider,
     IAuditService audit,
     ILogger<AutoAiDownloadRecoveryOrchestrator> logger) : IAutoAiDownloadRecoveryOrchestrator
 {
     private static readonly TimeSpan MaxRecoveryRunDuration = TimeSpan.FromMinutes(45);
+    private const int MaxRecoveryFinalizePolls = 36;
+    private static readonly TimeSpan RecoveryFinalizePollInterval = TimeSpan.FromSeconds(5);
 
     public async Task<AutoAiRecoveryResultDto> RecoverAsync(
         Guid sourceId,
@@ -137,20 +136,6 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             return await CompleteSkippedAsync(run, job, AutoAiRecoveryRunStatus.SkippedCooldown, "Cooldown or daily auto-recovery limit reached.", cancellationToken).ConfigureAwait(false);
         }
 
-        if (PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
-                source,
-                auditRow?.FailureCode,
-                job.ErrorMessage))
-        {
-            return await CompleteSkippedAsync(
-                    run,
-                    job,
-                    AutoAiRecoveryRunStatus.SkippedRepeatedBaseline,
-                    PublisherRepeatedRecoveryGuard.SkipSummary,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.Started,
             "AutoAiRecoveryRun",
@@ -183,9 +168,6 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         run.SourceRecoveryAttemptId = attempt.Id;
 
         var ranked = ranker.RankForAutoRecovery(analysis.Options, settings);
-        ranked = ranked
-            .Where(o => !PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, o))
-            .ToList();
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.SuggestionRanked,
             "AutoAiRecoveryRun",
@@ -212,16 +194,6 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
         foreach (var option in ranked)
         {
-            if (PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, option))
-            {
-                AutoAiRecoveryTimelineWriter.AddStep(
-                    run,
-                    "Suggestion skipped",
-                    "Known-good baseline already active; skipping duplicate publisher patch.",
-                    succeeded: false);
-                continue;
-            }
-
             if (!AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(option, settings, out var rejectReason))
             {
                 await audit.RecordAdminActionAsync(
@@ -300,22 +272,13 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                 await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
             }
 
-            using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.AutoAiRecovery))
-            {
-                if (source.PdfDiscoveryEnabled
-                    && source.SourceType is NewsSourceType.PublicPdf or NewsSourceType.PublicHtml)
-                {
-                    await PlaywrightDownloadConcurrencyGate.RunAsync(
-                        () => downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken),
-                        cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await downloadManager.ExecuteDownloadJobAsync(retryJobId, cancellationToken).ConfigureAwait(false);
-                }
-            }
+            AutoAiRecoveryTimelineWriter.AddStep(
+                run,
+                "Retry enqueued",
+                "Waiting for Hangfire download retry (same path as manual recovery).");
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-            var finalize = await recoveryOrchestrator.FinalizeAttemptAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
+            var finalize = await WaitForRecoveryFinalizationAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
             var retryJob = await db.DownloadJobs.AsNoTracking()
                 .FirstAsync(j => j.Id == retryJobId, cancellationToken)
                 .ConfigureAwait(false);
@@ -436,6 +399,27 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         {
             logger.LogWarning(ex, "Could not enqueue recovery follow-up status email for job {JobId}.", failedDownloadJobId);
         }
+    }
+
+    private async Task<SourceRecoveryApplyResultDto> WaitForRecoveryFinalizationAsync(
+        Guid attemptId,
+        CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < MaxRecoveryFinalizePolls; i++)
+        {
+            var result = await recoveryOrchestrator.FinalizeAttemptAsync(attemptId, cancellationToken)
+                .ConfigureAwait(false);
+            if (result.Status is SourceRecoveryAttemptStatus.Succeeded
+                or SourceRecoveryAttemptStatus.Failed
+                or SourceRecoveryAttemptStatus.RolledBack)
+            {
+                return result;
+            }
+
+            await Task.Delay(RecoveryFinalizePollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await recoveryOrchestrator.FinalizeAttemptAsync(attemptId, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<bool> ValidateRetrySuccessAsync(

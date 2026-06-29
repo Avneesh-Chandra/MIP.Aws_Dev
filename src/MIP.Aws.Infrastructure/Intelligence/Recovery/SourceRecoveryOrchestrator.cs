@@ -265,6 +265,7 @@ public sealed class SourceRecoveryOrchestrator(
                 new { job.Id },
                 cancellationToken).ConfigureAwait(false);
 
+            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
             return ToApplyResult(attempt);
         }
 
@@ -292,6 +293,7 @@ public sealed class SourceRecoveryOrchestrator(
                 new { job.Id, job.ErrorMessage, retainedConfig = true },
                 cancellationToken).ConfigureAwait(false);
 
+            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
             return ToApplyResult(attempt);
         }
 
@@ -308,6 +310,7 @@ public sealed class SourceRecoveryOrchestrator(
             new { job.Id, job.ErrorMessage },
             cancellationToken).ConfigureAwait(false);
 
+        await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
         return ToApplyResult(attempt);
     }
 
@@ -714,6 +717,33 @@ public sealed class SourceRecoveryOrchestrator(
                 source.ModifiedAt = DateTimeOffset.UtcNow;
             });
 
+    private async Task TryNotifyRecoveryFollowUpAsync(
+        SourceRecoveryAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        if (attempt.DownloadJobId is not Guid failedJobId)
+        {
+            return;
+        }
+
+        try
+        {
+            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueRecoveryFollowUpAfterRunAsync(
+                    db,
+                    failedJobId,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not enqueue recovery follow-up status email for attempt {AttemptId}.",
+                attempt.Id);
+        }
+    }
+
     private async Task<bool> TryHealOrphanedApplyAsync(
         SourceRecoveryAttempt attempt,
         CancellationToken cancellationToken)
@@ -747,6 +777,8 @@ public sealed class SourceRecoveryOrchestrator(
         attempt.Status = SourceRecoveryAttemptStatus.RetryEnqueued;
         attempt.ResultSummary ??= "Configuration applied; download retry in progress.";
         attempt.PredictedSuccessPercent ??= TryReadPredictedPercentFromAnalysis(attempt);
+        attempt.AppliedByUserId ??= versions
+            .FirstOrDefault(v => v.Status == SourceConfigurationVersionStatus.Candidate)?.CreatedByUserId;
         attempt.RollbackVersionId ??= versions
             .FirstOrDefault(v => v.Status == SourceConfigurationVersionStatus.Rollback)?.Id;
         attempt.CandidateVersionId ??= versions

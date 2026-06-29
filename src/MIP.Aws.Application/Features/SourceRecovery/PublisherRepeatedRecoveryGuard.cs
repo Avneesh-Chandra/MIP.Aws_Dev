@@ -5,30 +5,29 @@ using MIP.Aws.Domain.Security;
 namespace MIP.Aws.Application.Features.SourceRecovery;
 
 /// <summary>
-/// Prevents auto-recovery from re-applying the same publisher baseline when it is already active
-/// and the failure is caused by publisher/network blocking rather than configuration drift.
+/// Helpers for publisher baseline recovery. Baseline fields may already match the known-good
+/// configuration because guards apply them before each download; auto-recovery must still run
+/// the same apply-and-retry path as manual recovery in that case.
 /// </summary>
 public static class PublisherRepeatedRecoveryGuard
 {
     public const string SkipSummary =
         "Known-good publisher baseline is already active. This failure is likely publisher or datacenter network blocking and cannot be fixed by re-applying the same selectors.";
 
+    /// <summary>
+    /// Intentionally does not skip upfront: <see cref="AlAyamPublicPdfBaseline"/> fields are often
+    /// pre-applied by download guards, so manual and auto recovery share the same suggestion and
+    /// apply path even when configuration already looks correct.
+    /// </summary>
     public static bool ShouldSkipRepeatedBaselineRecovery(
         NewsSource source,
         string? failureCode,
-        string? errorMessage)
-    {
-        if (!HasKnownGoodBaselineApplied(source))
-        {
-            return false;
-        }
+        string? errorMessage) => false;
 
-        return IsNonRetriablePublisherFailure(failureCode, errorMessage);
-    }
-
-    public static bool IsRedundantBaselineOption(NewsSource source, SourceRecoveryOptionDto option) =>
-        HasKnownGoodBaselineApplied(source)
-        && PublisherRecoveryBaseline.IsBaselineRecoveryPatch(source.ConnectorKey, option.Patch);
+    /// <summary>
+    /// Baseline publisher patches are valid auto-recovery candidates even when source fields match.
+    /// </summary>
+    public static bool IsRedundantBaselineOption(NewsSource source, SourceRecoveryOptionDto option) => false;
 
     public static bool HasKnownGoodBaselineApplied(NewsSource source)
     {

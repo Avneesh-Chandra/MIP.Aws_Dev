@@ -171,7 +171,15 @@ public static class DownloadMonitorBatchOutcomeHelper
                      && r.CreatedAt >= notBefore
                      && r.CompletedAt == null,
                 cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false)
+            || await db.SourceRecoveryAttempts.AsNoTracking()
+                .AnyAsync(
+                    a => !a.IsDeleted
+                         && sourceIds.Contains(a.NewsSourceId)
+                         && a.CreatedAt >= notBefore
+                         && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued,
+                    cancellationToken)
+                .ConfigureAwait(false);
     }
 
     public static async Task<IReadOnlyList<PendingBatchRecoverySource>> GetPendingAutoRecoverySourcesForBatchAsync(

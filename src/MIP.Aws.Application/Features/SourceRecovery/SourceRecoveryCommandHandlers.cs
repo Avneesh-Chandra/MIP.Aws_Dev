@@ -134,6 +134,19 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
             .ToDictionaryAsync(u => u.Id, cancellationToken)
             .ConfigureAwait(false);
 
+        var retryJobIds = attempts
+            .Where(a => a.RetryDownloadJobId.HasValue)
+            .Select(a => a.RetryDownloadJobId!.Value)
+            .Distinct()
+            .ToList();
+        var retryJobs = retryJobIds.Count == 0
+            ? new Dictionary<Guid, DownloadJobStatus>()
+            : await db.DownloadJobs.AsNoTracking()
+                .Where(j => retryJobIds.Contains(j.Id))
+                .Select(j => new { j.Id, j.Status })
+                .ToDictionaryAsync(j => j.Id, j => j.Status, cancellationToken)
+                .ConfigureAwait(false);
+
         return attempts.Select(a =>
         {
             IReadOnlyList<SourceRecoveryOptionDto> options;
@@ -157,7 +170,7 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 ? "Automatic AI Recovery"
                 : a.AppliedByUserId is Guid uid && users.TryGetValue(uid, out var user)
                     ? user.Email ?? user.UserName ?? uid.ToString()
-                    : "—";
+                    : "Manual AI Recovery";
 
             autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
             var resultSummary = a.ResultSummary
@@ -165,8 +178,23 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                                 ?? (a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
                                     ? "Download retry in progress."
                                     : null);
-            var predicted = a.PredictedSuccessPercent;
+            var predicted = a.PredictedSuccessPercent
+                            ?? (a.SelectedOptionIndex >= 0
+                                ? options.FirstOrDefault(o => o.OptionIndex == a.SelectedOptionIndex)?.PredictedSuccessPercent
+                                : options.FirstOrDefault()?.PredictedSuccessPercent);
             int? actual = a.ActualSuccessPercent;
+            if (actual is null
+                && a.RetryDownloadJobId is Guid retryJobId
+                && retryJobs.TryGetValue(retryJobId, out var retryStatus))
+            {
+                actual = retryStatus switch
+                {
+                    DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery => 100,
+                    DownloadJobStatus.Failed or DownloadJobStatus.FailedAfterAutoAiRecovery => 0,
+                    _ => null
+                };
+            }
+
             if (actual is null && autoAiRun?.CompletedAt is not null)
             {
                 actual = autoAiRun.Status switch

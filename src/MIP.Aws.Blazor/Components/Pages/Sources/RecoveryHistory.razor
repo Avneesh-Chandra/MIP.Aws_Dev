@@ -58,14 +58,14 @@
                 <MudTd>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                         <MudChip T="string" Size="Size.Small" Color="@StatusColor(context)">@FormatStatus(context)</MudChip>
-                        @if (ShowsAutoAiRecoveryDetails(context))
+                        @if (ShowsRecoveryDetails(context))
                         {
-                            <MudTooltip Text="@AutoAiRecoveryDetailsTooltip(context)">
+                            <MudTooltip Text="@RecoveryDetailsTooltip(context)">
                                 <MudIconButton Icon="@Icons.Material.Filled.Info"
                                                Size="Size.Small"
-                                               Color="@AutoAiRecoveryInfoColor(context)"
-                                               aria-label="View automatic AI recovery details"
-                                               OnClick="@(() => ViewAutoAiRecoveryDetailsAsync(context))" />
+                                               Color="@RecoveryDetailsInfoColor(context)"
+                                               aria-label="View AI recovery details"
+                                               OnClick="@(() => ViewRecoveryDetailsAsync(context))" />
                             </MudTooltip>
                         }
                     </MudStack>
@@ -83,7 +83,11 @@
                 <MudTd>
                     @if (context.PredictedSuccessPercent is int predicted)
                     {
-                        <span>@predicted% → @(context.ActualSuccessPercent?.ToString() ?? "—")%</span>
+                        <span>@predicted% → @(FormatActualSuccessPercent(context))</span>
+                    }
+                    else if (context.ActualSuccessPercent is int actualOnly)
+                    {
+                        <span>— → @actualOnly%</span>
                     }
                     else
                     {
@@ -133,16 +137,26 @@
         item.IsAutomatic
         && item.Status is SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack;
 
-    private static bool ShowsAutoAiRecoveryDetails(SourceRecoveryHistoryItemDto item) =>
-        item.IsAutomatic && (IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item));
+    private static bool ShowsRecoveryDetails(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic
+            ? IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item)
+            : item.Status is SourceRecoveryAttemptStatus.Succeeded
+                or SourceRecoveryAttemptStatus.Failed
+                or SourceRecoveryAttemptStatus.RolledBack
+                or SourceRecoveryAttemptStatus.RetryEnqueued;
 
-    private static Color AutoAiRecoveryInfoColor(SourceRecoveryHistoryItemDto item) =>
-        IsAutoAiRecoveryFailure(item) ? Color.Error : Color.Success;
+    private static Color RecoveryDetailsInfoColor(SourceRecoveryHistoryItemDto item) =>
+        item.Status is SourceRecoveryAttemptStatus.Failed or SourceRecoveryAttemptStatus.RolledBack
+            || IsAutoAiRecoveryFailure(item)
+            ? Color.Error
+            : Color.Success;
 
-    private static string AutoAiRecoveryDetailsTooltip(SourceRecoveryHistoryItemDto item) =>
-        IsAutoAiRecoveryFailure(item)
-            ? "View automatic AI recovery attempt details"
-            : "View AI recovery details";
+    private static string RecoveryDetailsTooltip(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic
+            ? (IsAutoAiRecoveryFailure(item)
+                ? "View automatic AI recovery attempt details"
+                : "View AI recovery details")
+            : "View manual AI recovery details";
 
     private static string FormatSuccessStatus(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic ? SuccessByAutoAiRecovery : SuccessByAiRecovery;
@@ -178,10 +192,10 @@
             new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Medium });
     }
 
-    private Task ViewAutoAiRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item) =>
-        IsAiRecoverySuccess(item)
-            ? ViewAiRecoverySuccessDetailsAsync(item)
-            : ViewAutoAiRecoveryFailureDetailsAsync(item);
+    private Task ViewRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic && IsAutoAiRecoveryFailure(item)
+            ? ViewAutoAiRecoveryFailureDetailsAsync(item)
+            : ViewAiRecoverySuccessDetailsAsync(item);
 
     private static string FormatStatus(SourceRecoveryHistoryItemDto item) =>
         item.Status switch
@@ -202,6 +216,14 @@
 
     private static Color StatusColor(SourceRecoveryHistoryItemDto item) =>
         IsAutoAiRecoveryFailure(item) ? Color.Error : StatusColor(item.Status);
+
+    private static string FormatActualSuccessPercent(SourceRecoveryHistoryItemDto item) =>
+        item.ActualSuccessPercent switch
+        {
+            int actual => $"{actual}%",
+            null when item.Status == SourceRecoveryAttemptStatus.RetryEnqueued => "pending",
+            _ => "—"
+        };
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";

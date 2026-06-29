@@ -280,7 +280,7 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
-    public void Should_skip_repeated_AlAyam_baseline_when_config_already_active_and_pdf_invalid()
+    public void Does_not_skip_AlAyam_baseline_when_config_already_active_baseline_guard_pre_applies()
     {
         var source = new NewsSource
         {
@@ -294,25 +294,6 @@ public sealed class AutoAiRecoveryTests
         };
 
         Assert.True(AlAyamPublicPdfBaseline.HasKnownGoodConfiguration(source));
-        Assert.True(PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
-            source,
-            "PdfValidationFailed",
-            "Response appears to be HTML instead of a PDF."));
-    }
-
-    [Fact]
-    public void Should_not_skip_AlAyam_recovery_when_baseline_not_yet_applied()
-    {
-        var source = new NewsSource
-        {
-            Name = AlAyamPublicPdfBaseline.SourceName,
-            ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey,
-            UseHeadlessBrowser = false,
-            PdfLinkSelector = AlAyamPublicPdfBaseline.Broken.PdfLinkSelector,
-            BaseUrl = AlAyamPublicPdfBaseline.Broken.EpaperUrl
-        };
-
-        Assert.False(AlAyamPublicPdfBaseline.HasKnownGoodConfiguration(source));
         Assert.False(PublisherRepeatedRecoveryGuard.ShouldSkipRepeatedBaselineRecovery(
             source,
             "PdfValidationFailed",
@@ -320,7 +301,7 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
-    public void Redundant_baseline_option_filtered_when_AlAyam_already_configured()
+    public void Does_not_filter_redundant_AlAyam_baseline_option_for_auto_recovery()
     {
         var source = new NewsSource
         {
@@ -359,7 +340,7 @@ public sealed class AutoAiRecoveryTests
                 []),
             []);
         Assert.Single(options);
-        Assert.True(PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, options[0]));
+        Assert.False(PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, options[0]));
     }
 
     [Fact]

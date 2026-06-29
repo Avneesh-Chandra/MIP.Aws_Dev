@@ -513,7 +513,7 @@ public sealed class OperatorDownloadMonitorService(
 
         var appliedBy = attempt.IsAutomatic
             ? "Automatic AI Recovery"
-            : "—";
+            : "Manual AI Recovery";
         if (!attempt.IsAutomatic && attempt.AppliedByUserId is Guid userId)
         {
             var user = await db.Users.AsNoTracking()
