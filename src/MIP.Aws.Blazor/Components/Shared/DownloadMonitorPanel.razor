@@ -48,7 +48,7 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">
                 Refresh
             </MudButton>
-            @if (CanAbortActiveDownloads)
+            @if (CanAbortBatch)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Cancel"
                            OnClick="AbortActiveWorkAsync" Disabled="_aborting || _loading">
@@ -56,7 +56,7 @@
                 </MudButton>
             }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
-                       OnClick="ExecuteBatchAsync" Disabled="@(_batchExecuting || _batchProgress?.IsActive == true)">
+                       OnClick="ExecuteBatchAsync" Disabled="@(_batchExecuting || BatchBlocksNewRun)">
                 Execute PDF download Task
             </MudButton>
         </MudStack>
@@ -72,7 +72,7 @@
                         @_batchProgress.CurrentPhase
                     </MudChip>
                     <MudSpacer />
-                    @if (CanAbortActiveDownloads)
+                    @if (CanAbortBatch)
                     {
                         <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
                                    StartIcon="@Icons.Material.Filled.Cancel"
@@ -409,9 +409,19 @@
 
     private string RootClass => Embedded ? "mi-exec-download-monitor-panel" : null!;
 
-    private bool CanAbortActiveDownloads =>
-        _batchProgress?.IsActive == true
-        || _workloads?.HasActiveWork == true;
+    /// <summary>Show abort when a batch is incomplete, active, or Hangfire/DB work is still queued.</summary>
+    private bool CanAbortBatch =>
+        _batchProgress is { IsComplete: false }
+        || _workloads?.BatchProgress is { IsComplete: false }
+        || _batchProgress?.IsActive == true
+        || _workloads?.HasActiveWork == true
+        || (_workloads?.PendingHangfireDownloadJobs ?? 0) > 0;
+
+    private bool CanAbortActiveDownloads => CanAbortBatch;
+
+    private bool BatchBlocksNewRun =>
+        _batchProgress is { IsComplete: false, IsActive: true }
+        || _workloads?.BatchProgress is { IsComplete: false, IsActive: true };
 
     private bool _loading = true;
     private bool _batchExecuting;

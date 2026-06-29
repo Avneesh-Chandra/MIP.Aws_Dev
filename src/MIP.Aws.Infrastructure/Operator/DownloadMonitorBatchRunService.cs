@@ -367,7 +367,11 @@ public sealed class DownloadMonitorBatchRunService(
         var isComplete = completedCount >= total
                          || (inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow))
                          || batchExpired;
-        var isActive = !isComplete && (inProgressCount > 0 || (waitingCount > 0 && withinStaggerWindow));
+        // Keep batch "active" while downloads/recovery run, or when the orchestrator died with sources still pending.
+        var isActive = !isComplete && (
+            inProgressCount > 0
+            || autoRecoveryCount > 0
+            || waitingCount > 0 && (withinStaggerWindow || !orchestratorAlive));
         var percent = total == 0
             ? 100
             : Math.Round((completedCount + (isComplete && waitingCount > 0 ? waitingCount : 0)) * 100.0 / total, 1);
@@ -402,16 +406,26 @@ public sealed class DownloadMonitorBatchRunService(
             batchExpired);
 
         var downloadInProgressCount = inProgressCount - autoRecoveryCount;
-        await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueInitialBatchStatusEmailAsync(
-                db,
-                entry.StartedAt,
-                isComplete,
-                entry.HangfireJobId,
-                downloadInProgressCount,
-                waitingCount,
-                logger,
-                cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueInitialBatchStatusEmailAsync(
+                    db,
+                    entry.StartedAt,
+                    isComplete,
+                    entry.HangfireJobId,
+                    downloadInProgressCount,
+                    waitingCount,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not evaluate batch status email for batch started at {StartedAt:u}; download monitor progress will still load.",
+                entry.StartedAt);
+        }
 
         return new DownloadMonitorBatchProgressResult(
             entry.StartedAt,

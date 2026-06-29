@@ -75,7 +75,10 @@ public sealed class DownloadMonitorWorkloadService(
                                && !HangfireBatchOrchestratorState.IsBatchOrchestratorJobAlive(batchProgress.HangfireJobId)
                                && pendingHangfire == 0;
 
+        var hasIncompleteBatch = batchProgress is { IsComplete: false };
+
         var hasActiveWork = batchProgress?.IsActive == true
+                            || hasIncompleteBatch
                             || hasOrphanedBatch
                             || jobResults.Count > 0
                             || pendingHangfire > 0;
