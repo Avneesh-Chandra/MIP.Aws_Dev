@@ -5,7 +5,7 @@ namespace MIP.Aws.Application.Abstractions.Downloading;
 /// </summary>
 public interface IDownloadManager
 {
-    Task ExecuteSourceDownloadAsync(Guid newsSourceId, CancellationToken cancellationToken);
+    Task ExecuteSourceDownloadAsync(Guid newsSourceId, CancellationToken cancellationToken, string? correlationId = null);
 
     Task ExecuteDownloadJobAsync(Guid downloadJobId, CancellationToken cancellationToken);
 

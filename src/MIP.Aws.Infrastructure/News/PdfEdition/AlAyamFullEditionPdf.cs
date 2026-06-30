@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Infrastructure.Browser;
@@ -98,6 +99,21 @@ public static class AlAyamFullEditionPdf
         NewsSource source,
         IHttpClientFactory? httpClientFactory,
         ILogger logger,
+        CancellationToken cancellationToken) =>
+        await TryDiscoverAsync(
+            startPageUrl,
+            source,
+            httpClientFactory,
+            AlAyamOutboundHttpClient.NoOp,
+            logger,
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<AlAyamFullEditionResult?> TryDiscoverAsync(
+        Uri startPageUrl,
+        NewsSource source,
+        IHttpClientFactory? httpClientFactory,
+        IAlAyamOutboundHttpClient outbound,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         if (httpClientFactory is not null)
@@ -106,6 +122,7 @@ public static class AlAyamFullEditionPdf
             var httpUrl = knownPdf
                           ?? await AlAyamHttpPdfPath.TryDiscoverPdfUrlAsync(
                               httpClientFactory,
+                              outbound,
                               source,
                               logger,
                               cancellationToken)
@@ -132,6 +149,21 @@ public static class AlAyamFullEditionPdf
         NewsSource? source,
         IHttpClientFactory? httpClientFactory,
         ILogger logger,
+        CancellationToken cancellationToken) =>
+        await TryDownloadBytesAsync(
+            startPageUrl,
+            source,
+            httpClientFactory,
+            AlAyamOutboundHttpClient.NoOp,
+            logger,
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<byte[]?> TryDownloadBytesAsync(
+        Uri startPageUrl,
+        NewsSource? source,
+        IHttpClientFactory? httpClientFactory,
+        IAlAyamOutboundHttpClient outbound,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         if (httpClientFactory is not null && source is not null)
@@ -139,6 +171,7 @@ public static class AlAyamFullEditionPdf
             var knownPdf = IsDirectPdfUrl(startPageUrl) ? startPageUrl : null;
             var fromHttp = await AlAyamHttpPdfPath.TryDownloadBytesAsync(
                     httpClientFactory,
+                    outbound,
                     source,
                     knownPdf,
                     logger,
@@ -175,6 +208,23 @@ public static class AlAyamFullEditionPdf
         Uri? warmUpUrl,
         IHttpClientFactory? httpClientFactory,
         ILogger logger,
+        CancellationToken cancellationToken) =>
+        await TryDownloadBytesWithFallbacksAsync(
+            candidateOrPage,
+            source,
+            warmUpUrl,
+            httpClientFactory,
+            AlAyamOutboundHttpClient.NoOp,
+            logger,
+            cancellationToken).ConfigureAwait(false);
+
+    public static async Task<byte[]?> TryDownloadBytesWithFallbacksAsync(
+        Uri candidateOrPage,
+        NewsSource source,
+        Uri? warmUpUrl,
+        IHttpClientFactory? httpClientFactory,
+        IAlAyamOutboundHttpClient outbound,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         if (httpClientFactory is not null)
@@ -182,6 +232,7 @@ public static class AlAyamFullEditionPdf
             var knownPdf = IsDirectPdfUrl(candidateOrPage) ? candidateOrPage : null;
             var fromHttp = await AlAyamHttpPdfPath.TryDownloadBytesAsync(
                     httpClientFactory,
+                    outbound,
                     source,
                     knownPdf,
                     logger,
@@ -216,7 +267,7 @@ public static class AlAyamFullEditionPdf
                      .Where(u => u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
                      .DistinctBy(u => u.ToString().TrimEnd('/'), StringComparer.OrdinalIgnoreCase))
         {
-            var bytes = await TryDownloadBytesAsync(start, source, httpClientFactory, logger, cancellationToken)
+            var bytes = await TryDownloadBytesAsync(start, source, httpClientFactory, outbound, logger, cancellationToken)
                 .ConfigureAwait(false);
             if (bytes is not null && bytes.Length > 0 && PdfEditionContentFetcher.IsPdf(bytes))
             {
@@ -262,7 +313,7 @@ public static class AlAyamFullEditionPdf
 
             await page.GotoAsync(
                 epaperUri.ToString(),
-                new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs })
+                new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = timeoutMs })
                 .ConfigureAwait(false);
 
             try
@@ -272,7 +323,14 @@ public static class AlAyamFullEditionPdf
             }
             catch (TimeoutException)
             {
-                // continue polling
+                // Cloudflare or ads may prevent network idle.
+            }
+
+            var selector = source?.PdfLinkSelector?.Split(',')[0].Trim() ?? AllPagesLinkSelector;
+            if (!await WaitForEpaperReadyAsync(page, selector, source, logger, cancellationToken).ConfigureAwait(false))
+            {
+                logger.LogWarning("Al Ayam e-paper page did not become ready on {Url}", epaperUri);
+                return null;
             }
 
             if (source is not null)
@@ -389,6 +447,48 @@ public static class AlAyamFullEditionPdf
         }
 
         return source is not null ? ResolveEpaperUri(source, startPageUrl) : new Uri(EpaperUrl);
+    }
+
+    private static async Task<bool> WaitForEpaperReadyAsync(
+        IPage page,
+        string selector,
+        NewsSource? source,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var maxAttempts = source is null
+            ? 30
+            : Math.Max(30, Math.Clamp(source.DownloadWaitTimeoutSeconds, 60, 600) / 2);
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (await page.Locator(selector).CountAsync().ConfigureAwait(false) > 0)
+            {
+                return true;
+            }
+
+            var html = await page.ContentAsync().ConfigureAwait(false);
+            if (PublisherAccessGuard.LooksLikePublisherEpaper(html))
+            {
+                return true;
+            }
+
+            if (PublisherAccessGuard.IsAccessBlocked(html))
+            {
+                logger.LogDebug("Al Ayam: waiting for Cloudflare challenge (attempt {Attempt})", attempt + 1);
+            }
+            else if (ExtractPdfUrlFromHtml(html) is not null)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+        }
+
+        var finalHtml = await page.ContentAsync().ConfigureAwait(false);
+        return await page.Locator(selector).CountAsync().ConfigureAwait(false) > 0
+               || PublisherAccessGuard.LooksLikePublisherEpaper(finalHtml);
     }
 
     private static async Task<(Uri? PdfUrl, bool AccessBlocked)> ResolvePdfUrlAsync(

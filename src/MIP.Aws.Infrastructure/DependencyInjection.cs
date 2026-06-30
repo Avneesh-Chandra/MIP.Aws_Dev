@@ -42,6 +42,7 @@ using MIP.Aws.Infrastructure.Reporting;
 using MIP.Aws.Infrastructure.Telemetry;
 using Hangfire;
 using Hangfire.SqlServer;
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -77,6 +78,7 @@ public static class DependencyInjection
         services.Configure<HangfireHostOptions>(configuration.GetSection(HangfireHostOptions.SectionName));
         services.Configure<AiSelectorSuggestionOptions>(configuration.GetSection(AiSelectorSuggestionOptions.SectionName));
         services.Configure<RedisCacheOptions>(configuration.GetSection(RedisCacheOptions.SectionName));
+        services.Configure<PublisherOutboundOptions>(configuration.GetSection(PublisherOutboundOptions.SectionName));
         services.AddSingleton<ICacheService, InMemoryCacheService>();
 
         services.AddMipAwsCloudServices(configuration);
@@ -98,6 +100,21 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ar,en-US;q=0.9,en;q=0.8");
         });
+        services.AddHttpClient(AlAyamOutboundHttpClient.DirectClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(3);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+                client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8");
+                client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("ar,en-US;q=0.9,en;q=0.8");
+            })
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var handler = new SocketsHttpHandler();
+                AlAyamOutboundHttpClient.ConfigureDirectHandler(sp, handler);
+                return handler;
+            });
+        services.AddSingleton<IAlAyamOutboundHttpClient, AlAyamOutboundHttpClient>();
 
         services.AddSingleton<ITelemetryService, NoopTelemetryService>();
         services.AddSingleton<IHeadlessBrowserService, PlaywrightHeadlessBrowserService>();

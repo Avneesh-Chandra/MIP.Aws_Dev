@@ -5,6 +5,7 @@ using MIP.Aws.Application.Abstractions.Telemetry;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Infrastructure.Browser;
+using MIP.Aws.Infrastructure.News.PdfEdition;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,28 @@ public sealed class NewsIngestionJobs(IServiceScopeFactory scopeFactory, ILogger
                     }
                 },
                 activity => activity?.SetTag("newsSourceId", newsSourceId)),
+            CancellationToken.None).ConfigureAwait(false);
+
+    [Queue(HangfireQueueOptions.Names.Downloads)]
+    [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task DownloadAlAyamDeferredAsync(Guid newsSourceId, int deferredAttemptIndex) =>
+        await PlaywrightDownloadConcurrencyGate.RunAsync(
+            () => RunDownloadAsync(
+                "hangfire.downloads.alayam-deferred",
+                async manager =>
+                {
+                    using (DownloadExecutionContext.UseTrigger(DownloadJobTrigger.Scheduled))
+                    {
+                        var correlationId = $"{AlAyamPublisherTiming.DeferredCorrelationPrefix}{deferredAttemptIndex}";
+                        await manager.ExecuteSourceDownloadAsync(newsSourceId, CancellationToken.None, correlationId)
+                            .ConfigureAwait(false);
+                    }
+                },
+                activity =>
+                {
+                    activity?.SetTag("newsSourceId", newsSourceId);
+                    activity?.SetTag("deferredAttemptIndex", deferredAttemptIndex);
+                }),
             CancellationToken.None).ConfigureAwait(false);
 
     [Queue(HangfireQueueOptions.Names.Downloads)]

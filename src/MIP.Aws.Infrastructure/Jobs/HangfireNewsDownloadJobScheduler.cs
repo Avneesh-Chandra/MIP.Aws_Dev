@@ -11,6 +11,14 @@ public sealed class HangfireNewsDownloadJobScheduler : INewsDownloadJobScheduler
     public void EnqueueDownloadSingle(Guid newsSourceId) =>
         BackgroundJob.Enqueue<NewsIngestionJobs>(j => j.DownloadSourceAsync(newsSourceId));
 
+    public void ScheduleDownloadSingle(Guid newsSourceId, TimeSpan delay) =>
+        BackgroundJob.Schedule<NewsIngestionJobs>(j => j.DownloadSourceAsync(newsSourceId), delay);
+
+    public void ScheduleAlAyamDeferredDownload(Guid newsSourceId, int deferredAttemptIndex, TimeSpan delay) =>
+        BackgroundJob.Schedule<NewsIngestionJobs>(
+            j => j.DownloadAlAyamDeferredAsync(newsSourceId, deferredAttemptIndex),
+            delay);
+
     public void EnqueueDownloadJob(Guid downloadJobId) =>
         BackgroundJob.Enqueue<NewsIngestionJobs>(j => j.DownloadJobAsync(downloadJobId));
 

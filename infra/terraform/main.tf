@@ -168,6 +168,7 @@ module "ecs" {
   bedrock_region                  = var.bedrock_region
   bedrock_model_id                = var.bedrock_model_id
   identity_default_admin_password = var.identity_default_admin_password
+  alayam_http_proxy_uri           = var.alayam_http_proxy_uri
   tags                            = local.common_tags
 }
 

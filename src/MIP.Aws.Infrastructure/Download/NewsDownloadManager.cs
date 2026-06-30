@@ -21,6 +21,8 @@ using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Infrastructure.News;
+using MIP.Aws.Infrastructure.News.PdfEdition;
+using MIP.Aws.Infrastructure.Operator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -43,12 +45,13 @@ public sealed class NewsDownloadManager(
     IEnumerable<IArticleExtractor> extractors,
     HtmlEditionStoryExtractor editionStoryExtractor,
     IIntelligenceJobScheduler intelligenceJobs,
+    INewsDownloadJobScheduler downloadScheduler,
     ILogger<NewsDownloadManager> logger,
     IOptions<StorageOptions> storageOptions) : IDownloadManager
 {
     private readonly StorageOptions _storage = storageOptions.Value;
 
-    public async Task ExecuteSourceDownloadAsync(Guid newsSourceId, CancellationToken cancellationToken)
+    public async Task ExecuteSourceDownloadAsync(Guid newsSourceId, CancellationToken cancellationToken, string? correlationId = null)
     {
         var source = await db.NewsSources
             .AsNoTracking()
@@ -76,7 +79,7 @@ public sealed class NewsDownloadManager(
             Id = Guid.NewGuid(),
             NewsSourceId = source.Id,
             Status = DownloadJobStatus.Pending,
-            CorrelationId = Guid.NewGuid().ToString("N"),
+            CorrelationId = correlationId ?? Guid.NewGuid().ToString("N"),
             Trigger = DownloadExecutionContext.CurrentTrigger,
             CreatedAt = DateTimeOffset.UtcNow,
             RetryCount = previousFailures,
@@ -290,6 +293,7 @@ public sealed class NewsDownloadManager(
             if (job.Status == DownloadJobStatus.Failed)
             {
                 await autoAiRecoveryEnqueue.TryEnqueueAfterFailureAsync(job, cancellationToken).ConfigureAwait(false);
+                await TryScheduleAlAyamDeferredDownloadAsync(source, job, cancellationToken).ConfigureAwait(false);
             }
 
             if (job.Status == DownloadJobStatus.Succeeded)
@@ -297,6 +301,50 @@ public sealed class NewsDownloadManager(
                 intelligenceJobs.EnqueueProcessDownloadJob(job.Id);
             }
         }
+    }
+
+    private async Task TryScheduleAlAyamDeferredDownloadAsync(
+        NewsSource source,
+        DownloadJob job,
+        CancellationToken cancellationToken)
+    {
+        if (!AlAyamPublisherTiming.IsAlAyamSource(source)
+            || job.Status != DownloadJobStatus.Failed
+            || !AlAyamPublisherTiming.IsTransientPublisherFailure(job.ErrorMessage))
+        {
+            return;
+        }
+
+        if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
+                db,
+                source.Id,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var dayStart = DateTimeOffset.UtcNow.Date;
+        var deferredToday = await db.DownloadJobs.AsNoTracking()
+            .CountAsync(
+                j => !j.IsDeleted
+                     && j.NewsSourceId == source.Id
+                     && j.CreatedAt >= dayStart
+                     && j.CorrelationId.StartsWith(AlAyamPublisherTiming.DeferredCorrelationPrefix),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var delay = AlAyamPublisherTiming.ResolveDeferredDelay(deferredToday);
+        if (delay is null)
+        {
+            return;
+        }
+
+        downloadScheduler.ScheduleAlAyamDeferredDownload(source.Id, deferredToday, delay.Value);
+        logger.LogInformation(
+            "Scheduled Al Ayam deferred download for {Source} in {Minutes} minute(s) (deferred attempt {Attempt}).",
+            source.Name,
+            (int)delay.Value.TotalMinutes,
+            deferredToday + 1);
     }
 
     public Task<int> CleanupOldArtifactsAsync(int retentionDays, CancellationToken cancellationToken)

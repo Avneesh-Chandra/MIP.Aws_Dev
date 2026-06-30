@@ -38,6 +38,13 @@ resource "aws_lb_target_group" "api" {
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
   target_type = "ip"
+
+  stickiness {
+    type            = "lb_cookie"
+    cookie_duration = 86400
+    enabled         = true
+  }
+
   health_check {
     path                = "/health/live"
     healthy_threshold   = 2

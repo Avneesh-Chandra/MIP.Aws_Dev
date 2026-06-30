@@ -7,6 +7,7 @@ using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
+using MIP.Aws.Infrastructure.News.PdfEdition;
 using MIP.Aws.Infrastructure.Operator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -270,6 +271,15 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
                     "Waiting for reader UI before download retry.");
                 await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+            }
+            else if (AlAyamPublisherTiming.IsAlAyamSource(source))
+            {
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    "Al Ayam warm-up",
+                    "Waiting for today's INAF PDF link on the e-paper page before retry.");
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await Task.Delay(AlAyamPublisherTiming.AutoRecoveryWarmUp, cancellationToken).ConfigureAwait(false);
             }
 
             AutoAiRecoveryTimelineWriter.AddStep(

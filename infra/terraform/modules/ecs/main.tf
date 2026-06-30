@@ -60,6 +60,11 @@ variable "identity_default_admin_password" {
   type      = string
   sensitive = true
 }
+variable "alayam_http_proxy_uri" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
 variable "tags" { type = map(string) }
 
 locals {
@@ -130,7 +135,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "AutoAiDownloadRecovery__RunAfterScheduledFailure", value = "true" },
         { name = "AutoAiDownloadRecovery__RunAfterManualFailure", value = "true" },
         { name = "AutoAiDownloadRecovery__CooldownMinutesPerSource", value = "15" },
-        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" }
+        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" },
+        { name = "PublisherOutbound__AlAyam__HttpProxyUri", value = var.alayam_http_proxy_uri }
       ]
       secrets = [
         { name = "Jwt__SigningKey", valueFrom = var.jwt_secret_arn }
@@ -208,7 +214,8 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "AutoAiDownloadRecovery__RunAfterScheduledFailure", value = "true" },
         { name = "AutoAiDownloadRecovery__RunAfterManualFailure", value = "true" },
         { name = "AutoAiDownloadRecovery__CooldownMinutesPerSource", value = "15" },
-        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" }
+        { name = "AutoAiDownloadRecovery__MaxAutoRecoveryAttemptsPerDayPerSource", value = "5" },
+        { name = "PublisherOutbound__AlAyam__HttpProxyUri", value = var.alayam_http_proxy_uri }
       ]
       logConfiguration = {
         logDriver = "awslogs"

@@ -12,6 +12,7 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
     EditionDiscoveryHtmlClient htmlClient,
     EditionUrlDiscoveryRegistry editionRegistry,
     IHttpClientFactory httpClientFactory,
+    IAlAyamOutboundHttpClient alAyamOutbound,
     ILogger<PlaywrightPdfEditionDiscoveryService> logger) : IPdfEditionDiscoveryService
 {
     public async Task<PdfEditionDiscoveryResult> DiscoverAsync(NewsSource source, bool allowPlaywright, CancellationToken cancellationToken)
@@ -38,6 +39,7 @@ public sealed class PlaywrightPdfEditionDiscoveryService(
                         pageUrl,
                         source,
                         httpClientFactory,
+                        alAyamOutbound,
                         logger,
                         cancellationToken)
                     .ConfigureAwait(false);

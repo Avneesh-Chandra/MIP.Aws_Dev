@@ -36,3 +36,6 @@ db_engine                 = "sqlserver-ex"
 
 api_image_tag    = "latest"
 worker_image_tag = "latest"
+
+# Optional: commercial HTTP proxy when Al Ayam blocks raw AWS egress.
+# alayam_http_proxy_uri = "http://user:pass@proxy.example:8080"

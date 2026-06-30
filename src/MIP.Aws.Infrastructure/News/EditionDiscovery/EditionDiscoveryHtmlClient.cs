@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using MIP.Aws.Application.Abstractions.Browser;
+using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Infrastructure.News;
 using Microsoft.Extensions.Logging;
 
@@ -8,6 +9,7 @@ namespace MIP.Aws.Infrastructure.News.EditionDiscovery;
 
 public sealed class EditionDiscoveryHtmlClient(
     IHttpClientFactory httpClientFactory,
+    IAlAyamOutboundHttpClient alAyamOutbound,
     IHeadlessBrowserService headless,
     ILogger<EditionDiscoveryHtmlClient> logger)
 {
@@ -84,6 +86,25 @@ public sealed class EditionDiscoveryHtmlClient(
     {
         try
         {
+            if (pageUri.Host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase))
+            {
+                var relayed = await alAyamOutbound.GetAsync(pageUri, cancellationToken).ConfigureAwait(false);
+                if (relayed is not null)
+                {
+                    if (relayed.StatusCode is (int)HttpStatusCode.Forbidden or (int)HttpStatusCode.TooManyRequests)
+                    {
+                        return string.Empty;
+                    }
+
+                    if (relayed.StatusCode is >= 400 and < 600)
+                    {
+                        return string.Empty;
+                    }
+
+                    return System.Text.Encoding.UTF8.GetString(relayed.Body);
+                }
+            }
+
             var client = httpClientFactory.CreateClient(nameof(EditionDiscoveryHtmlClient));
             using var response = await client.GetAsync(pageUri, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)

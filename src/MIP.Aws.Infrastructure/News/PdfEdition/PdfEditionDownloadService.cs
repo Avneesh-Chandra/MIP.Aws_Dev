@@ -26,6 +26,7 @@ public sealed class PdfEditionDownloadService(
     PdfEditionContentFetcher contentFetcher,
     ISourcePageEditionDateVerifier sourcePageEditionDateVerifier,
     IHttpClientFactory httpClientFactory,
+    IAlAyamOutboundHttpClient alAyamOutbound,
     IPdfEditionFailureArtifactService failureArtifacts,
     IPdfEditionDownloadProgressTracker progress,
     IPublisherComplianceGate complianceGate,
@@ -552,15 +553,14 @@ public sealed class PdfEditionDownloadService(
                         logger,
                         cancellationToken).ConfigureAwait(false);
                 }
-                else if ((best.Method == PdfDiscoveryMethod.ConfiguredLinkSelector
-                          || AlAyamFullEditionPdf.IsDirectPdfUrl(best.Url))
-                         && AlAyamFullEditionPdf.UsesClickPath(source))
+                else if (AlAyamFullEditionPdf.UsesClickPath(source))
                 {
                     bytes = await AlAyamFullEditionPdf.TryDownloadBytesWithFallbacksAsync(
                         best.Url,
                         source,
                         ResolveWarmUpUrl(source),
                         httpClientFactory,
+                        alAyamOutbound,
                         logger,
                         cancellationToken).ConfigureAwait(false);
                 }
@@ -691,7 +691,7 @@ public sealed class PdfEditionDownloadService(
             && (AlAyamFullEditionPdf.IsDirectPdfUrl(manualUri)
                 || manualUri.AbsolutePath.Contains("/epaper", StringComparison.OrdinalIgnoreCase)))
         {
-            var alAyam = await AlAyamFullEditionPdf.TryDiscoverAsync(manualUri, source, httpClientFactory, logger, cancellationToken)
+            var alAyam = await AlAyamFullEditionPdf.TryDiscoverAsync(manualUri, source, httpClientFactory, alAyamOutbound, logger, cancellationToken)
                 .ConfigureAwait(false);
             if (alAyam?.PdfUrl is not null)
             {
@@ -1067,15 +1067,14 @@ public sealed class PdfEditionDownloadService(
                 continue;
             }
 
-            if (AlAyamFullEditionPdf.UsesClickPath(source)
-                && (candidate.Method == PdfDiscoveryMethod.ConfiguredLinkSelector
-                    || AlAyamFullEditionPdf.IsDirectPdfUrl(candidate.Url)))
+            if (AlAyamFullEditionPdf.UsesClickPath(source))
             {
                 var clickBytes = await AlAyamFullEditionPdf.TryDownloadBytesWithFallbacksAsync(
                     candidate.Url,
                     source,
                     warmUpUrl,
                     httpClientFactory,
+                    alAyamOutbound,
                     logger,
                     cancellationToken).ConfigureAwait(false);
                 if (clickBytes is not null && clickBytes.Length > 0)

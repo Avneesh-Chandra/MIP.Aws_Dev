@@ -176,3 +176,10 @@ variable "aws_application_arn" {
   type        = string
   default     = ""
 }
+
+variable "alayam_http_proxy_uri" {
+  description = "Optional HTTP forward proxy for Al Ayam publisher fetches from AWS egress (commercial proxy or NAT endpoint)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

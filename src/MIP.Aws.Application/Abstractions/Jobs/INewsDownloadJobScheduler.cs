@@ -9,6 +9,10 @@ public interface INewsDownloadJobScheduler
 
     void EnqueueDownloadSingle(Guid newsSourceId);
 
+    void ScheduleDownloadSingle(Guid newsSourceId, TimeSpan delay);
+
+    void ScheduleAlAyamDeferredDownload(Guid newsSourceId, int deferredAttemptIndex, TimeSpan delay);
+
     void EnqueueDownloadJob(Guid downloadJobId);
 
     void EnqueueCleanup(int retentionDays);
