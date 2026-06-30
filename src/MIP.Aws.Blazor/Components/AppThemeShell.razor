@@ -41,7 +41,21 @@
         UserTz.Changed += OnUserTimeZoneChanged;
     }
 
-    private void OnUserTimeZoneChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnUserTimeZoneChanged() => _ = InvokeAsync(() =>
+    {
+        try
+        {
+            StateHasChanged();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Shell disposed.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit disconnected.
+        }
+    });
 
     public void Dispose() => UserTz.Changed -= OnUserTimeZoneChanged;
 }

@@ -4,4 +4,18 @@
 
 <PageTitle>Download Monitor</PageTitle>
 
-<DownloadMonitorPanel />
+<ErrorBoundary>
+    <ChildContent>
+        <DownloadMonitorPanel />
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <MudAlert Severity="Severity.Error" Class="my-4">
+            Download monitor failed to render: @ex.Message
+            <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true))">
+                Reload
+            </MudButton>
+        </MudAlert>
+    </ErrorContent>
+</ErrorBoundary>
+
+@inject NavigationManager Navigation
