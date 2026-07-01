@@ -94,7 +94,8 @@ public sealed class OperatorDownloadMonitorService(
             {
                 successCount++;
             }
-            else if (row.LastDownloadStatus == DownloadMonitorStatusLabels.Failed)
+            else if (row.LastDownloadStatus is DownloadMonitorStatusLabels.Failed
+                     or DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery)
             {
                 failedCount++;
             }
@@ -303,7 +304,11 @@ public sealed class OperatorDownloadMonitorService(
         var failureCode = audit?.FailureCode ?? ExtractFailureCode(job.ErrorMessage);
         var complianceBlocked = !source.IsDownloadAllowed
             || failureCode is "DownloadNotAllowed" or "ComplianceBlocked";
+        var statusLabel = job.Status == DownloadJobStatus.FailedAfterAutoAiRecovery
+            ? DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery
+            : DownloadMonitorStatusLabels.Failed;
         var suggested = ManualInterventionSuggestions.GetSuggestion(
+            statusLabel,
             failureCode,
             job.ErrorMessage,
             source.RequiresManualAction,
@@ -994,7 +999,7 @@ public sealed class OperatorDownloadMonitorService(
 
         var suggested = manualRequired
             ? ManualInterventionSuggestions.GetSuggestion(
-                failureCode, failureReason, source.RequiresManualAction, complianceBlocked)
+                status, failureCode, failureReason, source.RequiresManualAction, complianceBlocked)
             : null;
 
         var adminInformed = latestJobId is Guid informedJobId

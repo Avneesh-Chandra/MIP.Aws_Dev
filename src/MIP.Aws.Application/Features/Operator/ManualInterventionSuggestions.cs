@@ -3,8 +3,18 @@ namespace MIP.Aws.Application.Features.Operator;
 /// <summary>Maps portal/PDF failure codes to operator-facing manual intervention guidance.</summary>
 public static class ManualInterventionSuggestions
 {
-    public static string GetSuggestion(string? failureCode, string? failureMessage, bool requiresManualAction, bool complianceBlocked)
+    public static string GetSuggestion(
+        string? statusLabel,
+        string? failureCode,
+        string? failureMessage,
+        bool requiresManualAction,
+        bool complianceBlocked)
     {
+        if (statusLabel == DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery)
+        {
+            return "Automatic AI recovery exhausted all eligible suggestions today. Review recovery details and inform Admin.";
+        }
+
         if (complianceBlocked)
         {
             return "Admin must review IsDownloadAllowed and publisher licensing approval.";
@@ -87,6 +97,7 @@ public static class ManualInterventionSuggestions
         requiresManualAction
         || complianceBlocked
         || statusLabel is DownloadMonitorStatusLabels.Failed
+            or DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery
             or DownloadMonitorStatusLabels.ManualActionRequired
             or DownloadMonitorStatusLabels.ComplianceBlocked
             or DownloadMonitorStatusLabels.NoPdfAvailable;
