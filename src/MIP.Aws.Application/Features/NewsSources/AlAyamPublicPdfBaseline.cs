@@ -11,6 +11,15 @@ public static class AlAyamPublicPdfBaseline
     public const string EpaperUrl = "https://www.alayam.com/epaper";
     public const string PdfLinkSelector = "a#aPDFdownloadAllPages, a:has-text('كل الصفحات')";
 
+    /// <summary>
+    /// Broader INAF href selector for late-published editions when the all-pages anchor is slow to appear.
+    /// Matches <see cref="MIP.Aws.Infrastructure.News.PdfEdition.AlAyamFullEditionPdf.AllPagesLinkSelector"/>.
+    /// </summary>
+    public const string InafDirectPdfLinkSelector =
+        "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']";
+
+    public const int ExtendedWaitTimeoutSeconds = 300;
+
     public static class Broken
     {
         public const string PdfLinkSelector = "a#brokenRecoveryTestLink, a:has-text('INVALID DOWNLOAD')";
@@ -34,6 +43,28 @@ public static class AlAyamPublicPdfBaseline
         EpaperUrl,
         EpaperUrl,
         180,
+        true);
+
+    /// <summary>
+    /// Recovery patch for slow e-paper publish: broader INAF link selector and longer Playwright wait.
+    /// </summary>
+    public static SourceRecoveryConfigurationPatchDto ExtendedInafWaitRecoveryPatch() => new(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        InafDirectPdfLinkSelector,
+        EpaperUrl,
+        EpaperUrl,
+        EpaperUrl,
+        ExtendedWaitTimeoutSeconds,
         true);
 
     public static bool IsSource(NewsSource source) =>

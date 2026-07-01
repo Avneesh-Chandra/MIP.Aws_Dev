@@ -64,7 +64,7 @@ public sealed class AutoAiRecoveryTests
         var options = SourceRecoveryHeuristicBuilder.MergePublisherHeuristics(
             context,
             []);
-        Assert.Single(options);
+        Assert.Equal(2, options.Count);
         Assert.True(options[0].Patch.UseHeadlessBrowser);
         Assert.Equal(AlAyamPublicPdfBaseline.PdfLinkSelector, options[0].Patch.PdfLinkSelector);
 
@@ -339,8 +339,9 @@ public sealed class AutoAiRecoveryTests
                 [],
                 []),
             []);
-        Assert.Single(options);
+        Assert.Equal(2, options.Count);
         Assert.False(PublisherRepeatedRecoveryGuard.IsRedundantBaselineOption(source, options[0]));
+        Assert.Equal(AlAyamPublicPdfBaseline.InafDirectPdfLinkSelector, options[1].Patch.PdfLinkSelector);
     }
 
     [Fact]
@@ -349,6 +350,50 @@ public sealed class AutoAiRecoveryTests
         Assert.True(PublisherRepeatedRecoveryGuard.IsNonRetriablePublisherFailure(
             null,
             "Publisher blocked automated access (Cloudflare/bot protection) on the e-paper page."));
+    }
+
+    [Fact]
+    public void AlAyam_second_heuristic_is_safe_for_auto_apply_with_extended_inaf_wait()
+    {
+        var context = new SourceRecoveryAnalysisContext(
+            Guid.NewGuid(),
+            AlAyamPublicPdfBaseline.SourceName,
+            Guid.NewGuid(),
+            SourceRecoveryFailureTypes.PdfLinkNotFound,
+            "PdfLinkNotFound",
+            "Al Ayam all-pages click path could not download a PDF from i.alayam.com.",
+            AlAyamPublicPdfBaseline.EpaperUrl,
+            AlAyamPublicPdfBaseline.EpaperUrl,
+            null,
+            0,
+            DateTimeOffset.UtcNow,
+            "{}",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            [],
+            [],
+            []);
+
+        var options = SourceRecoveryHeuristicBuilder.BuildOptions(context);
+        Assert.Equal(2, options.Count);
+        Assert.Equal(1, options[1].OptionIndex);
+        Assert.Contains("INAF", options[1].Title, StringComparison.OrdinalIgnoreCase);
+
+        var settings = new AutoAiDownloadRecoveryOptions
+        {
+            MinimumConfidence = 0.70,
+            MaximumRiskAllowed = "Medium"
+        };
+
+        Assert.True(
+            AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(options[1], settings, out var reason),
+            reason);
     }
 
     [Fact]

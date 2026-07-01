@@ -12,7 +12,7 @@ public static class SourceRecoveryHeuristicBuilder
     {
         if (IsAlAyamPublicPdf(context))
         {
-            return [BuildAlAyamHeuristicOption(context)];
+            return BuildAlAyamHeuristicOptions(context);
         }
 
         if (IsAawsatPublicPdf(context))
@@ -77,7 +77,7 @@ public static class SourceRecoveryHeuristicBuilder
         SourceRecoveryOptionDto? publisherOption = null;
         if (IsAlAyamPublicPdf(context))
         {
-            publisherOption = BuildAlAyamHeuristicOption(context);
+            return MergeAlAyamHeuristics(context, aiOptions);
         }
         else if (IsAawsatPublicPdf(context))
         {
@@ -114,7 +114,27 @@ public static class SourceRecoveryHeuristicBuilder
         || context.EditionUrl?.Contains("aawsat.com", StringComparison.OrdinalIgnoreCase) == true
         || context.FailureMessage.Contains("aawsat.com", StringComparison.OrdinalIgnoreCase);
 
-    private static SourceRecoveryOptionDto BuildAlAyamHeuristicOption(SourceRecoveryAnalysisContext? context = null)
+    private static IReadOnlyList<SourceRecoveryOptionDto> BuildAlAyamHeuristicOptions(SourceRecoveryAnalysisContext context) =>
+    [
+        BuildAlAyamBaselineHeuristicOption(context),
+        BuildAlAyamExtendedInafWaitHeuristicOption(context)
+    ];
+
+    private static IReadOnlyList<SourceRecoveryOptionDto> MergeAlAyamHeuristics(
+        SourceRecoveryAnalysisContext context,
+        IReadOnlyList<SourceRecoveryOptionDto> aiOptions)
+    {
+        var merged = new List<SourceRecoveryOptionDto>(BuildAlAyamHeuristicOptions(context));
+        var index = merged.Count;
+        foreach (var option in aiOptions)
+        {
+            merged.Add(option with { OptionIndex = index++ });
+        }
+
+        return merged;
+    }
+
+    private static SourceRecoveryOptionDto BuildAlAyamBaselineHeuristicOption(SourceRecoveryAnalysisContext? context = null)
     {
         var blocked = IsPublisherBlockedFailure(context);
         return new SourceRecoveryOptionDto(
@@ -136,6 +156,35 @@ public static class SourceRecoveryHeuristicBuilder
                 : ["PdfLinkSelector", "BaseUrl", "EditionUrl", "PdfDiscoveryPageUrl"],
             ["discover", "download"],
             AlAyamPublicPdfBaseline.RecoveryPatch(),
+            []);
+    }
+
+    private static SourceRecoveryOptionDto BuildAlAyamExtendedInafWaitHeuristicOption(
+        SourceRecoveryAnalysisContext? context = null)
+    {
+        var latePublish = context is not null
+                          && (context.FailureType == SourceRecoveryFailureTypes.PdfLinkNotFound
+                              || context.FailureMessage.Contains("could not download a PDF from i.alayam.com", StringComparison.OrdinalIgnoreCase)
+                              || context.FailureMessage.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+                              || context.FailureMessage.Contains("interrupted", StringComparison.OrdinalIgnoreCase));
+
+        return new SourceRecoveryOptionDto(
+            1,
+            latePublish
+                ? "Wait longer for Al Ayam INAF PDF link on e-paper"
+                : "Use Al Ayam INAF direct PDF href selector",
+            latePublish
+                ? "Al Ayam often publishes the daily INAF PDF minutes after batch start. Use the broader INAF href selector and extend Playwright wait before download."
+                : "Target the embedded i.alayam.com INAF PDF href directly instead of only the all-pages Arabic label link.",
+            latePublish
+                ? "Sets PdfLinkSelector to the INAF href pattern and DownloadWaitTimeoutSeconds to 300 for WaitForEpaperReady."
+                : "Sets PdfLinkSelector to match i.alayam.com INAF PDF anchors on the e-paper page.",
+            86,
+            latePublish ? 84 : 80,
+            SourceRecoveryRiskLevel.Low,
+            ["PdfLinkSelector", "BaseUrl", "EditionUrl", "PdfDiscoveryPageUrl", "DownloadWaitTimeoutSeconds", "UseHeadlessBrowser"],
+            ["discover", "wait", "download"],
+            AlAyamPublicPdfBaseline.ExtendedInafWaitRecoveryPatch(),
             []);
     }
 
