@@ -133,7 +133,8 @@
             {
                 _details = await Mediator.Send(new GetAiRecoverySuccessDetailsByAttemptQuery(attemptId));
             }
-            else if (RecoveryDownloadJobId is Guid recoveryJobId)
+
+            if (_details is null && RecoveryDownloadJobId is Guid recoveryJobId)
             {
                 _details = await Mediator.Send(new GetAiRecoverySuccessDetailsQuery(recoveryJobId));
             }

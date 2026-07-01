@@ -348,7 +348,7 @@ public sealed class OperatorDownloadMonitorService(
         var recoveryJob = await db.DownloadJobs.AsNoTracking()
             .FirstOrDefaultAsync(j => j.Id == recoveryDownloadJobId && !j.IsDeleted, cancellationToken)
             .ConfigureAwait(false);
-        if (recoveryJob is null || recoveryJob.Status != DownloadJobStatus.Succeeded)
+        if (recoveryJob is null || !IsSuccessfulRetryJob(recoveryJob.Status))
         {
             return null;
         }
@@ -374,7 +374,7 @@ public sealed class OperatorDownloadMonitorService(
             .Include(a => a.NewsSource)
             .FirstOrDefaultAsync(a => a.Id == attemptId && !a.IsDeleted, cancellationToken)
             .ConfigureAwait(false);
-        if (attempt is null || attempt.Status != SourceRecoveryAttemptStatus.Succeeded)
+        if (attempt is null)
         {
             return null;
         }
@@ -387,10 +387,31 @@ public sealed class OperatorDownloadMonitorService(
                 .ConfigureAwait(false);
             attempt = await EnsureRecoveryAttemptFinalizedAsync(attempt, retryJobId, cancellationToken)
                 .ConfigureAwait(false);
+            if (recoveryJob is null && attempt.RetryDownloadJobId is Guid updatedRetryJobId)
+            {
+                recoveryJob = await db.DownloadJobs.AsNoTracking()
+                    .FirstOrDefaultAsync(j => j.Id == updatedRetryJobId && !j.IsDeleted, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        if (!CanLoadAiRecoverySuccessDetails(attempt, recoveryJob))
+        {
+            return null;
         }
 
         return await BuildAiRecoverySuccessDetailsAsync(attempt, recoveryJob, cancellationToken).ConfigureAwait(false);
     }
+
+    private static bool IsSuccessfulRetryJob(DownloadJobStatus status) =>
+        status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery;
+
+    private static bool CanLoadAiRecoverySuccessDetails(
+        SourceRecoveryAttempt attempt,
+        DownloadJob? recoveryJob) =>
+        attempt.Status == SourceRecoveryAttemptStatus.Succeeded
+        || attempt.ActualSuccessPercent == 100
+        || (recoveryJob is not null && IsSuccessfulRetryJob(recoveryJob.Status));
 
     private async Task<SourceRecoveryAttempt> EnsureRecoveryAttemptFinalizedAsync(
         SourceRecoveryAttempt attempt,
@@ -559,7 +580,7 @@ public sealed class OperatorDownloadMonitorService(
             selected?.Description ?? string.Empty,
             selected?.ExpectedFix,
             attempt.PredictedSuccessPercent ?? selected?.PredictedSuccessPercent,
-            attempt.ActualSuccessPercent ?? (recoveryJob?.Status == DownloadJobStatus.Succeeded ? 100 : null),
+            attempt.ActualSuccessPercent ?? (recoveryJob is not null && IsSuccessfulRetryJob(recoveryJob.Status) ? 100 : null),
             appliedBy,
             attempt.AppliedAt,
             attempt.CompletedAt ?? recoveryJob?.CompletedAt,
