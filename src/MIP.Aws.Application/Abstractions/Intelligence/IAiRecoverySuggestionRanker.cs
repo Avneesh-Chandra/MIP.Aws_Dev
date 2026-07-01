@@ -7,5 +7,6 @@ public interface IAiRecoverySuggestionRanker
 {
     IReadOnlyList<SourceRecoveryOptionDto> RankForAutoRecovery(
         IReadOnlyList<SourceRecoveryOptionDto> options,
-        AutoAiDownloadRecoveryOptions settings);
+        AutoAiDownloadRecoveryOptions settings,
+        IReadOnlySet<int>? excludedOptionIndices = null);
 }

@@ -350,4 +350,50 @@ public sealed class AutoAiRecoveryTests
             null,
             "Publisher blocked automated access (Cloudflare/bot protection) on the e-paper page."));
     }
+
+    [Fact]
+    public void Ranker_skips_previously_tried_option_indices()
+    {
+        var settings = new AutoAiDownloadRecoveryOptions
+        {
+            MinimumConfidence = 0.60,
+            MaximumRiskAllowed = "High",
+            MaxSuggestionsToTry = 5
+        };
+
+        var options = new[]
+        {
+            new SourceRecoveryOptionDto(
+                0,
+                "Suggestion A",
+                "A",
+                "A",
+                95,
+                90,
+                SourceRecoveryRiskLevel.Low,
+                [],
+                [],
+                new SourceRecoveryConfigurationPatchDto(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true),
+                []),
+            new SourceRecoveryOptionDto(
+                1,
+                "Suggestion B",
+                "B",
+                "B",
+                90,
+                85,
+                SourceRecoveryRiskLevel.Low,
+                [],
+                [],
+                new SourceRecoveryConfigurationPatchDto(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true),
+                [])
+        };
+
+        var ranker = new AiRecoverySuggestionRanker();
+        var ranked = ranker.RankForAutoRecovery(options, settings, new HashSet<int> { 0 });
+
+        Assert.Single(ranked);
+        Assert.Equal(1, ranked[0].OptionIndex);
+        Assert.Equal("Suggestion B", ranked[0].Title);
+    }
 }

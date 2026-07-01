@@ -10,15 +10,20 @@ public sealed class AiRecoverySuggestionRanker : IAiRecoverySuggestionRanker
 {
     public IReadOnlyList<SourceRecoveryOptionDto> RankForAutoRecovery(
         IReadOnlyList<SourceRecoveryOptionDto> options,
-        AutoAiDownloadRecoveryOptions settings)
+        AutoAiDownloadRecoveryOptions settings,
+        IReadOnlySet<int>? excludedOptionIndices = null)
     {
+        var excluded = excludedOptionIndices ?? EmptyExcluded;
         return options
+            .Where(o => !excluded.Contains(o.OptionIndex))
             .Where(o => AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(o, settings, out _))
             .OrderByDescending(Score)
             .ThenBy(o => o.RiskLevel)
             .Take(Math.Max(1, settings.MaxSuggestionsToTry))
             .ToList();
     }
+
+    private static readonly HashSet<int> EmptyExcluded = [];
 
     internal static double Score(SourceRecoveryOptionDto option)
     {

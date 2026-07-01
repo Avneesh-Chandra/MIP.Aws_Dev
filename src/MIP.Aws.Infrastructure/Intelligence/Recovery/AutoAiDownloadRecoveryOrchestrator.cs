@@ -168,19 +168,24 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         attempt.AutoAiRecoveryRunId = run.Id;
         run.SourceRecoveryAttemptId = attempt.Id;
 
-        var ranked = ranker.RankForAutoRecovery(analysis.Options, settings);
+        var triedOptionIndices = await AutoAiRecoveryTriedSuggestions
+            .LoadForSourceTodayAsync(db, sourceId, cancellationToken)
+            .ConfigureAwait(false);
+        var ranked = ranker.RankForAutoRecovery(analysis.Options, settings, triedOptionIndices);
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.SuggestionRanked,
             "AutoAiRecoveryRun",
             run.Id.ToString(),
-            new { rankedCount = ranked.Count },
+            new { rankedCount = ranked.Count, excludedTriedCount = triedOptionIndices.Count },
             cancellationToken).ConfigureAwait(false);
 
         if (ranked.Count == 0)
         {
-            var noSuggestionsSummary = PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
-                ? PublisherRepeatedRecoveryGuard.SkipSummary
-                : "No safe AI recovery suggestions met confidence and risk thresholds.";
+            var noSuggestionsSummary = triedOptionIndices.Count > 0
+                ? "All eligible AI recovery suggestions were already tried today without success."
+                : PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
+                    ? PublisherRepeatedRecoveryGuard.SkipSummary
+                    : "No safe AI recovery suggestions met confidence and risk thresholds.";
             var noSuggestionsStatus = PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
                 ? AutoAiRecoveryRunStatus.SkippedRepeatedBaseline
                 : AutoAiRecoveryRunStatus.SkippedNoSuggestions;
@@ -373,12 +378,12 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
             if (ShouldStopAfterFailedRetry(source, retryJob))
             {
-                return await CompleteFailureAsync(
-                        run,
-                        job,
-                        BuildNonRetriableRecoverySummary(retryJob),
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    "Publisher/network block",
+                    "Retry failed with a publisher or network block; trying the next AI suggestion if available.",
+                    succeeded: false);
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -387,10 +392,6 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
     private static bool ShouldStopAfterFailedRetry(NewsSource source, DownloadJob retryJob) =>
         PublisherRepeatedRecoveryGuard.IsNonRetriablePublisherFailure(null, retryJob.ErrorMessage);
-
-    private static string BuildNonRetriableRecoverySummary(DownloadJob retryJob) =>
-        "Auto AI recovery stopped: publisher access or network blocking cannot be fixed by selector changes. "
-        + (retryJob.ErrorMessage ?? "Retry failed.");
 
     private async Task NotifyBatchRecoveryFollowUpAsync(
         Guid failedDownloadJobId,
