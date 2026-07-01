@@ -67,6 +67,7 @@ public sealed record SourceRecoveryHistoryItemDto(
     Guid? RetryDownloadJobId,
     string FailureType,
     string? SelectedOptionTitle,
+    DateTimeOffset? SuggestionLastAttemptAt,
     string AppliedByLabel,
     SourceRecoveryAttemptStatus Status,
     string? ResultSummary,

@@ -397,6 +397,38 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
+    public void SuggestionHistory_formats_exhausted_summary_with_titles_and_timestamps()
+    {
+        var when = new DateTimeOffset(2026, 7, 1, 7, 22, 0, TimeSpan.Zero);
+        var entries = new[]
+        {
+            new TriedSuggestionEntry(0, "Restore Al Ayam e-paper PDF link selector and page URL", when),
+            new TriedSuggestionEntry(1, "Wait longer for Al Ayam INAF PDF link on e-paper", when.AddMinutes(8))
+        };
+
+        var summary = AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(entries);
+
+        Assert.Contains("Restore Al Ayam", summary, StringComparison.Ordinal);
+        Assert.Contains("INAF", summary, StringComparison.Ordinal);
+        Assert.Contains("2026-07-01 07:22", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SuggestionHistory_parses_applied_steps_from_timeline()
+    {
+        var timeline = AutoAiRecoveryTimelineJson.Serialize([
+            new AutoAiRecoveryTimelineStepDto(1, "Suggestion 1 applied", DateTimeOffset.Parse("2026-07-01T07:30:00Z"),
+                "Wait longer for Al Ayam INAF PDF link on e-paper", true)
+        ]);
+
+        var parsed = AutoAiRecoverySuggestionHistory.ParseAppliedSuggestions(timeline);
+
+        Assert.Single(parsed);
+        Assert.Equal(1, parsed[0].OptionIndex);
+        Assert.Contains("INAF", parsed[0].Title, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Ranker_skips_previously_tried_option_indices()
     {
         var settings = new AutoAiDownloadRecoveryOptions

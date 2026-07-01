@@ -1,6 +1,7 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Auditing;
 using MIP.Aws.Application.Abstractions.Intelligence;
+using MIP.Aws.Application.Features.AutoAiRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Domain.Security;
@@ -158,10 +159,10 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 .ToDictionaryAsync(j => j.Id, j => j.Status, cancellationToken)
                 .ConfigureAwait(false);
 
+        var sourceIds = attempts.Select(a => a.NewsSourceId).Distinct().ToList();
         var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
         var editionDayStart = new DateTimeOffset(editionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var editionDayEnd = editionDayStart.AddDays(1);
-        var sourceIds = attempts.Select(a => a.NewsSourceId).Distinct().ToList();
         var sourcesWithEditionToday = sourceIds.Count == 0
             ? new HashSet<Guid>()
             : await db.PdfEditionDownloads.AsNoTracking()
@@ -176,7 +177,9 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 .ToHashSetAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        return attempts.Select(a =>
+        var triedBeforeCache = new Dictionary<(Guid SourceId, long BeforeTicks), IReadOnlyList<TriedSuggestionEntry>>();
+        var items = new List<SourceRecoveryHistoryItemDto>(attempts.Count);
+        foreach (var a in attempts)
         {
             IReadOnlyList<SourceRecoveryOptionDto> options;
             try
@@ -190,10 +193,27 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 options = Array.Empty<SourceRecoveryOptionDto>();
             }
 
-            var title = a.SelectedOptionIndex >= 0
-                ? options.FirstOrDefault(o => o.OptionIndex == a.SelectedOptionIndex)?.Title
-                : null;
-            title ??= options.FirstOrDefault()?.Title;
+            autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
+            IReadOnlyList<TriedSuggestionEntry> triedBeforeThisRun = [];
+            if (a.IsAutomatic)
+            {
+                var before = autoAiRun?.CreatedAt ?? a.CreatedAt;
+                var cacheKey = (a.NewsSourceId, before.UtcTicks);
+                if (!triedBeforeCache.TryGetValue(cacheKey, out triedBeforeThisRun!))
+                {
+                    triedBeforeThisRun = await AutoAiRecoverySuggestionHistory
+                        .LoadTriedEntriesForSourceTodayAsync(
+                            db,
+                            a.NewsSourceId,
+                            cancellationToken,
+                            beforeCreatedAt: before)
+                        .ConfigureAwait(false);
+                    triedBeforeCache[cacheKey] = triedBeforeThisRun;
+                }
+            }
+
+            var (suggestionTitle, suggestionLastAttemptAt, displaySummary) =
+                AutoAiRecoverySuggestionHistory.ResolveHistoryDisplay(a, autoAiRun, options, triedBeforeThisRun);
 
             var appliedBy = a.IsAutomatic
                 ? "Automatic AI Recovery"
@@ -203,8 +223,8 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                         ? "Manual AI Recovery"
                         : "—";
 
-            autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
-            var resultSummary = a.ResultSummary
+            var resultSummary = displaySummary
+                                ?? a.ResultSummary
                                 ?? autoAiRun?.ResultSummary
                                 ?? (a.Status == SourceRecoveryAttemptStatus.RetryEnqueued
                                     ? "Download retry in progress."
@@ -241,7 +261,8 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                     AutoAiRecoveryRunStatus.CompletedSuccess => 100,
                     AutoAiRecoveryRunStatus.CompletedFailure
                         or AutoAiRecoveryRunStatus.CandidateFailed
-                        or AutoAiRecoveryRunStatus.SkippedNoSuggestions => 0,
+                        or AutoAiRecoveryRunStatus.SkippedNoSuggestions
+                        or AutoAiRecoveryRunStatus.SkippedRepeatedBaseline => 0,
                     _ => null
                 };
             }
@@ -266,14 +287,15 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 resultSummary ??= a.ResultSummary ?? autoAiRun?.ResultSummary ?? "Download retry failed.";
             }
 
-            return new SourceRecoveryHistoryItemDto(
+            items.Add(new SourceRecoveryHistoryItemDto(
                 a.Id,
                 a.NewsSourceId,
                 a.NewsSource.Name,
                 a.DownloadJobId,
                 a.RetryDownloadJobId,
                 a.FailureType,
-                title,
+                suggestionTitle,
+                suggestionLastAttemptAt,
                 appliedBy,
                 status,
                 resultSummary,
@@ -281,8 +303,10 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 actual,
                 a.IsAutomatic,
                 a.CreatedAt,
-                a.CompletedAt ?? autoAiRun?.CompletedAt);
-        }).ToList();
+                a.CompletedAt ?? autoAiRun?.CompletedAt));
+        }
+
+        return items;
     }
 }
 

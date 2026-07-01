@@ -181,8 +181,20 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
 
         if (ranked.Count == 0)
         {
-            var noSuggestionsSummary = triedOptionIndices.Count > 0
-                ? "All eligible AI recovery suggestions were already tried today without success."
+            var triedBefore = await AutoAiRecoverySuggestionHistory
+                .LoadTriedEntriesForSourceTodayAsync(db, sourceId, cancellationToken, excludeRunId: run.Id)
+                .ConfigureAwait(false);
+            foreach (var entry in triedBefore.OrderBy(e => e.LastAttemptAt))
+            {
+                AutoAiRecoveryTimelineWriter.AddStep(
+                    run,
+                    $"Suggestion {entry.OptionIndex} already tried",
+                    $"{entry.Title} (last attempt {entry.LastAttemptAt:yyyy-MM-dd HH:mm} UTC)",
+                    succeeded: false);
+            }
+
+            var noSuggestionsSummary = triedBefore.Count > 0
+                ? AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(triedBefore)
                 : PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
                     ? PublisherRepeatedRecoveryGuard.SkipSummary
                     : "No safe AI recovery suggestions met confidence and risk thresholds.";

@@ -53,7 +53,17 @@
                 <MudTd>@UserTz.Format(context.CreatedAt, "yyyy-MM-dd HH:mm")</MudTd>
                 <MudTd>@context.SourceName</MudTd>
                 <MudTd>@context.FailureType</MudTd>
-                <MudTd>@(context.SelectedOptionTitle ?? "—")</MudTd>
+                <MudTd>
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">@(context.SelectedOptionTitle ?? "—")</MudText>
+                        @if (context.SuggestionLastAttemptAt is DateTimeOffset lastAt)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Last tried @UserTz.Format(lastAt, "yyyy-MM-dd HH:mm")
+                            </MudText>
+                        }
+                    </MudStack>
+                </MudTd>
                 <MudTd>@context.AppliedByLabel</MudTd>
                 <MudTd>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
@@ -137,31 +147,41 @@
     private static bool IsAiRecoverySuccess(SourceRecoveryHistoryItemDto item) =>
         ResolveDisplayStatus(item) == SourceRecoveryAttemptStatus.Succeeded;
 
+    private static bool IsAutoAiRecoverySkipped(SourceRecoveryHistoryItemDto item) =>
+        item.IsAutomatic
+        && (item.SelectedOptionTitle?.StartsWith("Skipped", StringComparison.OrdinalIgnoreCase) == true
+            || item.ResultSummary?.Contains("already tried today", StringComparison.OrdinalIgnoreCase) == true);
+
     private static bool IsAutoAiRecoveryFailure(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
+        && !IsAutoAiRecoverySkipped(item)
         && ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Failed
             or SourceRecoveryAttemptStatus.RolledBack;
 
     private static bool ShowsRecoveryDetails(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
-            ? IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item)
+            ? IsAiRecoverySuccess(item) || IsAutoAiRecoveryFailure(item) || IsAutoAiRecoverySkipped(item)
             : ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Succeeded
                 or SourceRecoveryAttemptStatus.Failed
                 or SourceRecoveryAttemptStatus.RolledBack
                 or SourceRecoveryAttemptStatus.RetryEnqueued;
 
     private static Color RecoveryDetailsInfoColor(SourceRecoveryHistoryItemDto item) =>
-        ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Failed
-            or SourceRecoveryAttemptStatus.RolledBack
-            || IsAutoAiRecoveryFailure(item)
-            ? Color.Error
-            : Color.Success;
+        IsAutoAiRecoverySkipped(item)
+            ? Color.Warning
+            : ResolveDisplayStatus(item) is SourceRecoveryAttemptStatus.Failed
+                or SourceRecoveryAttemptStatus.RolledBack
+                || IsAutoAiRecoveryFailure(item)
+                ? Color.Error
+                : Color.Success;
 
     private static string RecoveryDetailsTooltip(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
-            ? (IsAutoAiRecoveryFailure(item)
-                ? "View automatic AI recovery attempt details"
-                : "View AI recovery details")
+            ? (IsAutoAiRecoverySkipped(item)
+                ? "View skipped automatic recovery details"
+                : IsAutoAiRecoveryFailure(item)
+                    ? "View automatic AI recovery attempt details"
+                    : "View AI recovery details")
             : "View manual AI recovery details";
 
     private static string FormatSuccessStatus(SourceRecoveryHistoryItemDto item) =>
@@ -199,7 +219,7 @@
     }
 
     private Task ViewRecoveryDetailsAsync(SourceRecoveryHistoryItemDto item) =>
-        item.IsAutomatic && IsAutoAiRecoveryFailure(item)
+        item.IsAutomatic && (IsAutoAiRecoveryFailure(item) || IsAutoAiRecoverySkipped(item))
             ? ViewAutoAiRecoveryFailureDetailsAsync(item)
             : ViewAiRecoverySuccessDetailsAsync(item);
 
