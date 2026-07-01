@@ -254,7 +254,9 @@ public sealed class DownloadMonitorBatchRunService(
             .ConfigureAwait(false);
 
         var anyJobCreated = latestJobBySource.Count > 0;
-        var pendingHangfire = HangfireOperatorDownloadJobCleanup.CountMonitoredSourceDownloadJobs(sourceIds);
+        var pendingHangfireSourceIds = HangfireOperatorDownloadJobCleanup
+            .GetMonitoredSourceIdsWithPendingDownloadJobs(sourceIds);
+        var pendingHangfire = pendingHangfireSourceIds.Count;
         var orchestratorProcessing = HangfireBatchOrchestratorState.IsBatchOrchestratorJobProcessing(entry.HangfireJobId);
         var orchestratorAlive = HangfireBatchOrchestratorState.IsBatchOrchestratorJobAlive(entry.HangfireJobId);
         var orchestratorStale = orchestratorProcessing && !anyJobCreated && elapsed > TimeSpan.FromMinutes(10);
@@ -322,6 +324,15 @@ public sealed class DownloadMonitorBatchRunService(
                     "Skipped"));
                 continue;
             }
+            else if (pendingHangfireSourceIds.Contains(source.Id))
+            {
+                waitingCount++;
+                activities.Add(new DownloadMonitorBatchActivityResult(
+                    source.Name,
+                    DescribeHangfireQueuedActivity(sourceIndex, interval, entry.StartedAt, anyJobCreated),
+                    "Waiting"));
+                continue;
+            }
             else if (elapsed > staggerWindow)
             {
                 failedCount++;
@@ -366,13 +377,15 @@ public sealed class DownloadMonitorBatchRunService(
 
         var completedCount = successCount + failedCount;
         var withinStaggerWindow = DateTimeOffset.UtcNow - entry.StartedAt <= staggerWindow;
-        var isComplete = completedCount >= total
-                         || (inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow))
-                         || batchExpired;
+        var isComplete = pendingHangfire == 0
+                         && (completedCount >= total
+                             || (inProgressCount == 0 && (completedCount >= total || !withinStaggerWindow))
+                             || batchExpired);
         // Keep batch "active" while downloads/recovery run, or when the orchestrator died with sources still pending.
         var isActive = !isComplete && (
             inProgressCount > 0
             || autoRecoveryCount > 0
+            || pendingHangfire > 0
             || waitingCount > 0 && (withinStaggerWindow || !orchestratorAlive));
         var percent = total == 0
             ? 100
@@ -522,6 +535,26 @@ public sealed class DownloadMonitorBatchRunService(
         }
 
         return "Waiting for download worker (queue may be busy)";
+    }
+
+    private static string DescribeHangfireQueuedActivity(
+        int sourceIndex,
+        int intervalMinutes,
+        DateTimeOffset batchStartedAt,
+        bool anyJobCreated)
+    {
+        var slotAt = batchStartedAt.AddMinutes(sourceIndex * intervalMinutes);
+        if (DateTimeOffset.UtcNow < slotAt)
+        {
+            var minutes = (int)Math.Ceiling((slotAt - DateTimeOffset.UtcNow).TotalMinutes);
+            return minutes <= 1
+                ? "Queued in Hangfire — starts within 1 minute"
+                : $"Queued in Hangfire — stagger slot in ~{minutes} minutes";
+        }
+
+        return anyJobCreated
+            ? "Queued in Hangfire — waiting for download worker"
+            : "Queued in Hangfire — worker may be busy with earlier sources";
     }
 
     private static string BuildSummary(

@@ -56,36 +56,81 @@ internal static class HangfireOperatorDownloadJobCleanup
         return removed;
     }
 
-    public static int CountMonitoredSourceDownloadJobs(IReadOnlySet<Guid> monitoredSourceIds)
+    public static int CountMonitoredSourceDownloadJobs(IReadOnlySet<Guid> monitoredSourceIds) =>
+        GetMonitoredSourceIdsWithPendingDownloadJobs(monitoredSourceIds).Count;
+
+    public static HashSet<Guid> GetMonitoredSourceIdsWithPendingDownloadJobs(IReadOnlySet<Guid> monitoredSourceIds)
     {
+        var pending = new HashSet<Guid>();
         if (monitoredSourceIds.Count == 0 || JobStorage.Current is null)
         {
-            return 0;
+            return pending;
         }
 
         try
         {
             var monitor = JobStorage.Current.GetMonitoringApi();
-            var count = 0;
-            count += CountScheduledJobs(monitor.ScheduledJobs(0, 500), monitoredSourceIds);
-            count += CountProcessingJobs(monitor.ProcessingJobs(0, 200), monitoredSourceIds);
+            CollectPendingSourceIds(monitor.ScheduledJobs(0, 500), monitoredSourceIds, pending);
+            CollectPendingSourceIds(monitor.ProcessingJobs(0, 200), monitoredSourceIds, pending);
             foreach (var queue in DownloadQueueNames)
             {
                 try
                 {
-                    count += CountEnqueuedJobs(monitor.EnqueuedJobs(queue, 0, 200), monitoredSourceIds);
+                    CollectPendingSourceIds(monitor.EnqueuedJobs(queue, 0, 200), monitoredSourceIds, pending);
                 }
                 catch
                 {
                     // optional queue
                 }
             }
-
-            return count;
         }
         catch
         {
-            return 0;
+            // Hangfire storage unavailable
+        }
+
+        return pending;
+    }
+
+    private static void CollectPendingSourceIds(
+        JobList<ScheduledJobDto> jobs,
+        IReadOnlySet<Guid> monitoredSourceIds,
+        HashSet<Guid> pending)
+    {
+        foreach (var (_, dto) in jobs)
+        {
+            if (TryGetMonitoredSourceId(dto.Job, monitoredSourceIds, out var sourceId))
+            {
+                pending.Add(sourceId);
+            }
+        }
+    }
+
+    private static void CollectPendingSourceIds(
+        JobList<EnqueuedJobDto> jobs,
+        IReadOnlySet<Guid> monitoredSourceIds,
+        HashSet<Guid> pending)
+    {
+        foreach (var (_, dto) in jobs)
+        {
+            if (TryGetMonitoredSourceId(dto.Job, monitoredSourceIds, out var sourceId))
+            {
+                pending.Add(sourceId);
+            }
+        }
+    }
+
+    private static void CollectPendingSourceIds(
+        IList<KeyValuePair<string, ProcessingJobDto>> jobs,
+        IReadOnlySet<Guid> monitoredSourceIds,
+        HashSet<Guid> pending)
+    {
+        foreach (var (_, dto) in jobs)
+        {
+            if (TryGetMonitoredSourceId(dto.Job, monitoredSourceIds, out var sourceId))
+            {
+                pending.Add(sourceId);
+            }
         }
     }
 
