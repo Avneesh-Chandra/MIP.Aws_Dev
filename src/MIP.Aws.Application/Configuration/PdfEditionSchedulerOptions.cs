@@ -42,7 +42,7 @@ public sealed class PdfEditionSchedulerOptions
     public bool NotificationEnabled { get; set; }
 
     /// <summary>Recipient for legacy manual-action PDF download alerts.</summary>
-    public string AdminRecipientEmail { get; set; } = "adminDownloadPdf@gfh.com";
+    public string AdminRecipientEmail { get; set; } = "admin_mip@gfh.com";
 
     /// <summary>Public portal base URL for email links (e.g. https://api.your-domain.example).</summary>
     public string? AdminPortalUrl { get; set; }

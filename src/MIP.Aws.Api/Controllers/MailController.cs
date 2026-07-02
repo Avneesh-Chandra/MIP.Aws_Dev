@@ -53,7 +53,8 @@ public sealed class MailController(IMediator mediator) : ControllerBase
         await mediator.Send(new UpdateMailSchedulerSettingsCommand(
             body.StatusEmailEnabled,
             body.StatusEmailRecipient,
-            body.MailAutomationEnabled), cancellationToken).ConfigureAwait(false);
+            body.MailAutomationEnabled,
+            body.AdminRecipientEmail), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse.Ok("Scheduler mail settings updated"));
     }
 
@@ -101,5 +102,6 @@ public sealed class MailController(IMediator mediator) : ControllerBase
     public sealed record UpdateMailSchedulerSettingsApiRequest(
         bool StatusEmailEnabled,
         string? StatusEmailRecipient,
-        bool MailAutomationEnabled);
+        bool MailAutomationEnabled,
+        string? AdminRecipientEmail);
 }

@@ -4,6 +4,7 @@ using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.AutoAiRecovery;
 using MIP.Aws.Application.Features.NewsSources;
+using MIP.Aws.Application.Features.Operator;
 using MIP.Aws.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -46,6 +47,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             .ConfigureAwait(false);
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
         var summary = await summaryService.BuildSummaryAsync(monitor, cancellationToken).ConfigureAwait(false);
+        var failureContexts = await LoadFailureContextsAsync(monitor, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(executiveSummaryPrefix))
         {
             summary = string.IsNullOrWhiteSpace(summary)
@@ -57,7 +59,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             monitor,
             portalBase,
             summary,
-            pendingRecoveryNotices: null);
+            pendingRecoveryNotices: null,
+            adminRecipientEmail: ResolveAdminRecipientEmail(scheduler),
+            failureContextsByJobId: failureContexts);
         var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(date);
 
         return await SendHtmlAsync(recipients, subject, html, date, cancellationToken).ConfigureAwait(false);
@@ -92,7 +96,11 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         }
 
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
-        var html = DownloadMonitorRecoveryFollowUpEmailHtmlBuilder.Build(monitorDate, portalBase, sections);
+        var html = DownloadMonitorRecoveryFollowUpEmailHtmlBuilder.Build(
+            monitorDate,
+            portalBase,
+            sections,
+            ResolveAdminRecipientEmail(scheduler));
         var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildRecoveryFollowUpSubject(monitorDate);
 
         return await SendHtmlAsync(recipients, subject, html, monitorDate, cancellationToken).ConfigureAwait(false);
@@ -137,7 +145,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             monitor,
             portalBase,
             summary,
-            pendingNotices);
+            pendingNotices,
+            adminRecipientEmail: ResolveAdminRecipientEmail(scheduler),
+            failureContextsByJobId: await LoadFailureContextsAsync(monitor, cancellationToken).ConfigureAwait(false));
 
         var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(monitorDate);
         return await SendHtmlAsync(recipients, subject, html, monitorDate, cancellationToken).ConfigureAwait(false);
@@ -219,6 +229,49 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             logDate,
             send.ErrorMessage ?? send.Outcome.ToString());
         return false;
+    }
+
+    private static string ResolveAdminRecipientEmail(EffectiveSchedulerMailSettings scheduler) =>
+        string.IsNullOrWhiteSpace(scheduler.AdminRecipientEmail)
+            ? string.Empty
+            : scheduler.AdminRecipientEmail.Trim();
+
+    private async Task<IReadOnlyDictionary<Guid, DownloadMonitorEmailFailureContext>> LoadFailureContextsAsync(
+        DownloadMonitorDto monitor,
+        CancellationToken cancellationToken)
+    {
+        var failedJobIds = monitor.Sources
+            .Where(s => s.ManualInterventionRequired && s.LatestDownloadJobId is Guid)
+            .Select(s => s.LatestDownloadJobId!.Value)
+            .Distinct()
+            .ToList();
+        if (failedJobIds.Count == 0)
+        {
+            return new Dictionary<Guid, DownloadMonitorEmailFailureContext>();
+        }
+
+        var runs = await db.AutoAiRecoveryRuns.AsNoTracking()
+            .Where(r => !r.IsDeleted && failedJobIds.Contains(r.FailedDownloadJobId))
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var contexts = new Dictionary<Guid, DownloadMonitorEmailFailureContext>();
+        foreach (var jobId in failedJobIds)
+        {
+            var run = runs.FirstOrDefault(r => r.FailedDownloadJobId == jobId);
+            if (run is null)
+            {
+                continue;
+            }
+
+            var timeline = AutoAiRecoveryTimelineJson.Deserialize(run.TimelineJson)
+                .Select(step => new DownloadMonitorEmailTimelineStep(step.Step, step.Detail, step.Timestamp))
+                .ToList();
+            contexts[jobId] = new DownloadMonitorEmailFailureContext(run.ResultSummary, timeline);
+        }
+
+        return contexts;
     }
 
     private static string FormatRecoveryStatus(AutoAiRecoveryRunStatus status) => status switch

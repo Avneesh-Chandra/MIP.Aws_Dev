@@ -46,7 +46,8 @@ public sealed record UpdateMailSettingsCommand(
 public sealed record UpdateMailSchedulerSettingsCommand(
     bool StatusEmailEnabled,
     string? StatusEmailRecipient,
-    bool MailAutomationEnabled) : IRequest;
+    bool MailAutomationEnabled,
+    string? AdminRecipientEmail) : IRequest;
 
 public sealed record SendDownloadMonitorStatusEmailCommand(
     DateOnly? MonitorDate,
@@ -62,7 +63,8 @@ public sealed record MailSettingsDto(
     bool StatusEmailEnabled,
     string StatusEmailRecipient,
     bool MailAutomationEnabled,
-    string StatusEmailTimeUtc);
+    string StatusEmailTimeUtc,
+    string AdminRecipientEmail);
 
 public sealed record EmailLogListItemDto(
     Guid Id,
@@ -107,7 +109,8 @@ public sealed class GetMailSettingsQueryHandler(IMailSettingsService mailSetting
             scheduler.StatusEmailEnabled,
             scheduler.StatusEmailRecipient,
             scheduler.MailAutomationEnabled,
-            scheduler.StatusEmailTimeUtc);
+            scheduler.StatusEmailTimeUtc,
+            scheduler.AdminRecipientEmail);
     }
 }
 
@@ -131,6 +134,7 @@ public sealed class UpdateMailSchedulerSettingsCommandHandler(IMailSettingsServi
             request.StatusEmailEnabled,
             request.StatusEmailRecipient,
             request.MailAutomationEnabled,
+            request.AdminRecipientEmail,
             cancellationToken);
 }
 

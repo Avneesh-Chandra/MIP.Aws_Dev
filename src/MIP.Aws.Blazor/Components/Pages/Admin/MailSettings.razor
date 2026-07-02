@@ -4,6 +4,7 @@
 @using MIP.Aws.Application.Features.Reports
 @using MIP.Aws.Domain.Security
 @using MIP.Aws.Application.Time
+@using Microsoft.AspNetCore.WebUtilities
 @inject IMediator Mediator
 @inject IUserTimeZone UserTz
 @inject ISnackbar Snackbar
@@ -36,6 +37,9 @@
                 <MudTextField T="string" Label="Status email recipient" @bind-Value="_statusEmailRecipient"
                               Variant="Variant.Outlined" Class="mt-2"
                               HelperText="Semicolon-separated recipients for download monitor status email" />
+                <MudTextField T="string" Label="Admin intervention recipient" @bind-Value="_adminRecipientEmail"
+                              Variant="Variant.Outlined" Class="mt-2"
+                              HelperText="Inform Admin mailto links in status emails open a draft to this address (e.g. admin_mip@gfh.com)" />
                 <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
                     Scheduled at @_statusEmailLocalTime @MipDisplayTimeZone.ZoneSuffix() (@_statusEmailTimeUtc UTC; also sent after Execute PDF download task completes).
                 </MudText>
@@ -133,6 +137,7 @@
     private bool _statusEmailEnabled = true;
     private string _statusEmailRecipient = "Avneesh.c@almoayyedcomputers.com;cavneesh18@gmail.com";
     private bool _mailAutomationEnabled = true;
+    private string _adminRecipientEmail = "admin_mip@gfh.com";
     private string _statusEmailTimeUtc = "05:00";
     private string _statusEmailLocalTime = "08:00";
     private TestEmailResponseDto? _lastTest;
@@ -153,6 +158,7 @@
             _statusEmailEnabled = settings.StatusEmailEnabled;
             _statusEmailRecipient = settings.StatusEmailRecipient;
             _mailAutomationEnabled = settings.MailAutomationEnabled;
+            _adminRecipientEmail = settings.AdminRecipientEmail;
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
             _statusEmailLocalTime = MipDisplayTimeZone.FormatUtcTimeOfDay(settings.StatusEmailTimeUtc);
             _logs = await Mediator.Send(new GetRecentEmailLogsQuery(25));
@@ -190,7 +196,8 @@
             await Mediator.Send(new UpdateMailSchedulerSettingsCommand(
                 _statusEmailEnabled,
                 _statusEmailRecipient,
-                _mailAutomationEnabled));
+                _mailAutomationEnabled,
+                _adminRecipientEmail));
             Snackbar.Add("Scheduler mail settings saved.", Severity.Success);
             await ReloadAsync();
         }

@@ -14,6 +14,7 @@ public sealed class MailSettingsConfiguration : IEntityTypeConfiguration<MailSet
         builder.Property(x => x.RedirectAllTo).HasMaxLength(320);
         builder.Property(x => x.SubjectPrefix).HasMaxLength(128).IsRequired();
         builder.Property(x => x.StatusEmailRecipient).HasMaxLength(320);
+        builder.Property(x => x.AdminRecipientEmail).HasMaxLength(320);
         builder.Property(x => x.RowVersion).IsRowVersion();
     }
 }

@@ -52,7 +52,10 @@ public sealed class MailSettingsService(
             !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient) ? row!.StatusEmailRecipient!.Trim() : scheduler.StatusEmailRecipient,
             row?.MailAutomationEnabled ?? automation.Enabled,
             scheduler.StatusEmailTimeUtc,
-            scheduler.AdminPortalUrl);
+            scheduler.AdminPortalUrl,
+            !string.IsNullOrWhiteSpace(row?.AdminRecipientEmail)
+                ? row!.AdminRecipientEmail!.Trim()
+                : scheduler.AdminRecipientEmail);
     }
 
     public async Task UpdateAsync(
@@ -75,12 +78,14 @@ public sealed class MailSettingsService(
         bool statusEmailEnabled,
         string? statusEmailRecipient,
         bool mailAutomationEnabled,
+        string? adminRecipientEmail,
         CancellationToken cancellationToken)
     {
         var row = await GetOrCreateRowAsync(cancellationToken).ConfigureAwait(false);
         row.StatusEmailEnabled = statusEmailEnabled;
         row.StatusEmailRecipient = statusEmailRecipient?.Trim();
         row.MailAutomationEnabled = mailAutomationEnabled;
+        row.AdminRecipientEmail = adminRecipientEmail?.Trim();
         row.ModifiedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }

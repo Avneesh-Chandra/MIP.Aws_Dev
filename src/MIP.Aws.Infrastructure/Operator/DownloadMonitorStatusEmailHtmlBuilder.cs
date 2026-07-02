@@ -11,7 +11,9 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         DownloadMonitorDto monitor,
         string portalBaseUrl,
         string? executiveSummary = null,
-        IReadOnlyList<string>? pendingRecoveryNotices = null)
+        IReadOnlyList<string>? pendingRecoveryNotices = null,
+        string? adminRecipientEmail = null,
+        IReadOnlyDictionary<Guid, DownloadMonitorEmailFailureContext>? failureContextsByJobId = null)
     {
         var monitorUrl = $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor";
         var sb = new StringBuilder();
@@ -44,7 +46,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         AppendSummaryCards(sb, monitor);
         AppendAttentionSection(sb, monitor, monitorUrl);
-        AppendSourcesTable(sb, monitor, portalBaseUrl, monitorUrl);
+        AppendSourcesTable(sb, monitor, portalBaseUrl, adminRecipientEmail, failureContextsByJobId);
 
         sb.Append("<p style=\"font-size:12px;color:#6b7280;margin-top:24px;\">")
             .Append("Automated daily status from GFH Media Intelligence. Replies are not monitored.")
@@ -109,7 +111,8 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         StringBuilder sb,
         DownloadMonitorDto monitor,
         string portalBaseUrl,
-        string monitorUrl)
+        string? adminRecipientEmail,
+        IReadOnlyDictionary<Guid, DownloadMonitorEmailFailureContext>? failureContextsByJobId)
     {
         sb.Append("<table style=\"border-collapse:collapse;width:100%;font-size:13px;\">");
         sb.Append("<thead><tr style=\"background:#f3f4f6;\">");
@@ -153,9 +156,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
                 .Append(InterventionCell(row))
                 .Append("</td>");
             sb.Append("<td style=\"padding:8px;border:1px solid #e5e7eb;text-align:right;white-space:nowrap;\">")
-                .Append(ActionButton("Details", monitorUrl, "#ffffff", "#374151", "#d1d5db"))
-                .Append(' ')
-                .Append(ActionButton("Inform Admin", monitorUrl, "#ffffff", "#c2410c", "#fdba74"))
+                .Append(ActionsCell(row, monitor.MonitorDate, portalBaseUrl, adminRecipientEmail, failureContextsByJobId))
                 .Append("</td>");
             sb.Append("</tr>");
         }
@@ -168,7 +169,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         var (bg, fg) = status switch
         {
             DownloadMonitorStatusLabels.Success or DownloadMonitorStatusLabels.SuccessByAiRecovery => ("#dcfce7", "#166534"),
-            DownloadMonitorStatusLabels.Failed => ("#fee2e2", "#991b1b"),
+            DownloadMonitorStatusLabels.Failed or DownloadMonitorStatusLabels.FailedAfterAutoAiRecovery => ("#fee2e2", "#991b1b"),
             DownloadMonitorStatusLabels.ManualActionRequired => ("#ffedd5", "#9a3412"),
             DownloadMonitorStatusLabels.ComplianceBlocked => ("#fee2e2", "#991b1b"),
             DownloadMonitorStatusLabels.InProgress or DownloadMonitorStatusLabels.Pending => ("#dbeafe", "#1e40af"),
@@ -222,6 +223,41 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         var viewUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf?inline=true";
         var downloadUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf";
         return $"<a href=\"{WebUtility.HtmlEncode(viewUrl)}\" style=\"color:#1d4ed8;\">View</a> · <a href=\"{WebUtility.HtmlEncode(downloadUrl)}\" style=\"color:#1d4ed8;\">Download</a>";
+    }
+
+    private static string ActionsCell(
+        DownloadMonitorSourceRowDto row,
+        DateOnly monitorDate,
+        string portalBaseUrl,
+        string? adminRecipientEmail,
+        IReadOnlyDictionary<Guid, DownloadMonitorEmailFailureContext>? failureContextsByJobId)
+    {
+        if (!row.ManualInterventionRequired || row.LatestDownloadJobId is not Guid jobId)
+        {
+            return "—";
+        }
+
+        if (string.IsNullOrWhiteSpace(portalBaseUrl))
+        {
+            return "<span style=\"color:#6b7280;font-size:12px;\">Open Download Monitor in the portal</span>";
+        }
+
+        DownloadMonitorEmailFailureContext? recoveryContext = null;
+        failureContextsByJobId?.TryGetValue(jobId, out recoveryContext);
+        var detailsUrl = DownloadMonitorStatusEmailActionHelper.BuildDetailsUrl(portalBaseUrl, jobId);
+        var mailTo = DownloadMonitorStatusEmailActionHelper.BuildInformAdminMailTo(
+            adminRecipientEmail,
+            row,
+            monitorDate,
+            recoveryContext);
+
+        var html = ActionButton("Details", detailsUrl, "#ffffff", "#374151", "#d1d5db");
+        if (!string.IsNullOrWhiteSpace(mailTo))
+        {
+            html += ' ' + ActionButton("Inform Admin", mailTo, "#ffffff", "#c2410c", "#fdba74");
+        }
+
+        return html;
     }
 
     private static string ActionButton(string label, string href, string bg, string fg, string border)

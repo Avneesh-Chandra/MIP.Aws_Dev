@@ -18,4 +18,7 @@ public sealed class MailSettings : AuditableEntity
     public bool? StatusEmailEnabled { get; set; }
 
     public bool? MailAutomationEnabled { get; set; }
+
+    /// <summary>Recipient for Inform Admin mailto links and intervention alerts.</summary>
+    public string? AdminRecipientEmail { get; set; }
 }

@@ -11,7 +11,8 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
     public static string Build(
         DateOnly monitorDate,
         string portalBaseUrl,
-        IReadOnlyList<RecoveryFollowUpSourceSection> sections)
+        IReadOnlyList<RecoveryFollowUpSourceSection> sections,
+        string? adminRecipientEmail = null)
     {
         var monitorUrl = $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor";
         var sb = new StringBuilder();
@@ -25,7 +26,7 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
 
         foreach (var section in sections)
         {
-            AppendSourceSection(sb, section);
+            AppendSourceSection(sb, section, monitorDate, adminRecipientEmail);
         }
 
         sb.Append("<p style=\"margin:16px 0 0;\"><a href=\"")
@@ -39,7 +40,11 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
         return sb.ToString();
     }
 
-    private static void AppendSourceSection(StringBuilder sb, RecoveryFollowUpSourceSection section)
+    private static void AppendSourceSection(
+        StringBuilder sb,
+        RecoveryFollowUpSourceSection section,
+        DateOnly monitorDate,
+        string? adminRecipientEmail)
     {
         var (bg, fg) = section.Succeeded
             ? ("#dcfce7", "#166534")
@@ -89,6 +94,33 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
             }
 
             sb.Append("</ul>");
+        }
+
+        if (!section.Succeeded && !string.IsNullOrWhiteSpace(adminRecipientEmail))
+        {
+            var timeline = section.Timeline
+                .Select(step => (step.Step, step.Detail, step.Timestamp))
+                .ToList();
+            var body = DownloadMonitorStatusEmailActionHelper.BuildInformAdminBodyForRecoveryFollowUp(
+                section.SourceName,
+                monitorDate,
+                FormatStatus(section.RunStatus),
+                section.ResultSummary,
+                section.SuccessfulOptionTitle,
+                section.SuggestionsTried,
+                timeline);
+            if (body.Length > DownloadMonitorStatusEmailActionHelper.MaxMailToBodyLength)
+            {
+                body = body[..DownloadMonitorStatusEmailActionHelper.MaxMailToBodyLength] + "…";
+            }
+
+            var subject = $"GFH MIP — Auto-recovery failed: {section.SourceName} ({monitorDate:yyyy-MM-dd})";
+            var mailTo = $"mailto:{Uri.EscapeDataString(adminRecipientEmail.Trim())}?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+            sb.Append("<p style=\"margin:12px 0 0;\">")
+                .Append("<a href=\"")
+                .Append(WebUtility.HtmlEncode(mailTo))
+                .Append("\" style=\"display:inline-block;padding:6px 12px;border:1px solid #fdba74;border-radius:6px;background:#ffffff;color:#c2410c;text-decoration:none;font-size:12px;font-weight:600;\">Inform Admin</a>")
+                .Append("</p>");
         }
 
         sb.Append("</div>");

@@ -14,7 +14,8 @@ public sealed record EffectiveSchedulerMailSettings(
     string StatusEmailRecipient,
     bool MailAutomationEnabled,
     string StatusEmailTimeUtc,
-    string? AdminPortalUrl);
+    string? AdminPortalUrl,
+    string AdminRecipientEmail);
 
 public interface IMailSettingsService
 {
@@ -33,5 +34,6 @@ public interface IMailSettingsService
         bool statusEmailEnabled,
         string? statusEmailRecipient,
         bool mailAutomationEnabled,
+        string? adminRecipientEmail,
         CancellationToken cancellationToken);
 }
