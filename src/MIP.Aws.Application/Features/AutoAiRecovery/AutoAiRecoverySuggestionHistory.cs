@@ -70,6 +70,30 @@ public static class AutoAiRecoverySuggestionHistory
         return latest.Values.OrderBy(e => e.OptionIndex).ToList();
     }
 
+    public static async Task<DateTimeOffset?> ResolveBatchStartedAtForFailedJobAsync(
+        IApplicationDbContext db,
+        Guid failedDownloadJobId,
+        CancellationToken cancellationToken)
+    {
+        var jobCreatedAt = await db.DownloadJobs.AsNoTracking()
+            .Where(j => !j.IsDeleted && j.Id == failedDownloadJobId)
+            .Select(j => (DateTimeOffset?)j.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (jobCreatedAt is null)
+        {
+            return null;
+        }
+
+        return await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(b => !b.IsDeleted && b.StartedAt <= jobCreatedAt.Value)
+            .OrderByDescending(b => b.StartedAt)
+            .Select(b => (DateTimeOffset?)b.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public static async Task<HashSet<int>> LoadTriedOptionIndicesForSourceTodayAsync(
         IApplicationDbContext db,
         Guid sourceId,
@@ -78,6 +102,41 @@ public static class AutoAiRecoverySuggestionHistory
         var entries = await LoadTriedEntriesForSourceTodayAsync(db, sourceId, cancellationToken)
             .ConfigureAwait(false);
         return entries.Select(e => e.OptionIndex).ToHashSet();
+    }
+
+    public static async Task<HashSet<int>> LoadTriedOptionIndicesForSourceBatchAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken,
+        Guid? excludeRunId = null)
+    {
+        var entries = await LoadTriedEntriesForSourceBatchAsync(
+                db,
+                sourceId,
+                batchStartedAt,
+                cancellationToken,
+                excludeRunId)
+            .ConfigureAwait(false);
+        return entries.Select(e => e.OptionIndex).ToHashSet();
+    }
+
+    public static Task<IReadOnlyList<TriedSuggestionEntry>> LoadTriedEntriesForSourceBatchAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken,
+        Guid? excludeRunId = null,
+        DateTimeOffset? beforeCreatedAt = null)
+    {
+        var notBefore = batchStartedAt.AddMinutes(-1);
+        return LoadTriedEntriesForSourceSinceAsync(
+            db,
+            sourceId,
+            notBefore,
+            cancellationToken,
+            excludeRunId,
+            beforeCreatedAt);
     }
 
     public static async Task<IReadOnlyList<TriedSuggestionEntry>> LoadTriedEntriesForSourceTodayAsync(
@@ -91,11 +150,31 @@ public static class AutoAiRecoverySuggestionHistory
         var dayStartOffset = new DateTimeOffset(dayStart, TimeSpan.Zero);
         var dayEndOffset = dayStartOffset.AddDays(1);
 
+        return await LoadTriedEntriesForSourceSinceAsync(
+                db,
+                sourceId,
+                dayStartOffset,
+                cancellationToken,
+                excludeRunId,
+                beforeCreatedAt,
+                notAfter: dayEndOffset)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<IReadOnlyList<TriedSuggestionEntry>> LoadTriedEntriesForSourceSinceAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset notBefore,
+        CancellationToken cancellationToken,
+        Guid? excludeRunId = null,
+        DateTimeOffset? beforeCreatedAt = null,
+        DateTimeOffset? notAfter = null)
+    {
         var runs = await db.AutoAiRecoveryRuns.AsNoTracking()
             .Where(r => !r.IsDeleted
                         && r.NewsSourceId == sourceId
-                        && r.CreatedAt >= dayStartOffset
-                        && r.CreatedAt < dayEndOffset
+                        && r.CreatedAt >= notBefore
+                        && (notAfter == null || r.CreatedAt < notAfter)
                         && (excludeRunId == null || r.Id != excludeRunId)
                         && (beforeCreatedAt == null || r.CreatedAt < beforeCreatedAt))
             .OrderBy(r => r.CreatedAt)
@@ -138,8 +217,8 @@ public static class AutoAiRecoverySuggestionHistory
             .Where(a => !a.IsDeleted
                         && a.NewsSourceId == sourceId
                         && a.IsAutomatic
-                        && a.CreatedAt >= dayStartOffset
-                        && a.CreatedAt < dayEndOffset
+                        && a.CreatedAt >= notBefore
+                        && (notAfter == null || a.CreatedAt < notAfter)
                         && a.SelectedOptionIndex >= 0
                         && (beforeCreatedAt == null || a.CreatedAt < beforeCreatedAt))
             .Select(a => new { a.SelectedOptionIndex, a.AppliedAt, a.CreatedAt, a.AnalysisJson })
@@ -164,24 +243,30 @@ public static class AutoAiRecoverySuggestionHistory
         return map.Values.OrderBy(e => e.OptionIndex).ToList();
     }
 
-    public static string FormatExhaustedSummary(IReadOnlyList<TriedSuggestionEntry> entries)
+    public static string FormatExhaustedSummary(
+        IReadOnlyList<TriedSuggestionEntry> entries,
+        bool forCurrentBatch = false)
     {
         if (entries.Count == 0)
         {
-            return "No eligible AI recovery suggestions remain for today.";
+            return forCurrentBatch
+                ? "No eligible AI recovery suggestions remain for this download batch."
+                : "No eligible AI recovery suggestions remain for today.";
         }
 
         var parts = entries
             .OrderByDescending(e => e.LastAttemptAt)
             .Select(e => $"{e.Title} (option {e.OptionIndex}, last {e.LastAttemptAt:yyyy-MM-dd HH:mm} UTC)");
-        return "All eligible suggestions already tried today without success: " + string.Join("; ", parts) + ".";
+        var scope = forCurrentBatch ? "in this download batch" : "today";
+        return $"All eligible suggestions already tried {scope} without success: " + string.Join("; ", parts) + ".";
     }
 
     public static (string? SuggestionTitle, DateTimeOffset? LastAttemptAt, string? ResultSummary) ResolveHistoryDisplay(
         SourceRecoveryAttempt attempt,
         AutoAiRecoveryRun? run,
         IReadOnlyList<SourceRecoveryOptionDto> options,
-        IReadOnlyList<TriedSuggestionEntry> triedBeforeThisRun)
+        IReadOnlyList<TriedSuggestionEntry> triedBeforeThisRun,
+        bool triedEntriesAreBatchScoped = false)
     {
         if (run is not null)
         {
@@ -208,8 +293,10 @@ public static class AutoAiRecoverySuggestionHistory
                 }
 
                 var latest = prior.MaxBy(e => e.LastAttemptAt);
-                var headline = $"Skipped — {prior.Count} suggestion(s) already tried today";
-                var detail = FormatExhaustedSummary(prior);
+                var headline = triedEntriesAreBatchScoped
+                    ? $"Skipped — {prior.Count} suggestion(s) already tried in this download batch"
+                    : $"Skipped — {prior.Count} suggestion(s) already tried today";
+                var detail = FormatExhaustedSummary(prior, triedEntriesAreBatchScoped);
                 return (headline, latest?.LastAttemptAt, detail);
             }
 

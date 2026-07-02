@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MIP.Aws.Infrastructure.Intelligence.Recovery;
 
-/// <summary>Tracks which AI recovery option indices were already applied for a source today.</summary>
+/// <summary>Tracks which AI recovery option indices were already applied for a source.</summary>
 internal static class AutoAiRecoveryTriedSuggestions
 {
     public static IReadOnlySet<int> FromTimelineJson(string? timelineJson) =>
@@ -17,4 +17,17 @@ internal static class AutoAiRecoveryTriedSuggestions
         Guid sourceId,
         CancellationToken cancellationToken) =>
         AutoAiRecoverySuggestionHistory.LoadTriedOptionIndicesForSourceTodayAsync(db, sourceId, cancellationToken);
+
+    public static Task<HashSet<int>> LoadForSourceBatchAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken,
+        Guid? excludeRunId = null) =>
+        AutoAiRecoverySuggestionHistory.LoadTriedOptionIndicesForSourceBatchAsync(
+            db,
+            sourceId,
+            batchStartedAt,
+            cancellationToken,
+            excludeRunId);
 }

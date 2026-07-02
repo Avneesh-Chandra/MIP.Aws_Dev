@@ -168,22 +168,43 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         attempt.AutoAiRecoveryRunId = run.Id;
         run.SourceRecoveryAttemptId = attempt.Id;
 
-        var triedOptionIndices = await AutoAiRecoveryTriedSuggestions
-            .LoadForSourceTodayAsync(db, sourceId, cancellationToken)
+        var batchStartedAt = await AutoAiRecoverySuggestionHistory
+            .ResolveBatchStartedAtForFailedJobAsync(db, failedDownloadJobId, cancellationToken)
             .ConfigureAwait(false);
+        var triedOptionIndices = batchStartedAt is DateTimeOffset batchStart
+            ? await AutoAiRecoveryTriedSuggestions
+                .LoadForSourceBatchAsync(db, sourceId, batchStart, cancellationToken, excludeRunId: run.Id)
+                .ConfigureAwait(false)
+            : await AutoAiRecoveryTriedSuggestions
+                .LoadForSourceTodayAsync(db, sourceId, cancellationToken)
+                .ConfigureAwait(false);
         var ranked = ranker.RankForAutoRecovery(analysis.Options, settings, triedOptionIndices);
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.SuggestionRanked,
             "AutoAiRecoveryRun",
             run.Id.ToString(),
-            new { rankedCount = ranked.Count, excludedTriedCount = triedOptionIndices.Count },
+            new
+            {
+                rankedCount = ranked.Count,
+                excludedTriedCount = triedOptionIndices.Count,
+                batchStartedAt
+            },
             cancellationToken).ConfigureAwait(false);
 
         if (ranked.Count == 0)
         {
-            var triedBefore = await AutoAiRecoverySuggestionHistory
-                .LoadTriedEntriesForSourceTodayAsync(db, sourceId, cancellationToken, excludeRunId: run.Id)
-                .ConfigureAwait(false);
+            var triedBefore = batchStartedAt is DateTimeOffset exhaustedBatchStart
+                ? await AutoAiRecoverySuggestionHistory
+                    .LoadTriedEntriesForSourceBatchAsync(
+                        db,
+                        sourceId,
+                        exhaustedBatchStart,
+                        cancellationToken,
+                        excludeRunId: run.Id)
+                    .ConfigureAwait(false)
+                : await AutoAiRecoverySuggestionHistory
+                    .LoadTriedEntriesForSourceTodayAsync(db, sourceId, cancellationToken, excludeRunId: run.Id)
+                    .ConfigureAwait(false);
             foreach (var entry in triedBefore.OrderBy(e => e.LastAttemptAt))
             {
                 AutoAiRecoveryTimelineWriter.AddStep(
@@ -194,7 +215,9 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             }
 
             var noSuggestionsSummary = triedBefore.Count > 0
-                ? AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(triedBefore)
+                ? AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(
+                    triedBefore,
+                    forCurrentBatch: batchStartedAt is not null)
                 : PublisherRepeatedRecoveryGuard.HasKnownGoodBaselineApplied(source)
                     ? PublisherRepeatedRecoveryGuard.SkipSummary
                     : "No safe AI recovery suggestions met confidence and risk thresholds.";

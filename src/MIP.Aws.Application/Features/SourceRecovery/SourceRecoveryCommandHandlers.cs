@@ -177,7 +177,7 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
                 .ToHashSetAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-        var triedBeforeCache = new Dictionary<(Guid SourceId, long BeforeTicks), IReadOnlyList<TriedSuggestionEntry>>();
+        var triedBeforeCache = new Dictionary<(Guid SourceId, long BeforeTicks, long BatchTicks), IReadOnlyList<TriedSuggestionEntry>>();
         var items = new List<SourceRecoveryHistoryItemDto>(attempts.Count);
         foreach (var a in attempts)
         {
@@ -195,25 +195,52 @@ public sealed class GetSourceRecoveryHistoryQueryHandler(
 
             autoAiRuns.TryGetValue(a.AutoAiRecoveryRunId ?? Guid.Empty, out var autoAiRun);
             IReadOnlyList<TriedSuggestionEntry> triedBeforeThisRun = [];
+            var triedEntriesAreBatchScoped = false;
             if (a.IsAutomatic)
             {
                 var before = autoAiRun?.CreatedAt ?? a.CreatedAt;
-                var cacheKey = (a.NewsSourceId, before.UtcTicks);
+                DateTimeOffset? batchStartedAt = null;
+                if (autoAiRun is not null)
+                {
+                    batchStartedAt = await AutoAiRecoverySuggestionHistory
+                        .ResolveBatchStartedAtForFailedJobAsync(
+                            db,
+                            autoAiRun.FailedDownloadJobId,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                triedEntriesAreBatchScoped = batchStartedAt is not null;
+                var cacheKey = (a.NewsSourceId, before.UtcTicks, batchStartedAt?.UtcTicks ?? 0);
                 if (!triedBeforeCache.TryGetValue(cacheKey, out triedBeforeThisRun!))
                 {
-                    triedBeforeThisRun = await AutoAiRecoverySuggestionHistory
-                        .LoadTriedEntriesForSourceTodayAsync(
-                            db,
-                            a.NewsSourceId,
-                            cancellationToken,
-                            beforeCreatedAt: before)
-                        .ConfigureAwait(false);
+                    triedBeforeThisRun = batchStartedAt is DateTimeOffset batchStart
+                        ? await AutoAiRecoverySuggestionHistory
+                            .LoadTriedEntriesForSourceBatchAsync(
+                                db,
+                                a.NewsSourceId,
+                                batchStart,
+                                cancellationToken,
+                                beforeCreatedAt: before)
+                            .ConfigureAwait(false)
+                        : await AutoAiRecoverySuggestionHistory
+                            .LoadTriedEntriesForSourceTodayAsync(
+                                db,
+                                a.NewsSourceId,
+                                cancellationToken,
+                                beforeCreatedAt: before)
+                            .ConfigureAwait(false);
                     triedBeforeCache[cacheKey] = triedBeforeThisRun;
                 }
             }
 
             var (suggestionTitle, suggestionLastAttemptAt, displaySummary) =
-                AutoAiRecoverySuggestionHistory.ResolveHistoryDisplay(a, autoAiRun, options, triedBeforeThisRun);
+                AutoAiRecoverySuggestionHistory.ResolveHistoryDisplay(
+                    a,
+                    autoAiRun,
+                    options,
+                    triedBeforeThisRun,
+                    triedEntriesAreBatchScoped);
 
             var appliedBy = a.IsAutomatic
                 ? "Automatic AI Recovery"

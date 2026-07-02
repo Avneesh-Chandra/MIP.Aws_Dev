@@ -408,9 +408,26 @@ public sealed class AutoAiRecoveryTests
 
         var summary = AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(entries);
 
+        Assert.Contains("already tried today", summary, StringComparison.Ordinal);
         Assert.Contains("Restore Al Ayam", summary, StringComparison.Ordinal);
         Assert.Contains("INAF", summary, StringComparison.Ordinal);
         Assert.Contains("2026-07-01 07:22", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SuggestionHistory_formats_exhausted_summary_for_current_batch()
+    {
+        var when = new DateTimeOffset(2026, 7, 2, 7, 36, 0, TimeSpan.Zero);
+        var entries = new[]
+        {
+            new TriedSuggestionEntry(0, "Restore Al Ayam e-paper PDF link selector and page URL", when),
+            new TriedSuggestionEntry(1, "Wait longer for Al Ayam INAF PDF link on e-paper", when.AddMinutes(8))
+        };
+
+        var summary = AutoAiRecoverySuggestionHistory.FormatExhaustedSummary(entries, forCurrentBatch: true);
+
+        Assert.Contains("already tried in this download batch", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("already tried today", summary, StringComparison.Ordinal);
     }
 
     [Fact]
