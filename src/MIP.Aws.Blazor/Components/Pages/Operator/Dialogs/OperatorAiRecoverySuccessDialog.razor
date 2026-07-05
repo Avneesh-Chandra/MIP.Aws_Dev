@@ -15,17 +15,29 @@
         }
         else
         {
+            var succeeded = IsSuccessfulOutcome(_details);
             <MudStack Spacing="3">
-                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true"
+                <MudAlert Severity="@(succeeded ? Severity.Success : Severity.Error)" Variant="Variant.Outlined" Dense="true"
                           Icon="@(_details.IsAutomatic ? Icons.Material.Filled.SmartToy : Icons.Material.Filled.AutoFixHigh)">
                     <MudText Typo="Typo.body2">
                         @if (_details.IsAutomatic)
                         {
-                            <text>Today's PDF was recovered by automatic AI recovery after a safe configuration fix was applied and retried.</text>
+                            if (succeeded)
+                            {
+                                <text>Today's PDF was recovered by automatic AI recovery after a safe configuration fix was applied and retried.</text>
+                            }
+                            else
+                            {
+                                <text>Automatic AI recovery applied a configuration fix and retried, but today's PDF was not recovered.</text>
+                            }
+                        }
+                        else if (succeeded)
+                        {
+                            <text>Today's PDF was recovered after an operator-applied AI configuration fix was retried successfully.</text>
                         }
                         else
                         {
-                            <text>Today's PDF was recovered after an operator-applied AI configuration fix was retried successfully.</text>
+                            <text>An operator-applied AI configuration fix was retried, but today's PDF was not recovered.</text>
                         }
                     </MudText>
                 </MudAlert>
@@ -156,4 +168,9 @@
     private static bool HasFailureArtifacts(AiRecoverySuccessDetailsDto details) =>
         !string.IsNullOrWhiteSpace(details.ScreenshotUrl)
         || !string.IsNullOrWhiteSpace(details.HtmlSnapshotUrl);
+
+    private static bool IsSuccessfulOutcome(AiRecoverySuccessDetailsDto details) =>
+        details.ActualSuccessPercent == 100
+        || (details.OutcomeSummary?.Contains("succeeded", StringComparison.OrdinalIgnoreCase) == true
+            && details.OutcomeSummary.Contains("failed", StringComparison.OrdinalIgnoreCase) != true);
 }

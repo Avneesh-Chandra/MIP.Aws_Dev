@@ -150,7 +150,8 @@
     private static bool IsAutoAiRecoverySkipped(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic
         && (item.SelectedOptionTitle?.StartsWith("Skipped", StringComparison.OrdinalIgnoreCase) == true
-            || item.ResultSummary?.Contains("already tried today", StringComparison.OrdinalIgnoreCase) == true);
+            || item.ResultSummary?.Contains("already tried today", StringComparison.OrdinalIgnoreCase) == true
+            || item.ResultSummary?.Contains("already tried in this download batch", StringComparison.OrdinalIgnoreCase) == true);
 
     private static bool IsAutoAiRecoveryFailure(SourceRecoveryHistoryItemDto item) =>
         item.IsAutomatic

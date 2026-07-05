@@ -7,7 +7,9 @@ using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.SourceRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
+using MIP.Aws.Infrastructure.Jobs;
 using MIP.Aws.Infrastructure.Operator;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -270,7 +272,7 @@ public sealed class SourceRecoveryOrchestrator(
                 attempt.ResultSummary =
                     "Today's edition is available; recovery configuration kept active.";
                 await SaveChangesWithRecoveryConcurrencyRetryAsync(cancellationToken).ConfigureAwait(false);
-                await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
+                await TryNotifyRecoveryOutcomeEmailAsync(attempt, cancellationToken).ConfigureAwait(false);
                 return ToApplyResult(attempt);
             }
 
@@ -301,7 +303,7 @@ public sealed class SourceRecoveryOrchestrator(
                 new { job.Id },
                 cancellationToken).ConfigureAwait(false);
 
-            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
+            await TryNotifyRecoveryOutcomeEmailAsync(attempt, cancellationToken).ConfigureAwait(false);
             return ToApplyResult(attempt);
         }
 
@@ -702,9 +704,15 @@ public sealed class SourceRecoveryOrchestrator(
                 throw new InvalidOperationException("This fix is awaiting admin approval.");
             case SourceRecoveryAttemptStatus.RetryEnqueued:
             case SourceRecoveryAttemptStatus.CandidateApplied:
+                throw new InvalidOperationException(
+                    "A recovery retry is still in progress for this analysis. Wait for it to finish or run Analyze with AI again after a new failure.");
             case SourceRecoveryAttemptStatus.Succeeded:
                 throw new InvalidOperationException(
-                    "This recovery suggestion was already applied. Run Analyze with AI again after a new failure.");
+                    "This recovery suggestion already succeeded. Run Analyze with AI again after a new failure.");
+            case SourceRecoveryAttemptStatus.Failed:
+            case SourceRecoveryAttemptStatus.RolledBack:
+            case SourceRecoveryAttemptStatus.AnalysisGenerated:
+                return;
         }
     }
 
@@ -765,6 +773,45 @@ public sealed class SourceRecoveryOrchestrator(
                 SourceRecoveryConfigurationSnapshot.FromEntity(source).ApplyPatch(patch, source);
                 source.ModifiedAt = DateTimeOffset.UtcNow;
             });
+
+    private async Task TryNotifyRecoveryOutcomeEmailAsync(
+        SourceRecoveryAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        if (attempt.Status != SourceRecoveryAttemptStatus.Succeeded)
+        {
+            return;
+        }
+
+        if (attempt.IsAutomatic)
+        {
+            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        TryEnqueueManualRecoveryStatusEmail(attempt);
+    }
+
+    private void TryEnqueueManualRecoveryStatusEmail(SourceRecoveryAttempt attempt)
+    {
+        try
+        {
+            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendDailyStatusEmailAsync());
+
+            logger.LogInformation(
+                "Enqueued download monitor status email after manual AI recovery success for attempt {AttemptId}.",
+                attempt.Id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not enqueue download monitor status email for manual recovery attempt {AttemptId}.",
+                attempt.Id);
+        }
+    }
 
     private async Task TryNotifyRecoveryFollowUpAsync(
         SourceRecoveryAttempt attempt,

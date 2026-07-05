@@ -411,7 +411,17 @@ public sealed class OperatorDownloadMonitorService(
         DownloadJob? recoveryJob) =>
         attempt.Status == SourceRecoveryAttemptStatus.Succeeded
         || attempt.ActualSuccessPercent == 100
-        || (recoveryJob is not null && IsSuccessfulRetryJob(recoveryJob.Status));
+        || (recoveryJob is not null && IsSuccessfulRetryJob(recoveryJob.Status))
+        || HasAppliedRecoveryDetails(attempt);
+
+    private static bool HasAppliedRecoveryDetails(SourceRecoveryAttempt attempt) =>
+        attempt.SelectedOptionIndex >= 0
+        && attempt.AppliedAt is not null
+        && attempt.Status is SourceRecoveryAttemptStatus.Failed
+            or SourceRecoveryAttemptStatus.RolledBack
+            or SourceRecoveryAttemptStatus.RetryEnqueued
+            or SourceRecoveryAttemptStatus.CandidateApplied
+            or SourceRecoveryAttemptStatus.Succeeded;
 
     private async Task<SourceRecoveryAttempt> EnsureRecoveryAttemptFinalizedAsync(
         SourceRecoveryAttempt attempt,
@@ -559,9 +569,18 @@ public sealed class OperatorDownloadMonitorService(
         var outcomeSummary = attempt.ResultSummary;
         if (string.IsNullOrWhiteSpace(outcomeSummary))
         {
-            outcomeSummary = attempt.Status == SourceRecoveryAttemptStatus.Succeeded
-                ? "Download retry succeeded; candidate configuration activated."
-                : "Download retry succeeded after AI recovery.";
+            outcomeSummary = attempt.Status switch
+            {
+                SourceRecoveryAttemptStatus.Succeeded =>
+                    "Download retry succeeded; candidate configuration activated.",
+                SourceRecoveryAttemptStatus.Failed =>
+                    "Download retry failed after AI recovery apply.",
+                SourceRecoveryAttemptStatus.RolledBack =>
+                    "AI recovery changes were rolled back after a failed retry.",
+                SourceRecoveryAttemptStatus.RetryEnqueued or SourceRecoveryAttemptStatus.CandidateApplied =>
+                    "Configuration applied; download retry in progress.",
+                _ => "AI recovery attempt details."
+            };
         }
 
         return new AiRecoverySuccessDetailsDto(

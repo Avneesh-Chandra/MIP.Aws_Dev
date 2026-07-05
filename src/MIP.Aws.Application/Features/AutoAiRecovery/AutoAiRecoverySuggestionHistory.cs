@@ -9,7 +9,7 @@ namespace MIP.Aws.Application.Features.AutoAiRecovery;
 
 public sealed record TriedSuggestionEntry(int OptionIndex, string Title, DateTimeOffset LastAttemptAt);
 
-/// <summary>Parses and formats AI suggestion attempts across automatic recovery runs.</summary>
+/// <summary>Parses and formats AI suggestion attempts across automatic recovery runs (manual attempts are excluded).</summary>
 public static class AutoAiRecoverySuggestionHistory
 {
     private static readonly Regex SuggestionAppliedStep = new(
