@@ -446,6 +446,53 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
+    public void TriedIndexAdjuster_removes_manual_succeeded_indices_from_tried_set()
+    {
+        var tried = new HashSet<int> { 0, 1, 2 };
+        AutoAiRecoveryTriedIndexAdjuster.RemoveManualSucceededFromTried(tried, [0, 2]);
+        Assert.Equal([1], tried.OrderBy(i => i));
+    }
+
+    [Fact]
+    public void TriedIndexAdjuster_allows_AlAyam_baseline_retry_after_publisher_timing_gap()
+    {
+        var tried = new HashSet<int> { 0, 1 };
+        var now = new DateTimeOffset(2026, 7, 5, 11, 11, 0, TimeSpan.Zero);
+        var entries = new[]
+        {
+            new TriedSuggestionEntry(0, "Restore Al Ayam e-paper PDF link selector and page URL", now.AddMinutes(-45)),
+            new TriedSuggestionEntry(1, "Wait longer for Al Ayam INAF PDF link on e-paper", now.AddMinutes(-5))
+        };
+
+        AutoAiRecoveryTriedIndexAdjuster.RemoveTimingRetriableFromTried(
+            tried,
+            entries,
+            TimeSpan.FromMinutes(30),
+            now);
+
+        Assert.Equal([1], tried.OrderBy(i => i));
+    }
+
+    [Fact]
+    public void TriedIndexAdjuster_keeps_recent_AlAyam_attempts_in_tried_set()
+    {
+        var tried = new HashSet<int> { 0 };
+        var now = new DateTimeOffset(2026, 7, 5, 11, 11, 0, TimeSpan.Zero);
+        var entries = new[]
+        {
+            new TriedSuggestionEntry(0, "Restore Al Ayam e-paper PDF link selector and page URL", now.AddMinutes(-10))
+        };
+
+        AutoAiRecoveryTriedIndexAdjuster.RemoveTimingRetriableFromTried(
+            tried,
+            entries,
+            TimeSpan.FromMinutes(30),
+            now);
+
+        Assert.Equal([0], tried);
+    }
+
+    [Fact]
     public void Ranker_skips_previously_tried_option_indices()
     {
         var settings = new AutoAiDownloadRecoveryOptions

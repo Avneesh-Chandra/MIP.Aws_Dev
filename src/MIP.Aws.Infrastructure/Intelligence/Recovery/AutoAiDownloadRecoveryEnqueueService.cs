@@ -4,6 +4,7 @@ using MIP.Aws.Application.Features.AutoAiRecovery;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Jobs;
+using MIP.Aws.Infrastructure.Operator;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -79,6 +80,19 @@ public sealed class AutoAiDownloadRecoveryEnqueueService(
                 failedJob.Id,
                 source.Name,
                 source.SourceType);
+            return;
+        }
+
+        if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
+                db,
+                failedJob.NewsSourceId,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Skipped auto AI download recovery enqueue for job {JobId} (source {SourceName}): today's edition is already downloaded.",
+                failedJob.Id,
+                source.Name);
             return;
         }
 

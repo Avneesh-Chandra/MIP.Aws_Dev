@@ -137,6 +137,18 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
             return await CompleteSkippedAsync(run, job, AutoAiRecoveryRunStatus.SkippedCooldown, "Cooldown or daily auto-recovery limit reached.", cancellationToken).ConfigureAwait(false);
         }
 
+        if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(db, sourceId, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return await CompleteSkippedAsync(
+                    run,
+                    job,
+                    AutoAiRecoveryRunStatus.SkippedIneligible,
+                    "Today's edition is already downloaded; auto recovery is not needed.",
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.Started,
             "AutoAiRecoveryRun",
@@ -171,13 +183,15 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         var batchStartedAt = await AutoAiRecoverySuggestionHistory
             .ResolveBatchStartedAtForFailedJobAsync(db, failedDownloadJobId, cancellationToken)
             .ConfigureAwait(false);
-        var triedOptionIndices = batchStartedAt is DateTimeOffset batchStart
-            ? await AutoAiRecoveryTriedSuggestions
-                .LoadForSourceBatchAsync(db, sourceId, batchStart, cancellationToken, excludeRunId: run.Id)
-                .ConfigureAwait(false)
-            : await AutoAiRecoveryTriedSuggestions
-                .LoadForSourceTodayAsync(db, sourceId, cancellationToken)
-                .ConfigureAwait(false);
+        var triedOptionIndices = await AutoAiRecoveryRetriableSuggestions
+            .LoadExcludedIndicesForAutoRecoveryAsync(
+                db,
+                source,
+                sourceId,
+                batchStartedAt,
+                cancellationToken,
+                excludeRunId: run.Id)
+            .ConfigureAwait(false);
         var ranked = ranker.RankForAutoRecovery(analysis.Options, settings, triedOptionIndices);
         await audit.RecordAdminActionAsync(
             AutoAiRecoveryAuditEvents.SuggestionRanked,
@@ -473,6 +487,15 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
         NewsSource source,
         CancellationToken cancellationToken)
     {
+        if (await DownloadMonitorBatchOutcomeHelper.HasTodaysDownloadedEditionAsync(
+                db,
+                source.Id,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return true;
+        }
+
         if (retryJob.Status != DownloadJobStatus.Succeeded)
         {
             return false;

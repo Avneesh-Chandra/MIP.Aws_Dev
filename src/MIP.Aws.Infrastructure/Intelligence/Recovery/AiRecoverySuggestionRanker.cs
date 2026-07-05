@@ -19,6 +19,7 @@ public sealed class AiRecoverySuggestionRanker : IAiRecoverySuggestionRanker
             .Where(o => AutoAiRecoveryPatchValidator.IsOptionSafeForAutoApply(o, settings, out _))
             .OrderByDescending(Score)
             .ThenBy(o => o.RiskLevel)
+            .ThenBy(o => o.OptionIndex)
             .Take(Math.Max(1, settings.MaxSuggestionsToTry))
             .ToList();
     }

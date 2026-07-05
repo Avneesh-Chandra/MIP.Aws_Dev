@@ -121,6 +121,32 @@ public static class AutoAiRecoverySuggestionHistory
         return entries.Select(e => e.OptionIndex).ToHashSet();
     }
 
+    /// <summary>
+    /// Option indices from manual recovery attempts that succeeded since the batch (or today when no batch).
+    /// Auto recovery may retry these even when an earlier automatic attempt failed in the same batch.
+    /// </summary>
+    public static async Task<HashSet<int>> LoadManualSucceededOptionIndicesSinceAsync(
+        IApplicationDbContext db,
+        Guid sourceId,
+        DateTimeOffset? batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var notBefore = batchStartedAt?.AddMinutes(-1)
+                        ?? new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
+
+        return await db.SourceRecoveryAttempts.AsNoTracking()
+            .Where(a => !a.IsDeleted
+                        && a.NewsSourceId == sourceId
+                        && !a.IsAutomatic
+                        && a.Status == SourceRecoveryAttemptStatus.Succeeded
+                        && a.SelectedOptionIndex >= 0
+                        && a.CreatedAt >= notBefore)
+            .Select(a => a.SelectedOptionIndex)
+            .Distinct()
+            .ToHashSetAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public static Task<IReadOnlyList<TriedSuggestionEntry>> LoadTriedEntriesForSourceBatchAsync(
         IApplicationDbContext db,
         Guid sourceId,
