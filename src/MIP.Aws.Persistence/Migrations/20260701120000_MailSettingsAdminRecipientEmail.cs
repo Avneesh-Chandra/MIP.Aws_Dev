@@ -1,3 +1,5 @@
+using MIP.Aws.Persistence;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MIP.Aws.Persistence.Migrations;
 
 /// <inheritdoc />
+[DbContext(typeof(MediaIntelligenceDbContext))]
+[Migration("20260701120000_MailSettingsAdminRecipientEmail")]
 public partial class MailSettingsAdminRecipientEmail : Migration
 {
     /// <inheritdoc />
