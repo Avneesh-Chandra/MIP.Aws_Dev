@@ -38,7 +38,38 @@ public static class DownloadMonitorStatusEmailActionHelper
             body = body[..MaxMailToBodyLength] + "…";
         }
 
-        return $"mailto:{Uri.EscapeDataString(adminRecipientEmail.Trim())}?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+        return BuildMailToUri(adminRecipientEmail.Trim(), subject, body);
+    }
+
+    /// <summary>
+    /// Gmail web compose often leaves To blank unless the address is percent-encoded and repeated as a mailto hfield.
+    /// </summary>
+    public static string BuildMailToUri(string recipientEmail, string subject, string body)
+    {
+        var to = Uri.EscapeDataString(recipientEmail.Trim());
+        return $"mailto:{to}?to={to}&subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+    }
+
+    public static string BuildInformAdminPortalUrl(string portalBaseUrl, Guid downloadJobId)
+    {
+        if (string.IsNullOrWhiteSpace(portalBaseUrl))
+        {
+            return string.Empty;
+        }
+
+        return $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor?jobId={downloadJobId:D}&informAdmin=1";
+    }
+
+    public static string? PickInformAdminEmailHref(
+        string? mailTo,
+        string portalInformAdminUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(mailTo) && mailTo.Length <= EmailHtmlLinkFormatter.MaxMailToHrefLength)
+        {
+            return mailTo;
+        }
+
+        return string.IsNullOrWhiteSpace(portalInformAdminUrl) ? mailTo : portalInformAdminUrl;
     }
 
     public static string BuildInformAdminBody(

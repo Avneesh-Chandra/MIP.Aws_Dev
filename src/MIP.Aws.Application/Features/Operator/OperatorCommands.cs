@@ -24,6 +24,8 @@ public sealed record AddDownloadOperatorNoteCommand(Guid DownloadJobId, string N
 
 public sealed record InformAdminCommand(Guid DownloadJobId, string? OperatorNote) : IRequest<Guid>;
 
+public sealed record GetInformAdminMailToQuery(Guid DownloadJobId) : IRequest<string?>;
+
 public sealed record GetAdminInterventionNotificationsQuery(bool PendingOnly = false)
     : IRequest<IReadOnlyList<AdminInterventionNotificationDto>>;
 

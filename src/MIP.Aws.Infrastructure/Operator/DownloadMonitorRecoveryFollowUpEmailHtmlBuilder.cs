@@ -115,11 +115,9 @@ public static class DownloadMonitorRecoveryFollowUpEmailHtmlBuilder
             }
 
             var subject = $"GFH MIP — Auto-recovery failed: {section.SourceName} ({monitorDate:yyyy-MM-dd})";
-            var mailTo = $"mailto:{Uri.EscapeDataString(adminRecipientEmail.Trim())}?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+            var mailTo = DownloadMonitorStatusEmailActionHelper.BuildMailToUri(adminRecipientEmail.Trim(), subject, body);
             sb.Append("<p style=\"margin:12px 0 0;\">")
-                .Append("<a href=\"")
-                .Append(WebUtility.HtmlEncode(mailTo))
-                .Append("\" style=\"display:inline-block;padding:6px 12px;border:1px solid #fdba74;border-radius:6px;background:#ffffff;color:#c2410c;text-decoration:none;font-size:12px;font-weight:600;\">Inform Admin</a>")
+                .Append(EmailHtmlLinkFormatter.Link(mailTo, "Inform Admin"))
                 .Append("</p>");
         }
 

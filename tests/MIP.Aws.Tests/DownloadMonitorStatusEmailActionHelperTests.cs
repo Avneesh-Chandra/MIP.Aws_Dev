@@ -70,7 +70,7 @@ public sealed class DownloadMonitorStatusEmailActionHelperTests
             context);
 
         Assert.NotNull(mailTo);
-        Assert.StartsWith("mailto:admin_mip%40gfh.com", mailTo, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("mailto:admin_mip%40gfh.com?to=admin_mip%40gfh.com", mailTo, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Manual%20intervention%20required", mailTo, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("PdfValidationFailed", mailTo, StringComparison.OrdinalIgnoreCase);
     }
@@ -86,5 +86,26 @@ public sealed class DownloadMonitorStatusEmailActionHelperTests
         Assert.Equal(
             "https://d3rvv409o9wpf6.cloudfront.net/operator/download-monitor?jobId=11111111-1111-1111-1111-111111111111",
             url);
+    }
+
+    [Fact]
+    public void BuildInformAdminPortalUrl_includes_inform_admin_query_flag()
+    {
+        var jobId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var url = DownloadMonitorStatusEmailActionHelper.BuildInformAdminPortalUrl(
+            "https://d3rvv409o9wpf6.cloudfront.net",
+            jobId);
+
+        Assert.Equal(
+            "https://d3rvv409o9wpf6.cloudfront.net/operator/download-monitor?jobId=11111111-1111-1111-1111-111111111111&informAdmin=1",
+            url);
+    }
+
+    [Fact]
+    public void EmailHtmlLinkFormatter_mailto_link_preserves_query_separators()
+    {
+        var html = EmailHtmlLinkFormatter.Link("mailto:admin@test.com?subject=Hello&body=World", "Inform Admin");
+        Assert.Contains("href=\"mailto:admin@test.com?subject=Hello&body=World\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("&amp;body=", html, StringComparison.Ordinal);
     }
 }

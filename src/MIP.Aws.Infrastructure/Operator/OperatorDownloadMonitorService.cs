@@ -24,6 +24,7 @@ public sealed class OperatorDownloadMonitorService(
     PortalArtifactUrlBuilder artifactUrls,
     ISourceRecoveryOrchestrator recoveryOrchestrator,
     IAutoAiDownloadRecoveryEnqueueService autoAiRecoveryEnqueue,
+    IMailSettingsService mailSettings,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
     IOptions<MailAutomationOptions> mailAutomation,
     ILogger<OperatorDownloadMonitorService> logger) : IOperatorDownloadMonitorService
@@ -734,6 +735,14 @@ public sealed class OperatorDownloadMonitorService(
         await TrySendAdminEmailAsync(job.NewsSource, notification, cancellationToken).ConfigureAwait(false);
         return notification.Id;
     }
+
+    public Task<string?> BuildInformAdminMailToAsync(Guid downloadJobId, CancellationToken cancellationToken) =>
+        DownloadMonitorInformAdminMailToBuilder.BuildForJobAsync(
+            db,
+            this,
+            mailSettings,
+            downloadJobId,
+            cancellationToken);
 
     public async Task<IReadOnlyList<AdminInterventionNotificationDto>> GetInterventionNotificationsAsync(
         bool pendingOnly,

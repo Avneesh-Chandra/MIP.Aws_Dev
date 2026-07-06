@@ -435,6 +435,7 @@
     private DateTimeOffset? _batchStartedAt;
     private CancellationTokenSource? _pollCts;
     private Guid? _pendingDetailsJobId;
+    private bool _pendingInformAdminFromQuery;
     private static readonly string AppBuildId = ResolveAppBuildId();
 
     private static string ResolveAppBuildId()
@@ -464,6 +465,7 @@
     protected override async Task OnInitializedAsync()
     {
         _pendingDetailsJobId = TryParseDetailsJobIdFromUri();
+        _pendingInformAdminFromQuery = TryParseInformAdminFromUri();
         if (SelfLoad)
         {
             await LoadAsync();
@@ -540,7 +542,58 @@
         {
             _loading = false;
             await SafeStateHasChangedAsync();
-            await TryOpenDetailsFromQueryAsync();
+            if (_pendingInformAdminFromQuery)
+            {
+                await TryOpenInformAdminFromQueryAsync();
+            }
+            else
+            {
+                await TryOpenDetailsFromQueryAsync();
+            }
+        }
+    }
+
+    private bool TryParseInformAdminFromUri()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        if (!QueryHelpers.ParseQuery(uri.Query).TryGetValue("informAdmin", out var values) || values.Count == 0)
+        {
+            return false;
+        }
+
+        var value = values[0];
+        return string.Equals(value, "1", StringComparison.Ordinal)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task TryOpenInformAdminFromQueryAsync()
+    {
+        if (!_pendingInformAdminFromQuery)
+        {
+            return;
+        }
+
+        _pendingInformAdminFromQuery = false;
+        var jobId = _pendingDetailsJobId ?? TryParseDetailsJobIdFromUri();
+        if (jobId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var mailTo = await Mediator.Send(new GetInformAdminMailToQuery(jobId.Value));
+            if (string.IsNullOrWhiteSpace(mailTo))
+            {
+                Snackbar.Add("Could not build Inform Admin email draft for this job.", Severity.Warning);
+                return;
+            }
+
+            await JS.InvokeVoidAsync("mipOpenMailTo", mailTo);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not open Inform Admin draft: {ex.Message}", Severity.Error);
         }
     }
 

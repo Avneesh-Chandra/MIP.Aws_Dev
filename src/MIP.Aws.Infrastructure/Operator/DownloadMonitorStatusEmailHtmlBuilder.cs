@@ -222,7 +222,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         var viewUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf?inline=true";
         var downloadUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf";
-        return $"<a href=\"{WebUtility.HtmlEncode(viewUrl)}\" style=\"color:#1d4ed8;\">View</a> · <a href=\"{WebUtility.HtmlEncode(downloadUrl)}\" style=\"color:#1d4ed8;\">Download</a>";
+        return $"{EmailHtmlLinkFormatter.Link(viewUrl, "View")} · {EmailHtmlLinkFormatter.Link(downloadUrl, "Download")}";
     }
 
     private static string ActionsCell(
@@ -245,24 +245,26 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         DownloadMonitorEmailFailureContext? recoveryContext = null;
         failureContextsByJobId?.TryGetValue(jobId, out recoveryContext);
         var detailsUrl = DownloadMonitorStatusEmailActionHelper.BuildDetailsUrl(portalBaseUrl, jobId);
+        var informPortalUrl = DownloadMonitorStatusEmailActionHelper.BuildInformAdminPortalUrl(portalBaseUrl, jobId);
         var mailTo = DownloadMonitorStatusEmailActionHelper.BuildInformAdminMailTo(
             adminRecipientEmail,
             row,
             monitorDate,
             recoveryContext);
+        var informHref = DownloadMonitorStatusEmailActionHelper.PickInformAdminEmailHref(mailTo, informPortalUrl);
 
-        var html = ActionButton("Details", detailsUrl, "#ffffff", "#374151", "#d1d5db");
-        if (!string.IsNullOrWhiteSpace(mailTo))
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(detailsUrl))
         {
-            html += ' ' + ActionButton("Inform Admin", mailTo, "#ffffff", "#c2410c", "#fdba74");
+            parts.Add(EmailHtmlLinkFormatter.Link(detailsUrl, "Details"));
         }
 
-        return html;
-    }
+        if (!string.IsNullOrWhiteSpace(informHref))
+        {
+            parts.Add(EmailHtmlLinkFormatter.Link(informHref, "Inform Admin"));
+        }
 
-    private static string ActionButton(string label, string href, string bg, string fg, string border)
-    {
-        return $"<a href=\"{WebUtility.HtmlEncode(href)}\" style=\"display:inline-block;padding:6px 12px;border:1px solid {border};border-radius:6px;background:{bg};color:{fg};text-decoration:none;font-size:12px;font-weight:600;\">{WebUtility.HtmlEncode(label)}</a>";
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
     }
 
     private static string FormatLocal(DateTimeOffset? value) =>

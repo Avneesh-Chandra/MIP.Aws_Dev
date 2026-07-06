@@ -181,6 +181,18 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
         return Ok(ApiResponse<Guid>.Ok(id, "Admin informed."));
     }
 
+    [HttpGet("download-jobs/{jobId:guid}/inform-admin-mailto")]
+    [Authorize(Policy = AuthPolicies.OperatorInformAdmin)]
+    [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<string>>> GetInformAdminMailToAsync(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var mailTo = await mediator.Send(new GetInformAdminMailToQuery(jobId), cancellationToken).ConfigureAwait(false);
+        return mailTo is null ? NotFound() : Ok(ApiResponse<string>.Ok(mailTo, "Inform Admin mailto draft"));
+    }
+
     public sealed record OperatorNoteRequest(string Note);
 
     public sealed record InformAdminRequest(string? OperatorNote);

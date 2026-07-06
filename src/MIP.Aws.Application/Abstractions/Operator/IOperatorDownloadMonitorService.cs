@@ -27,6 +27,8 @@ public interface IOperatorDownloadMonitorService
 
     Task<Guid> InformAdminAsync(Guid downloadJobId, string? operatorNote, Guid actorUserId, CancellationToken cancellationToken);
 
+    Task<string?> BuildInformAdminMailToAsync(Guid downloadJobId, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<AdminInterventionNotificationDto>> GetInterventionNotificationsAsync(
         bool pendingOnly,
         CancellationToken cancellationToken);

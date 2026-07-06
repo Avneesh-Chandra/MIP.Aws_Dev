@@ -52,6 +52,19 @@ window.mipInitAppBarNavScroll = function (navId, leftBtnId, rightBtnId) {
     updateButtons();
 };
 
+window.mipOpenMailTo = function (mailToUrl) {
+    try {
+        if (!mailToUrl) {
+            return false;
+        }
+        window.location.href = mailToUrl;
+        return true;
+    } catch (err) {
+        console.error('mipOpenMailTo failed', err);
+        return false;
+    }
+};
+
 window.downloadTextFile = function (filename, content, mimeType) {
     try {
         const blob = new Blob([content], { type: mimeType || 'text/plain' });

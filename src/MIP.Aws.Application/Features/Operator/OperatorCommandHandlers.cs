@@ -188,6 +188,13 @@ public sealed class InformAdminCommandHandler(
     }
 }
 
+public sealed class GetInformAdminMailToQueryHandler(IOperatorDownloadMonitorService service)
+    : IRequestHandler<GetInformAdminMailToQuery, string?>
+{
+    public Task<string?> Handle(GetInformAdminMailToQuery request, CancellationToken cancellationToken) =>
+        service.BuildInformAdminMailToAsync(request.DownloadJobId, cancellationToken);
+}
+
 public sealed class GetAdminInterventionNotificationsQueryHandler(IOperatorDownloadMonitorService service)
     : IRequestHandler<GetAdminInterventionNotificationsQuery, IReadOnlyList<AdminInterventionNotificationDto>>
 {
