@@ -2,8 +2,11 @@ using MediatR;
 
 namespace MIP.Aws.Application.Features.Operator;
 
-public sealed record GetDownloadMonitorQuery(DateOnly? MonitorDate = null, bool SkipReconciliation = false)
+public sealed record GetDownloadMonitorQuery(DateOnly? MonitorDate = null, bool SkipReconciliation = true)
     : IRequest<DownloadMonitorDto>;
+
+/// <summary>Runs a single bounded reconciliation pass before monitor reads (avoid repeating per query).</summary>
+public sealed record ReconcileDownloadMonitorStateCommand(TimeSpan? MaxDuration = null) : IRequest;
 
 public sealed record GetSourceDownloadStatusQuery(Guid SourceId, DateOnly? MonitorDate = null) : IRequest<SourceDownloadStatusDto?>;
 

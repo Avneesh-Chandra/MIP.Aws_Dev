@@ -8,7 +8,7 @@ public sealed record ExecuteDownloadMonitorBatchCommand(Guid ActorUserId)
 
 public sealed record GetDownloadMonitorBatchProgressQuery(
     DateTimeOffset? BatchStartedAt = null,
-    bool SkipReconciliation = false)
+    bool SkipReconciliation = true)
     : IRequest<DownloadMonitorBatchProgressResult?>;
 
 public sealed record GetDownloadMonitorWorkloadQuery(bool SkipReconciliation = true)

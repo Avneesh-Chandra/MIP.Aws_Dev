@@ -466,7 +466,7 @@
         _pendingDetailsJobId = TryParseDetailsJobIdFromUri();
         if (SelfLoad)
         {
-            await LoadAsync(reconcile: true);
+            await LoadAsync();
             if (_batchProgress?.IsActive == true)
             {
                 StartBatchPolling();
@@ -513,11 +513,15 @@
         await SafeStateHasChangedAsync();
         try
         {
+            if (reconcile)
+            {
+                await Mediator.Send(new ReconcileDownloadMonitorStateCommand());
+            }
+
             var date = _selectedDate.HasValue ? DateOnly.FromDateTime(_selectedDate.Value) : (DateOnly?)null;
-            var skipReconcile = !reconcile;
-            _monitor = await Mediator.Send(new GetDownloadMonitorQuery(date, skipReconcile));
-            _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt, skipReconcile));
-            _workloads = await Mediator.Send(new GetDownloadMonitorWorkloadQuery(skipReconcile));
+            _monitor = await Mediator.Send(new GetDownloadMonitorQuery(date, SkipReconciliation: true));
+            _batchProgress = await Mediator.Send(new GetDownloadMonitorBatchProgressQuery(_batchStartedAt, SkipReconciliation: true));
+            _workloads = await Mediator.Send(new GetDownloadMonitorWorkloadQuery(SkipReconciliation: true));
             if (_batchProgress is not null)
             {
                 _batchStartedAt ??= _batchProgress.StartedAt;
@@ -603,7 +607,7 @@
             _batchStartedAt = started.StartedAt;
             Snackbar.Add($"PDF download batch started for {started.TotalSources} monitored source(s).", Severity.Success);
             await RefreshBatchProgressAsync();
-            await LoadAsync(reconcile: true);
+            await LoadAsync();
             StartBatchPolling();
         }
         catch (Exception ex)

@@ -1,9 +1,37 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Auditing;
+using MIP.Aws.Application.Abstractions.Intelligence;
 using MIP.Aws.Application.Abstractions.Operator;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace MIP.Aws.Application.Features.Operator;
+
+public sealed class ReconcileDownloadMonitorStateCommandHandler(
+    ISourceRecoveryOrchestrator recoveryOrchestrator,
+    ILogger<ReconcileDownloadMonitorStateCommandHandler> logger)
+    : IRequestHandler<ReconcileDownloadMonitorStateCommand>
+{
+    private static readonly TimeSpan DefaultMaxDuration = TimeSpan.FromSeconds(45);
+
+    public async Task Handle(ReconcileDownloadMonitorStateCommand request, CancellationToken cancellationToken)
+    {
+        var maxDuration = request.MaxDuration ?? DefaultMaxDuration;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(maxDuration);
+
+        try
+        {
+            await recoveryOrchestrator.ReconcileAllAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "Download monitor reconciliation stopped after {Seconds:F0}s to avoid request timeout.",
+                maxDuration.TotalSeconds);
+        }
+    }
+}
 
 public sealed class GetDownloadMonitorQueryHandler(
     IOperatorDownloadMonitorService service,

@@ -20,9 +20,17 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
     [ProducesResponseType(typeof(ApiResponse<DownloadMonitorDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<DownloadMonitorDto>>> GetMonitorAsync(
         [FromQuery] DateOnly? date,
-        CancellationToken cancellationToken)
+        [FromQuery] bool reconcile = false,
+        CancellationToken cancellationToken = default)
     {
-        var result = await mediator.Send(new GetDownloadMonitorQuery(date), cancellationToken).ConfigureAwait(false);
+        if (reconcile)
+        {
+            await mediator.Send(new ReconcileDownloadMonitorStateCommand(), cancellationToken).ConfigureAwait(false);
+        }
+
+        var result = await mediator.Send(
+            new GetDownloadMonitorQuery(date, SkipReconciliation: true),
+            cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse<DownloadMonitorDto>.Ok(result));
     }
 
@@ -51,7 +59,7 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
     public async Task<ActionResult<ApiResponse<DownloadMonitorBatchProgressResult>>> GetBatchProgressAsync(
         [FromQuery] DateTimeOffset? batchStartedAt,
         CancellationToken cancellationToken,
-        [FromQuery] bool skipReconciliation = false)
+        [FromQuery] bool skipReconciliation = true)
     {
         var result = await mediator.Send(
             new GetDownloadMonitorBatchProgressQuery(batchStartedAt, skipReconciliation),
