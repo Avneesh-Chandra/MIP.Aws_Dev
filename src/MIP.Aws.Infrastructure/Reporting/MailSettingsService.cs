@@ -2,7 +2,9 @@ using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Domain.Entities;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace MIP.Aws.Infrastructure.Reporting;
@@ -12,7 +14,8 @@ public sealed class MailSettingsService(
     IOptions<MailOptions> mailOptions,
     IOptions<EmailSafetyOptions> legacySafetyOptions,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
-    IOptions<MailAutomationOptions> mailAutomationOptions) : IMailSettingsService
+    IOptions<MailAutomationOptions> mailAutomationOptions,
+    ILogger<MailSettingsService> logger) : IMailSettingsService
 {
     private static readonly Guid SingletonId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
@@ -20,9 +23,7 @@ public sealed class MailSettingsService(
     {
         var file = mailOptions.Value;
         var legacy = legacySafetyOptions.Value;
-        var row = await db.MailSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == SingletonId && !x.IsDeleted, cancellationToken)
-            .ConfigureAwait(false);
+        var row = await TryLoadMailSettingsRowAsync(cancellationToken).ConfigureAwait(false);
 
         var provider = row is not null && Enum.TryParse<MailActiveProvider>(row.ActiveProvider, true, out var parsed)
             ? parsed
@@ -43,9 +44,7 @@ public sealed class MailSettingsService(
     {
         var scheduler = schedulerOptions.Value;
         var automation = mailAutomationOptions.Value;
-        var row = await db.MailSettings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == SingletonId && !x.IsDeleted, cancellationToken)
-            .ConfigureAwait(false);
+        var row = await TryLoadMailSettingsRowAsync(cancellationToken).ConfigureAwait(false);
 
         return new EffectiveSchedulerMailSettings(
             row?.StatusEmailEnabled ?? scheduler.StatusEmailEnabled,
@@ -105,5 +104,47 @@ public sealed class MailSettingsService(
         }
 
         return row;
+    }
+
+    private Task<MailSettings?> TryLoadMailSettingsRowAsync(CancellationToken cancellationToken) =>
+        TryLoadMailSettingsRowTrackedAsync(tracked: false, cancellationToken);
+
+    private async Task<MailSettings?> TryLoadMailSettingsRowTrackedAsync(
+        bool tracked,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var query = tracked
+                ? db.MailSettings.Where(x => x.Id == SingletonId && !x.IsDeleted)
+                : db.MailSettings.AsNoTracking().Where(x => x.Id == SingletonId && !x.IsDeleted);
+            return await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsMissingMailSettingsSchema(ex))
+        {
+            logger.LogWarning(
+                ex,
+                "MailSettings query failed (schema may be behind migrations); using appsettings defaults.");
+            return null;
+        }
+    }
+
+    private static bool IsMissingMailSettingsSchema(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is SqlException sql && (sql.Number == 207 || sql.Number == 208))
+            {
+                return true;
+            }
+
+            if (current.Message.Contains("AdminRecipientEmail", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("Invalid column name", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

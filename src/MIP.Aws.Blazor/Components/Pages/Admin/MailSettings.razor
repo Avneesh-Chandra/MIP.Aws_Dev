@@ -12,6 +12,9 @@
 
 <PageTitle>Mail settings</PageTitle>
 
+<ErrorBoundary>
+    <ChildContent>
+
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Primary" Size="Size.Large" />
@@ -128,6 +131,19 @@
     </MudPaper>
 </MudStack>
 
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <MudAlert Severity="Severity.Error" Class="my-4">
+            Mail settings failed to load: @ex.Message
+            <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true))">
+                Reload
+            </MudButton>
+        </MudAlert>
+    </ErrorContent>
+</ErrorBoundary>
+
+@inject NavigationManager Navigation
+
 @code {
     private bool _busy;
     private MailConfigStatusDto? _status;
@@ -162,6 +178,10 @@
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
             _statusEmailLocalTime = MipDisplayTimeZone.FormatUtcTimeOfDay(settings.StatusEmailTimeUtc);
             _logs = await Mediator.Send(new GetRecentEmailLogsQuery(25));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load mail settings: {ex.Message}", Severity.Error);
         }
         finally
         {
