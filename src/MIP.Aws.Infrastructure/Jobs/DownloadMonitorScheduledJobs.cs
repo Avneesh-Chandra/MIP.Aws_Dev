@@ -216,6 +216,12 @@ public sealed class DownloadMonitorScheduledJobs(
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
 
+        await DownloadMonitorStatusEmailGuard.ReleaseStaleInitialClaimIfNeededAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
         var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
         if (sources.Count > 0)
         {
@@ -250,22 +256,19 @@ public sealed class DownloadMonitorScheduledJobs(
             return;
         }
 
-        var hasClaim = await db.DownloadMonitorBatchRuns.AsNoTracking()
-            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
-            .Select(b => b.StatusEmailSentAt)
-            .FirstOrDefaultAsync(CancellationToken.None)
-            .ConfigureAwait(false);
-
-        if (hasClaim is null
-            && !await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
-                    db,
-                    batchStartedAt,
-                    CancellationToken.None)
-                .ConfigureAwait(false))
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false))
         {
             logger.LogInformation(
-                "Download monitor initial status email already claimed for batch started at {BatchStartedAt:u}; skipping.",
+                "Download monitor initial status email already claimed for batch started at {BatchStartedAt:u}; scheduling retry.",
                 batchStartedAt);
+            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendInitialBatchStatusEmailAsync(batchStartedAt),
+                TimeSpan.FromMinutes(2));
             return;
         }
 
@@ -383,6 +386,12 @@ public sealed class DownloadMonitorScheduledJobs(
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
 
+        await DownloadMonitorStatusEmailGuard.ReleaseStaleRecoveryFollowUpClaimIfNeededAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
         if (!await DownloadMonitorBatchStatusEmailCoordinator.ShouldSendRecoveryFollowUpEmailAsync(
                 db,
                 batchStartedAt,
@@ -414,6 +423,22 @@ public sealed class DownloadMonitorScheduledJobs(
                 HangfireQueueOptions.Names.Email,
                 j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, attempt + 1),
                 DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+            return;
+        }
+
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor recovery follow-up email already claimed for batch started at {BatchStartedAt:u}; scheduling retry.",
+                batchStartedAt);
+            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, attempt),
+                TimeSpan.FromMinutes(2));
             return;
         }
 

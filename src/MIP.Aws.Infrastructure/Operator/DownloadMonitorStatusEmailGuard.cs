@@ -148,6 +148,26 @@ public static class DownloadMonitorStatusEmailGuard
             .ConfigureAwait(false);
     }
 
+    public static Task ReleaseStaleInitialClaimIfNeededAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(
+            DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+        return ReleaseStaleInitialClaimAsync(db, batchStartedAt, subject, cancellationToken);
+    }
+
+    public static Task ReleaseStaleRecoveryFollowUpClaimIfNeededAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildRecoveryFollowUpSubject(
+            DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+        return ReleaseStaleRecoveryFollowUpClaimAsync(db, batchStartedAt, subject, cancellationToken);
+    }
+
     private static async Task ReleaseStaleInitialClaimAsync(
         IApplicationDbContext db,
         DateTimeOffset batchStartedAt,

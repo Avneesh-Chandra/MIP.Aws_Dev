@@ -51,9 +51,10 @@ public sealed class SourceRecoveryController(IMediator mediator) : ControllerBas
     public async Task<ActionResult<ApiResponse<IReadOnlyList<SourceRecoveryHistoryItemDto>>>> GetHistoryAsync(
         [FromQuery] int take = 50,
         [FromQuery] DateOnly? monitorDate = null,
+        [FromQuery] bool reconcile = false,
         CancellationToken cancellationToken = default)
     {
-        var result = await mediator.Send(new GetSourceRecoveryHistoryQuery(take, monitorDate), cancellationToken)
+        var result = await mediator.Send(new GetSourceRecoveryHistoryQuery(take, monitorDate, reconcile), cancellationToken)
             .ConfigureAwait(false);
         return Ok(ApiResponse<IReadOnlyList<SourceRecoveryHistoryItemDto>>.Ok(result));
     }

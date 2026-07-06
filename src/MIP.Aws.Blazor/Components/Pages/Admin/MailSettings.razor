@@ -111,7 +111,14 @@
     </MudPaper>
 
     <MudPaper Class="pa-4" Outlined="true">
-        <MudText Typo="Typo.h6" Class="mb-2">Recent email logs</MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
+            <MudText Typo="Typo.h6">Email logs</MudText>
+            <MudSpacer />
+            <MudDatePicker Date="_logDate" DateChanged="OnLogDateChanged" Label="Log date" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" MaxDate="DateTime.Today" Clearable="true"
+                           HelperText="Filter by Bahrain calendar day; clear to show recent" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy" OnClick="ReloadLogsAsync">Refresh logs</MudButton>
+        </MudStack>
         <MudTable Items="_logs" Dense="true" Hover="true">
             <HeaderContent>
                 <MudTh>When</MudTh>
@@ -121,12 +128,24 @@
                 <MudTh>Status</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>@UserTz.Format(context.CreatedAt)</MudTd>
+                <MudTd>@UserTz.Format(context.SentAt ?? context.CreatedAt)</MudTd>
                 <MudTd>@context.Provider</MudTd>
                 <MudTd>@context.To</MudTd>
                 <MudTd>@context.Subject</MudTd>
                 <MudTd>@context.Status</MudTd>
             </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                    @if (_logDate is null)
+                    {
+                        <text>No email logs found.</text>
+                    }
+                    else
+                    {
+                        <text>No email logs for @(_logDate.Value.ToString("yyyy-MM-dd")).</text>
+                    }
+                </MudText>
+            </NoRecordsContent>
         </MudTable>
     </MudPaper>
 </MudStack>
@@ -158,8 +177,28 @@
     private string _statusEmailLocalTime = "08:00";
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
+    private DateTime? _logDate = DateTime.Today;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task OnLogDateChanged(DateTime? date)
+    {
+        _logDate = date;
+        await ReloadLogsAsync();
+    }
+
+    private async Task ReloadLogsAsync()
+    {
+        try
+        {
+            var logDate = _logDate is null ? (DateOnly?)null : DateOnly.FromDateTime(_logDate.Value);
+            _logs = await Mediator.Send(new GetRecentEmailLogsQuery(100, logDate));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load email logs: {ex.Message}", Severity.Error);
+        }
+    }
 
     private async Task ReloadAsync()
     {
@@ -177,7 +216,7 @@
             _adminRecipientEmail = settings.AdminRecipientEmail;
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
             _statusEmailLocalTime = MipDisplayTimeZone.FormatUtcTimeOfDay(settings.StatusEmailTimeUtc);
-            _logs = await Mediator.Send(new GetRecentEmailLogsQuery(25));
+            await ReloadLogsAsync();
         }
         catch (Exception ex)
         {
@@ -250,8 +289,13 @@
         _busy = true;
         try
         {
-            await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(null, _statusEmailRecipient));
-            Snackbar.Add("Status email sent.", Severity.Success);
+            var sent = await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(
+                null,
+                _statusEmailRecipient,
+                BypassThrottle: true));
+            Snackbar.Add(
+                sent ? "Status email sent." : "Status email was not sent (check settings and logs).",
+                sent ? Severity.Success : Severity.Warning);
             await ReloadAsync();
         }
         finally

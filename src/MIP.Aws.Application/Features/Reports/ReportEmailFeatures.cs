@@ -2,9 +2,11 @@ using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Time;
 using MIP.Aws.Domain.Enums;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace MIP.Aws.Application.Features.Reports;
 
@@ -51,7 +53,8 @@ public sealed record UpdateMailSchedulerSettingsCommand(
 
 public sealed record SendDownloadMonitorStatusEmailCommand(
     DateOnly? MonitorDate,
-    string? RecipientOverride = null) : IRequest<bool>;
+    string? RecipientOverride = null,
+    bool BypassThrottle = false) : IRequest<bool>;
 
 public sealed record GetMailSettingsQuery : IRequest<MailSettingsDto>;
 
@@ -85,7 +88,7 @@ public sealed record EmailLogListItemDto(
     string? ProviderOperationId,
     DateTimeOffset CreatedAt);
 
-public sealed record GetRecentEmailLogsQuery(int Take = 25) : IRequest<IReadOnlyList<EmailLogListItemDto>>;
+public sealed record GetRecentEmailLogsQuery(int Take = 25, DateOnly? LogDate = null) : IRequest<IReadOnlyList<EmailLogListItemDto>>;
 
 public sealed class GetMailConfigStatusQueryHandler(IMailConfigStatusService statusService)
     : IRequestHandler<GetMailConfigStatusQuery, MailConfigStatusDto>
@@ -163,12 +166,13 @@ public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonito
 {
     public async Task<bool> Handle(SendDownloadMonitorStatusEmailCommand request, CancellationToken cancellationToken)
     {
-        await statusEmail.SendDailyStatusEmailAsync(
+        return await statusEmail.SendDailyStatusEmailAsync(
                 request.MonitorDate,
                 cancellationToken,
-                ParseRecipientOverride(request.RecipientOverride))
+                ParseRecipientOverride(request.RecipientOverride),
+                executiveSummaryPrefix: null,
+                bypassThrottle: request.BypassThrottle)
             .ConfigureAwait(false);
-        return true;
     }
 
     private static IReadOnlyList<string>? ParseRecipientOverride(string? value)
@@ -187,16 +191,31 @@ public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonito
     }
 }
 
-public sealed class GetRecentEmailLogsQueryHandler(IApplicationDbContext db)
+public sealed class GetRecentEmailLogsQueryHandler(
+    IApplicationDbContext db,
+    IOptions<ApplicationDisplayOptions> displayOptions)
     : IRequestHandler<GetRecentEmailLogsQuery, IReadOnlyList<EmailLogListItemDto>>
 {
-    public async Task<IReadOnlyList<EmailLogListItemDto>> Handle(GetRecentEmailLogsQuery request, CancellationToken cancellationToken) =>
-        await db.EmailLogs.AsNoTracking()
-            .OrderByDescending(e => e.CreatedAt)
+    public async Task<IReadOnlyList<EmailLogListItemDto>> Handle(GetRecentEmailLogsQuery request, CancellationToken cancellationToken)
+    {
+        var query = db.EmailLogs.AsNoTracking().AsQueryable();
+
+        if (request.LogDate is DateOnly logDate)
+        {
+            var tz = MipDisplayTimeZone.Resolve(displayOptions.Value.DisplayTimeZoneId);
+            var localStart = logDate.ToDateTime(TimeOnly.MinValue);
+            var startUtc = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, tz));
+            var endUtc = startUtc.AddDays(1);
+            query = query.Where(e => (e.SentAt ?? e.CreatedAt) >= startUtc && (e.SentAt ?? e.CreatedAt) < endUtc);
+        }
+
+        return await query
+            .OrderByDescending(e => e.SentAt ?? e.CreatedAt)
             .Take(request.Take)
             .Select(e => new EmailLogListItemDto(
                 e.Id, e.ReportId, e.ReportScheduleId, e.BriefId, e.Provider, e.FromEmail, e.Recipient,
                 e.Cc, e.Bcc, e.Subject, e.Status, e.SentAt, e.LastError, e.AttemptCount, e.MessageId,
                 e.ProviderOperationId, e.CreatedAt))
             .ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

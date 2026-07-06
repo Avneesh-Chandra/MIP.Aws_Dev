@@ -75,20 +75,26 @@ public sealed class MailController(IMediator mediator) : ControllerBase
     [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
     public async Task<ActionResult<ApiResponse<bool>>> SendStatusEmailAsync(
         [FromQuery] DateOnly? date,
-        CancellationToken cancellationToken)
+        [FromQuery] bool bypassThrottle = true,
+        CancellationToken cancellationToken = default)
     {
-        await mediator.Send(new SendDownloadMonitorStatusEmailCommand(date), cancellationToken).ConfigureAwait(false);
-        return Ok(ApiResponse<bool>.Ok(true, "Download monitor status email sent."));
+        var sent = await mediator.Send(
+            new SendDownloadMonitorStatusEmailCommand(date, RecipientOverride: null, BypassThrottle: bypassThrottle),
+            cancellationToken).ConfigureAwait(false);
+        return Ok(ApiResponse<bool>.Ok(
+            sent,
+            sent ? "Download monitor status email sent." : "Download monitor status email was not sent."));
     }
 
     [HttpGet("logs/recent")]
     [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<EmailLogListItemDto>>>> RecentLogsAsync(
-        [FromQuery] int take = 25,
+        [FromQuery] int take = 100,
+        [FromQuery] DateOnly? date = null,
         CancellationToken cancellationToken = default)
     {
-        var logs = await mediator.Send(new GetRecentEmailLogsQuery(take), cancellationToken).ConfigureAwait(false);
-        return Ok(ApiResponse<IReadOnlyList<EmailLogListItemDto>>.Ok(logs, "Recent email logs"));
+        var logs = await mediator.Send(new GetRecentEmailLogsQuery(take, date), cancellationToken).ConfigureAwait(false);
+        return Ok(ApiResponse<IReadOnlyList<EmailLogListItemDto>>.Ok(logs, "Email logs"));
     }
 
     public sealed record SendTestEmailApiRequest(string To, string Subject, string HtmlBody);

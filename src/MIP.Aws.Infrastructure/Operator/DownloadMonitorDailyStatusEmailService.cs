@@ -23,7 +23,8 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         DateOnly? monitorDate,
         CancellationToken cancellationToken,
         IReadOnlyList<string>? recipientOverride = null,
-        string? executiveSummaryPrefix = null)
+        string? executiveSummaryPrefix = null,
+        bool bypassThrottle = false)
     {
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
         if (!scheduler.StatusEmailEnabled)
@@ -42,8 +43,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         }
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        if (await DownloadMonitorStatusEmailGuard.ShouldThrottleAdHocDailyStatusEmailAsync(db, date, cancellationToken)
-            .ConfigureAwait(false))
+        if (!bypassThrottle
+            && await DownloadMonitorStatusEmailGuard.ShouldThrottleAdHocDailyStatusEmailAsync(db, date, cancellationToken)
+                .ConfigureAwait(false))
         {
             logger.LogInformation(
                 "Download monitor status email skipped for {Date}: a status email was sent recently.",

@@ -400,9 +400,11 @@ public sealed class SourceRecoveryOrchestrator(
             }
         }
 
-        var orphanedJobs = await db.DownloadJobs.AsNoTracking()
+        var orphanedCutoff = DateTimeOffset.UtcNow.AddDays(-7);
+        var orphanedCorrelationIds = await db.DownloadJobs.AsNoTracking()
             .Where(j => !j.IsDeleted
                         && j.CorrelationId.StartsWith("recovery:")
+                        && j.CreatedAt >= orphanedCutoff
                         && (j.Status == DownloadJobStatus.Succeeded
                             || j.Status == DownloadJobStatus.Failed
                             || j.Status == DownloadJobStatus.SuccessWithAutoAiRecovery
@@ -410,26 +412,31 @@ public sealed class SourceRecoveryOrchestrator(
                             || j.Status == DownloadJobStatus.Cancelled
                             || j.Status == DownloadJobStatus.ManualInterventionRequired
                             || j.Status == DownloadJobStatus.AutoAiRecoverySkipped))
-            .Select(j => new { j.CorrelationId, j.CreatedAt })
+            .OrderByDescending(j => j.CreatedAt)
+            .Select(j => j.CorrelationId)
+            .Take(100)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        foreach (var job in orphanedJobs)
-        {
-            if (!Guid.TryParse(job.CorrelationId["recovery:".Length..], out var attemptId))
-            {
-                continue;
-            }
+        var orphanedAttemptIds = orphanedCorrelationIds
+            .Select(correlationId =>
+                Guid.TryParse(correlationId["recovery:".Length..], out var attemptId) ? (Guid?)attemptId : null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
 
-            var needsHeal = await db.SourceRecoveryAttempts.AsNoTracking()
-                .AnyAsync(
-                    a => a.Id == attemptId
-                         && !a.IsDeleted
-                         && a.AppliedAt == null
-                         && a.Status == SourceRecoveryAttemptStatus.AnalysisGenerated,
-                    cancellationToken)
+        if (orphanedAttemptIds.Count > 0)
+        {
+            var needsHealIds = await db.SourceRecoveryAttempts.AsNoTracking()
+                .Where(a => orphanedAttemptIds.Contains(a.Id)
+                            && !a.IsDeleted
+                            && a.AppliedAt == null
+                            && a.Status == SourceRecoveryAttemptStatus.AnalysisGenerated)
+                .Select(a => a.Id)
+                .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            if (needsHeal)
+            foreach (var attemptId in needsHealIds)
             {
                 attemptIds.Add(attemptId);
             }
@@ -462,16 +469,16 @@ public sealed class SourceRecoveryOrchestrator(
             .Take(50)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        foreach (var attemptId in completedAutoAiRuns)
+        if (completedAutoAiRuns.Count > 0)
         {
-            var stillOpen = await db.SourceRecoveryAttempts.AsNoTracking()
-                .AnyAsync(
-                    a => a.Id == attemptId
-                         && !a.IsDeleted
-                         && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued,
-                    cancellationToken)
+            var stillOpenIds = await db.SourceRecoveryAttempts.AsNoTracking()
+                .Where(a => completedAutoAiRuns.Contains(a.Id)
+                            && !a.IsDeleted
+                            && a.Status == SourceRecoveryAttemptStatus.RetryEnqueued)
+                .Select(a => a.Id)
+                .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            if (stillOpen)
+            foreach (var attemptId in stillOpenIds)
             {
                 attemptIds.Add(attemptId);
             }

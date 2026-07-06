@@ -114,7 +114,7 @@
     private DateTime? _selectedDate = DateTime.UtcNow.Date;
     private IReadOnlyList<SourceRecoveryHistoryItemDto> _items = Array.Empty<SourceRecoveryHistoryItemDto>();
 
-    protected override async Task OnInitializedAsync() => await LoadAsync(reconcile: true);
+    protected override async Task OnInitializedAsync() => await LoadAsync(reconcile: false);
 
     private Task RefreshAsync() => LoadAsync(reconcile: true);
 
@@ -124,7 +124,7 @@
         await LoadAsync(reconcile: false);
     }
 
-    private async Task LoadAsync(bool reconcile = true)
+    private async Task LoadAsync(bool reconcile = false)
     {
         _loading = true;
         StateHasChanged();

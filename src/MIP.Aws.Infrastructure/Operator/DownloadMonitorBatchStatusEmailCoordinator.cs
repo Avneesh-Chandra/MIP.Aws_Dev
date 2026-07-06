@@ -62,15 +62,6 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             return;
         }
 
-        if (!await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
-                db,
-                batchStartedAt,
-                cancellationToken)
-            .ConfigureAwait(false))
-        {
-            return;
-        }
-
         BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
             HangfireQueueOptions.Names.Email,
             j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
@@ -100,15 +91,6 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             .ConfigureAwait(false))
         {
             await MarkRecoveryFollowUpNotRequiredAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
-                db,
-                batchStartedAt,
-                cancellationToken)
-            .ConfigureAwait(false))
-        {
             return;
         }
 
@@ -149,15 +131,6 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         if (await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
                 db,
                 sourceIds,
-                batchStartedAt.Value,
-                cancellationToken)
-            .ConfigureAwait(false))
-        {
-            return;
-        }
-
-        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
-                db,
                 batchStartedAt.Value,
                 cancellationToken)
             .ConfigureAwait(false))

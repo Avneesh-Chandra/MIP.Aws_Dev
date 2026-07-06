@@ -7,7 +7,8 @@ public interface IDownloadMonitorDailyStatusEmailService
         DateOnly? monitorDate,
         CancellationToken cancellationToken,
         IReadOnlyList<string>? recipientOverride = null,
-        string? executiveSummaryPrefix = null);
+        string? executiveSummaryPrefix = null,
+        bool bypassThrottle = false);
 
     Task<bool> SendInitialBatchStatusEmailAsync(
         DateTimeOffset batchStartedAt,
