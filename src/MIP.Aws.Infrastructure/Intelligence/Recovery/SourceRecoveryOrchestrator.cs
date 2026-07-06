@@ -798,10 +798,10 @@ public sealed class SourceRecoveryOrchestrator(
         {
             BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
                 HangfireQueueOptions.Names.Email,
-                j => j.SendDailyStatusEmailAsync());
+                j => j.SendDebouncedManualRecoveryStatusEmailAsync());
 
             logger.LogInformation(
-                "Enqueued download monitor status email after manual AI recovery success for attempt {AttemptId}.",
+                "Enqueued debounced download monitor status email after manual AI recovery success for attempt {AttemptId}.",
                 attempt.Id);
         }
         catch (Exception ex)

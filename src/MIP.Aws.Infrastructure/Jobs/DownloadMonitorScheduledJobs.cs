@@ -142,6 +142,30 @@ public sealed class DownloadMonitorScheduledJobs(
 
     [Queue(HangfireQueueOptions.Names.Email)]
     [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task SendDebouncedManualRecoveryStatusEmailAsync()
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+        var date = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        if (await DownloadMonitorStatusEmailGuard.ShouldThrottleAdHocDailyStatusEmailAsync(
+                db,
+                date,
+                CancellationToken.None)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Skipped debounced manual-recovery status email for {Date}: a status email was sent recently.",
+                date);
+            return;
+        }
+
+        await email.SendDailyStatusEmailAsync(date, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task SendDailyStatusEmailAsync()
     {
         using var scope = scopeFactory.CreateScope();
@@ -226,6 +250,25 @@ public sealed class DownloadMonitorScheduledJobs(
             return;
         }
 
+        var hasClaim = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
+            .Select(b => b.StatusEmailSentAt)
+            .FirstOrDefaultAsync(CancellationToken.None)
+            .ConfigureAwait(false);
+
+        if (hasClaim is null
+            && !await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor initial status email already claimed for batch started at {BatchStartedAt:u}; skipping.",
+                batchStartedAt);
+            return;
+        }
+
         try
         {
             var sent = await email.SendInitialBatchStatusEmailAsync(batchStartedAt, CancellationToken.None)
@@ -249,6 +292,11 @@ public sealed class DownloadMonitorScheduledJobs(
             }
             else
             {
+                await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 logger.LogWarning(
                     "Download monitor initial status email was not delivered for batch started at {BatchStartedAt:u}; will retry.",
                     batchStartedAt);
@@ -257,6 +305,11 @@ public sealed class DownloadMonitorScheduledJobs(
         }
         catch (Exception ex)
         {
+            await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             logger.LogError(
                 ex,
                 "Download monitor initial status email failed for batch started at {BatchStartedAt:u}.",
@@ -381,11 +434,21 @@ public sealed class DownloadMonitorScheduledJobs(
             }
             else
             {
+                await DownloadMonitorStatusEmailGuard.ReleaseRecoveryFollowUpEmailClaimAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 throw new InvalidOperationException("Download monitor recovery follow-up email was not delivered.");
             }
         }
         catch (Exception ex)
         {
+            await DownloadMonitorStatusEmailGuard.ReleaseRecoveryFollowUpEmailClaimAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             logger.LogError(
                 ex,
                 "Download monitor recovery follow-up email failed for batch started at {BatchStartedAt:u}.",

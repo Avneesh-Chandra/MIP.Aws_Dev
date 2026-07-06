@@ -62,6 +62,15 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             return;
         }
 
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
+                db,
+                batchStartedAt,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return;
+        }
+
         BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
             HangfireQueueOptions.Names.Email,
             j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
@@ -91,6 +100,15 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             .ConfigureAwait(false))
         {
             await MarkRecoveryFollowUpNotRequiredAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
+                db,
+                batchStartedAt,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
             return;
         }
 
@@ -131,6 +149,15 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         if (await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
                 db,
                 sourceIds,
+                batchStartedAt.Value,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
+                db,
                 batchStartedAt.Value,
                 cancellationToken)
             .ConfigureAwait(false))
@@ -179,29 +206,12 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var batchRun = await db.DownloadMonitorBatchRuns.AsNoTracking()
-            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
-            .Select(b => new { b.StatusEmailSentAt })
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        if (batchRun?.StatusEmailSentAt is not null)
-        {
-            return false;
-        }
-
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        var subjectPrefix = BuildInitialSubject(monitorDate);
-        var alreadySent = await db.EmailLogs.AsNoTracking()
-            .AnyAsync(
-                e => !e.IsDeleted
-                     && e.Subject == subjectPrefix
-                     && e.SentAt >= batchStartedAt
-                     && e.Status == EmailDeliveryStatus.Sent,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        return !alreadySent;
+        var subjectPrefix = BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+        return !await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+            db,
+            subjectPrefix,
+            batchStartedAt,
+            cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<bool> ShouldSendRecoveryFollowUpEmailAsync(
@@ -215,23 +225,30 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (batchRun?.StatusEmailSentAt is null || batchRun.RecoveryFollowUpEmailSentAt is not null)
+        if (batchRun?.StatusEmailSentAt is null)
         {
             return false;
         }
 
         var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         var subject = BuildRecoveryFollowUpSubject(monitorDate);
-        var alreadySent = await db.EmailLogs.AsNoTracking()
-            .AnyAsync(
-                e => !e.IsDeleted
-                     && e.Subject == subject
-                     && e.SentAt >= batchStartedAt
-                     && e.Status == EmailDeliveryStatus.Sent,
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+                db,
+                subject,
+                batchStartedAt,
                 cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false))
+        {
+            return false;
+        }
 
-        return !alreadySent;
+        if (batchRun.RecoveryFollowUpEmailSentAt is DateTimeOffset followUpAt
+            && !DownloadMonitorStatusEmailGuard.IsRecoveryFollowUpEnqueueClaim(followUpAt, batchStartedAt))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     public static async Task MarkInitialStatusEmailSentAsync(

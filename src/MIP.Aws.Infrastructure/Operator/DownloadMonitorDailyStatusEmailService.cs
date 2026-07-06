@@ -42,6 +42,15 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         }
 
         var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        if (await DownloadMonitorStatusEmailGuard.ShouldThrottleAdHocDailyStatusEmailAsync(db, date, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor status email skipped for {Date}: a status email was sent recently.",
+                date);
+            return false;
+        }
+
         var monitor = await monitorService
             .GetMonitorAsync(date, skipReconciliation: false, cancellationToken)
             .ConfigureAwait(false);
