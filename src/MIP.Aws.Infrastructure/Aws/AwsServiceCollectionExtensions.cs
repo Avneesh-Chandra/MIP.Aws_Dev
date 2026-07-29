@@ -21,6 +21,7 @@ public static class AwsServiceCollectionExtensions
         services.Configure<AwsOptions>(configuration.GetSection(AwsOptions.SectionName));
         services.Configure<EmailOptions>(configuration.GetSection(EmailOptions.SectionName));
         services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
+        services.Configure<MicrosoftGraphOptions>(configuration.GetSection(MicrosoftGraphOptions.SectionName));
 
         var aws = configuration.GetSection(AwsOptions.SectionName).Get<AwsOptions>() ?? new AwsOptions();
         var storage = configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>() ?? new StorageOptions();
@@ -42,6 +43,18 @@ public static class AwsServiceCollectionExtensions
             services.AddSingleton<IAmazonSimpleEmailServiceV2>(_ => AwsClientFactory.CreateSesClient(aws));
             services.AddScoped<AwsSesEmailSender>();
             services.AddScoped<IReportEmailTransport, AwsSesEmailSender>();
+            services.AddScoped<IReportEmailSender, ReportEmailDispatcher>();
+        }
+        else if (string.Equals(email.Provider, "MicrosoftGraph", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddHttpClient("MicrosoftGraphToken");
+            services.AddHttpClient("MicrosoftGraphMail", client =>
+            {
+                client.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/");
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
+            services.AddScoped<MicrosoftGraphEmailSender>();
+            services.AddScoped<IReportEmailTransport, MicrosoftGraphEmailSender>();
             services.AddScoped<IReportEmailSender, ReportEmailDispatcher>();
         }
         else if (string.Equals(email.Provider, "Smtp", StringComparison.OrdinalIgnoreCase))

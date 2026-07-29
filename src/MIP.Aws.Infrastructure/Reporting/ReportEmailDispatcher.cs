@@ -4,13 +4,12 @@ using MIP.Aws.Application.Configuration;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Aws;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace MIP.Aws.Infrastructure.Reporting;
 
-/// <summary>Routes outbound mail through AWS SES with safety and audit logging.</summary>
+/// <summary>Routes outbound mail through the configured transport (SES or Microsoft Graph) with safety and audit logging.</summary>
 public sealed class ReportEmailDispatcher(
     IApplicationDbContext db,
     IReportEmailTransport transport,
@@ -18,6 +17,7 @@ public sealed class ReportEmailDispatcher(
     IMailSettingsService mailSettings,
     IOptions<AwsOptions> awsOptions,
     IOptions<EmailOptions> emailOptions,
+    IOptions<MicrosoftGraphOptions> graphOptions,
     ILogger<ReportEmailDispatcher> logger) : IReportEmailSender
 {
     public async Task<ReportEmailSendResult> SendAsync(ReportEmailMessage message, CancellationToken cancellationToken)
@@ -44,26 +44,16 @@ public sealed class ReportEmailDispatcher(
             }
         }
 
-        var ses = awsOptions.Value.Ses;
         var email = emailOptions.Value;
-        if (!ses.Enabled || !string.Equals(email.Provider, "AwsSes", StringComparison.OrdinalIgnoreCase))
+        var providerKey = ResolveProviderKey(email.Provider);
+        var from = ResolveFromEmail(email);
+        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(from))
         {
-            var err = "AWS SES is not enabled. Set Email:Provider=AwsSes and Aws:Ses:Enabled=true.";
-            var logId = await WriteLogAsync(message, "aws-ses", string.Empty, to[0],
+            var err = BuildNotConfiguredMessage(email.Provider);
+            var logId = await WriteLogAsync(message, providerKey ?? "None", string.Empty, to[0],
                 EmailDeliveryStatus.SkippedConfigurationMissing, err, null, null, string.Join("; ", to), cancellationToken)
                 .ConfigureAwait(false);
-            return new ReportEmailSendResult(false, "aws-ses", string.Empty, [], [logId], null, null, err,
-                EmailSendOutcome.SkippedConfigurationMissing);
-        }
-
-        var from = !string.IsNullOrWhiteSpace(email.FromEmail) ? email.FromEmail.Trim() : ses.SenderEmail.Trim();
-        if (string.IsNullOrWhiteSpace(from))
-        {
-            var err = "SES sender email is not configured.";
-            var logId = await WriteLogAsync(message, "aws-ses", string.Empty, to[0],
-                EmailDeliveryStatus.SkippedConfigurationMissing, err, null, null, string.Join("; ", to), cancellationToken)
-                .ConfigureAwait(false);
-            return new ReportEmailSendResult(false, "aws-ses", string.Empty, [], [logId], null, null, err,
+            return new ReportEmailSendResult(false, providerKey ?? "None", string.Empty, [], [logId], null, null, err,
                 EmailSendOutcome.SkippedConfigurationMissing);
         }
 
@@ -82,6 +72,7 @@ public sealed class ReportEmailDispatcher(
                     cc,
                     bcc,
                     from,
+                    providerKey,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -104,6 +95,7 @@ public sealed class ReportEmailDispatcher(
                     cc,
                     bcc,
                     from,
+                    providerKey,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -125,7 +117,7 @@ public sealed class ReportEmailDispatcher(
         {
             return new ReportEmailSendResult(
                 false,
-                "aws-ses",
+                providerKey,
                 from,
                 [],
                 aggregatedLogIds,
@@ -146,7 +138,7 @@ public sealed class ReportEmailDispatcher(
 
         return new ReportEmailSendResult(
             true,
-            "aws-ses",
+            providerKey,
             from,
             aggregatedDelivered,
             aggregatedLogIds,
@@ -155,6 +147,51 @@ public sealed class ReportEmailDispatcher(
             failures.Count > 0 ? string.Join(" | ", failures) : null,
             EmailSendOutcome.Sent,
             lastSentAt);
+    }
+
+    private string? ResolveProviderKey(string provider)
+    {
+        if (string.Equals(provider, "AwsSes", StringComparison.OrdinalIgnoreCase) && awsOptions.Value.Ses.Enabled)
+        {
+            return "aws-ses";
+        }
+
+        if (string.Equals(provider, "MicrosoftGraph", StringComparison.OrdinalIgnoreCase) && graphOptions.Value.IsConfigured)
+        {
+            return "microsoft-graph";
+        }
+
+        return null;
+    }
+
+    private string ResolveFromEmail(EmailOptions email)
+    {
+        if (!string.IsNullOrWhiteSpace(email.FromEmail))
+        {
+            return email.FromEmail.Trim();
+        }
+
+        if (string.Equals(email.Provider, "MicrosoftGraph", StringComparison.OrdinalIgnoreCase))
+        {
+            return graphOptions.Value.SenderMailbox.Trim();
+        }
+
+        return awsOptions.Value.Ses.SenderEmail.Trim();
+    }
+
+    private static string BuildNotConfiguredMessage(string provider)
+    {
+        if (string.Equals(provider, "MicrosoftGraph", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Microsoft Graph is not configured. Set Email:Provider=MicrosoftGraph and MicrosoftGraph (Enabled, TenantId, ClientId, ClientSecret, SenderMailbox).";
+        }
+
+        if (string.Equals(provider, "AwsSes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AWS SES is not enabled. Set Email:Provider=AwsSes and Aws:Ses:Enabled=true with a verified sender.";
+        }
+
+        return $"Email provider '{provider}' is not configured for the dispatcher transport.";
     }
 
     private async Task<ReportEmailSendResult> SendToRecipientsAsync(
@@ -166,11 +203,12 @@ public sealed class ReportEmailDispatcher(
         IReadOnlyList<string> cc,
         IReadOnlyList<string> bcc,
         string from,
+        string providerKey,
         CancellationToken cancellationToken)
     {
         if (recipients.Count == 0)
         {
-            return new ReportEmailSendResult(false, "aws-ses", from, [], [], null, null,
+            return new ReportEmailSendResult(false, providerKey, from, [], [], null, null,
                 "No recipients.", EmailSendOutcome.SkippedNoRecipients);
         }
 

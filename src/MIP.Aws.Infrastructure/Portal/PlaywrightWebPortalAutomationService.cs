@@ -37,6 +37,13 @@ public sealed class PlaywrightWebPortalAutomationService(
 
     public async Task<NewsPortalLoginTestResultDto> TestLoginAsync(Guid newsSourceId, CancellationToken cancellationToken)
     {
+        // Avoid a stale tracked NewsSource from the Blazor circuit / prior MediatR handlers
+        // (same concurrency class as UpdateNewsSourceCommandHandler).
+        if (db is DbContext loginProbeContext)
+        {
+            loginProbeContext.ChangeTracker.Clear();
+        }
+
         var source = await db.NewsSources
             .Include(s => s.Credential)
             .FirstAsync(s => s.Id == newsSourceId && !s.IsDeleted, cancellationToken).ConfigureAwait(false);
@@ -96,11 +103,11 @@ public sealed class PlaywrightWebPortalAutomationService(
                 cancellationToken).ConfigureAwait(false);
 
             // Clear sticky manual-action gate after a successful probe (prior selector/CAPTCHA failures set this).
+            // Use ExecuteUpdate so Hangfire/recovery RowVersion changes during the Playwright run do not
+            // surface as DbUpdateConcurrencyException and wipe a successful probe result.
             if (source.RequiresManualAction)
             {
-                source.RequiresManualAction = false;
-                source.ModifiedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await ClearRequiresManualActionAsync(source, cancellationToken).ConfigureAwait(false);
             }
 
             return new NewsPortalLoginTestResultDto(true, "Login test succeeded.", null, null, null);
@@ -108,8 +115,18 @@ public sealed class PlaywrightWebPortalAutomationService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Login test failed for source {SourceId}", newsSourceId);
-            var (shot, html) = await CaptureFailureArtifactsAsync(source, null, page, "login-test", cancellationToken).ConfigureAwait(false);
-            await AddAuditAsync(source, null, PortalAuditEventKind.Failure, ex.Message, "UnexpectedError", cancellationToken, shot, html).ConfigureAwait(false);
+            string? shot = null;
+            string? html = null;
+            try
+            {
+                (shot, html) = await CaptureFailureArtifactsAsync(source, null, page, "login-test", cancellationToken).ConfigureAwait(false);
+                await AddAuditAsync(source, null, PortalAuditEventKind.Failure, ex.Message, "UnexpectedError", cancellationToken, shot, html).ConfigureAwait(false);
+            }
+            catch (Exception auditEx)
+            {
+                logger.LogWarning(auditEx, "Could not persist login-probe failure artifacts for source {SourceId}", newsSourceId);
+            }
+
             return new NewsPortalLoginTestResultDto(false, ex.Message, "UnexpectedError", shot, html);
         }
         finally
@@ -942,6 +959,31 @@ public sealed class PlaywrightWebPortalAutomationService(
             CreatedAt = DateTimeOffset.UtcNow
         });
         return Task.CompletedTask;
+    }
+
+    private async Task ClearRequiresManualActionAsync(NewsSource source, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await db.NewsSources
+            .Where(s => s.Id == source.Id && s.RequiresManualAction && !s.IsDeleted)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(s => s.RequiresManualAction, false)
+                    .SetProperty(s => s.ModifiedAt, now),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        source.RequiresManualAction = false;
+        source.ModifiedAt = now;
+        if (db is DbContext ctx)
+        {
+            var entry = ctx.Entry(source);
+            if (entry.State != EntityState.Detached)
+            {
+                entry.Property(s => s.RequiresManualAction).IsModified = false;
+                entry.Property(s => s.ModifiedAt).IsModified = false;
+            }
+        }
     }
 
     private async Task AddAuditAsync(

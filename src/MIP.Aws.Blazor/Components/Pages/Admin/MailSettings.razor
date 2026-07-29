@@ -19,7 +19,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Primary" Size="Size.Large" />
         <MudText Typo="Typo.h4" Style="font-weight:700;">Mail settings</MudText>
-        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">AWS SES</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">@_providerLabel</MudChip>
         <MudSpacer />
         <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="ReloadAsync">Refresh</MudButton>
     </MudStack>
@@ -55,7 +55,7 @@
 
         <MudItem xs="12" lg="6">
             <MudPaper Class="pa-4" Outlined="true">
-                <MudText Typo="Typo.h6" Class="mb-3">AWS SES provider</MudText>
+                <MudText Typo="Typo.h6" Class="mb-3">Mail provider</MudText>
                 @if (_status is null)
                 {
                     <MudProgressLinear Indeterminate="true" />
@@ -63,8 +63,8 @@
                 else
                 {
                     <MudStack Spacing="1">
-                        <MudText Typo="Typo.body2">Provider: <strong>AWS SES</strong></MudText>
-                        <MudText Typo="Typo.body2">SES enabled: @(_status.SesEnabled ? "Yes" : "No")</MudText>
+                        <MudText Typo="Typo.body2">Provider: <strong>@_providerLabel</strong></MudText>
+                        <MudText Typo="Typo.body2">Transport enabled: @(_status.SesEnabled ? "Yes" : "No")</MudText>
                         <MudText Typo="Typo.body2">Sender configured: @(_status.SesSenderConfigured ? "Yes" : "No")</MudText>
                         <MudText Typo="Typo.body2">From: @(_status.FromEmail ?? "—")</MudText>
                         <MudText Typo="Typo.body2">Ready: @(_status.IsReady ? "Yes" : "No")</MudText>
@@ -178,6 +178,16 @@
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
     private DateTime? _logDate = DateTime.Today;
+    private MailActiveProvider _activeProvider = MailActiveProvider.MicrosoftGraph;
+
+    private string _providerLabel => _status?.ActiveProvider switch
+    {
+        "MicrosoftGraph" => "Microsoft Graph",
+        "AwsSes" => "AWS SES",
+        "Smtp" => "SMTP",
+        null or "" => "—",
+        var other => other
+    };
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -207,6 +217,12 @@
         {
             _status = await Mediator.Send(new GetMailConfigStatusQuery());
             var settings = await Mediator.Send(new GetMailSettingsQuery());
+            _activeProvider = settings.ActiveProvider;
+            if (!string.IsNullOrWhiteSpace(_status.ActiveProvider)
+                && Enum.TryParse<MailActiveProvider>(_status.ActiveProvider, true, out var fromStatus))
+            {
+                _activeProvider = fromStatus;
+            }
             _developmentSafety = settings.DevelopmentSafetyEnabled;
             _redirectTo = settings.RedirectAllTo ?? _redirectTo;
             _subjectPrefix = settings.SubjectPrefix ?? _subjectPrefix;
@@ -234,7 +250,7 @@
         try
         {
             await Mediator.Send(new UpdateMailSettingsCommand(
-                MailActiveProvider.AwsSes,
+                _activeProvider,
                 _developmentSafety,
                 _redirectTo,
                 _subjectPrefix));

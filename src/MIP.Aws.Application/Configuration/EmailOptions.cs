@@ -5,7 +5,7 @@ public sealed class EmailOptions
 {
     public const string SectionName = "Email";
 
-    /// <summary>Mock | Smtp | AwsSes</summary>
+    /// <summary>Mock | Smtp | AwsSes | MicrosoftGraph</summary>
     public string Provider { get; set; } = "Mock";
 
     public string FromEmail { get; set; } = string.Empty;
