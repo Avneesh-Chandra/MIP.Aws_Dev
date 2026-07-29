@@ -1,10 +1,22 @@
 name: AWS Deploy
 
+# Targets GFH Media Intelligence DEV infrastructure (eu-west-1) by default.
+# Override names via repository Variables if needed.
+#
+# Defaults (Infra sheet):
+#   ECR:      522213210072.dkr.ecr.eu-west-1.amazonaws.com/gfh-mip
+#   Cluster:  ir-gfh-dev-ecs-mip-01
+#   API svc:  gfh-dev-mip-svc-api-01
+#   Worker:   gfh-dev-mip-svc-worker-01 (optional until Infra creates it)
+#
+# Keep apply_terraform=false for this pre-built GFH stack. Terraform apply
+# provisions a separate mip-aws-* stack and must not be used against GFH DEV.
+
 on:
   workflow_dispatch:
     inputs:
       apply_terraform:
-        description: "Run terraform apply after plan"
+        description: "Run terraform apply after plan (KEEP false for GFH pre-built infra)"
         required: true
         default: "false"
         type: choice
@@ -20,36 +32,59 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
       IMAGE_TAG: ${{ (github.event.inputs.image_tag == 'latest' || github.event.inputs.image_tag == '') && github.sha || github.event.inputs.image_tag }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'gfh-mip' }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'ir-gfh-dev-ecs-mip-01' }}
+      ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE || 'gfh-dev-mip-svc-api-01' }}
+      ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE || 'gfh-dev-mip-svc-worker-01' }}
+      API_IMAGE_PREFIX: ${{ vars.API_IMAGE_PREFIX || 'api' }}
+      WORKER_IMAGE_PREFIX: ${{ vars.WORKER_IMAGE_PREFIX || 'worker' }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Show deploy targets
+        run: |
+          echo "AWS_REGION=$AWS_REGION"
+          echo "ECR_REPOSITORY=$ECR_REPOSITORY"
+          echo "API tags: ${API_IMAGE_PREFIX}-${IMAGE_TAG}, ${API_IMAGE_PREFIX}-latest"
+          echo "Worker tags: ${WORKER_IMAGE_PREFIX}-${IMAGE_TAG}, ${WORKER_IMAGE_PREFIX}-latest"
+          echo "ECS_CLUSTER=$ECS_CLUSTER"
+          echo "ECS_API_SERVICE=$ECS_API_SERVICE"
+          echo "ECS_WORKER_SERVICE=$ECS_WORKER_SERVICE"
+          echo "apply_terraform=${{ github.event.inputs.apply_terraform }}"
 
       - name: Verify AWS secrets are configured
         run: |
           if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
             echo "::error::Missing GitHub secrets AWS_ACCESS_KEY_ID and/or AWS_SECRET_ACCESS_KEY."
             echo "Add them at: Settings → Secrets and variables → Actions → Repository secrets"
-            echo "Use the same IAM access key as your local mip-dev profile (IAM → Users → Security credentials → Create access key)."
             exit 1
           fi
-          missing=""
-          if [ -z "${{ secrets.TF_VAR_db_username }}" ] && [ -z "${{ secrets.TF_VAR_DB_USERNAME }}" ]; then missing="$missing TF_VAR_db_username"; fi
-          if [ -z "${{ secrets.TF_VAR_db_password }}" ] && [ -z "${{ secrets.TF_VAR_DB_PASSWORD }}" ]; then missing="$missing TF_VAR_db_password"; fi
-          if [ -z "${{ secrets.TF_VAR_mip_bucket_name }}" ] && [ -z "${{ secrets.TF_VAR_MIP_BUCKET_NAME }}" ]; then missing="$missing TF_VAR_mip_bucket_name"; fi
-          if [ -z "${{ secrets.TF_VAR_jwt_signing_key }}" ] && [ -z "${{ secrets.TF_VAR_JWT_SIGNING_KEY }}" ]; then missing="$missing TF_VAR_jwt_signing_key"; fi
-          if [ -z "${{ secrets.TF_VAR_identity_default_admin_password }}" ] && [ -z "${{ secrets.TF_VAR_IDENTITY_DEFAULT_ADMIN_PASSWORD }}" ]; then missing="$missing TF_VAR_identity_default_admin_password"; fi
-          if [ -n "$missing" ]; then
-            echo "::error::Missing GitHub Actions secrets:$missing"
-            echo "Add them under Settings → Secrets and variables → Actions → Repository secrets."
-            echo "TF_VAR_identity_default_admin_password must match identity_default_admin_password in infra/terraform/terraform.tfvars."
-            exit 1
+          if [ "${{ github.event.inputs.apply_terraform }}" = "true" ]; then
+            missing=""
+            if [ -z "${{ secrets.TF_VAR_db_username }}" ] && [ -z "${{ secrets.TF_VAR_DB_USERNAME }}" ]; then missing="$missing TF_VAR_db_username"; fi
+            if [ -z "${{ secrets.TF_VAR_db_password }}" ] && [ -z "${{ secrets.TF_VAR_DB_PASSWORD }}" ]; then missing="$missing TF_VAR_db_password"; fi
+            if [ -z "${{ secrets.TF_VAR_mip_bucket_name }}" ] && [ -z "${{ secrets.TF_VAR_MIP_BUCKET_NAME }}" ]; then missing="$missing TF_VAR_mip_bucket_name"; fi
+            if [ -z "${{ secrets.TF_VAR_jwt_signing_key }}" ] && [ -z "${{ secrets.TF_VAR_JWT_SIGNING_KEY }}" ]; then missing="$missing TF_VAR_jwt_signing_key"; fi
+            if [ -z "${{ secrets.TF_VAR_identity_default_admin_password }}" ] && [ -z "${{ secrets.TF_VAR_IDENTITY_DEFAULT_ADMIN_PASSWORD }}" ]; then missing="$missing TF_VAR_identity_default_admin_password"; fi
+            if [ -n "$missing" ]; then
+              echo "::error::Missing GitHub Actions secrets for terraform:$missing"
+              exit 1
+            fi
           fi
-          echo "AWS and Terraform secrets present."
+          echo "Required secrets present for this run."
 
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "10.0.x"
+      - name: Block terraform apply against GFH pre-built stack
+        if: github.event.inputs.apply_terraform == 'true'
+        run: |
+          if [ "${{ vars.ALLOW_TERRAFORM_APPLY || 'false' }}" != "true" ]; then
+            echo "::error::Terraform apply is disabled for the GFH pre-built DEV stack."
+            echo "Infra already provisioned RDS/ECS/ALB/S3/ECR (ir-gfh-dev-*)."
+            echo "Keep apply_terraform=false and deploy images only."
+            echo "To allow greenfield terraform later, set repository variable ALLOW_TERRAFORM_APPLY=true."
+            exit 1
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -65,26 +100,32 @@ jobs:
       - name: Build and push API image
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-          ECR_REPOSITORY: mip-aws-dev-api
         run: |
+          set -euo pipefail
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
           docker build -f Dockerfile.Api \
             --build-arg SOURCE_REVISION=${{ github.sha }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            -t "$IMAGE_URI:${API_IMAGE_PREFIX}-${IMAGE_TAG}" \
+            -t "$IMAGE_URI:${API_IMAGE_PREFIX}-latest" .
+          docker push "$IMAGE_URI:${API_IMAGE_PREFIX}-${IMAGE_TAG}"
+          docker push "$IMAGE_URI:${API_IMAGE_PREFIX}-latest"
+          echo "Pushed $IMAGE_URI:${API_IMAGE_PREFIX}-${IMAGE_TAG}"
+          echo "Pushed $IMAGE_URI:${API_IMAGE_PREFIX}-latest"
 
       - name: Build and push Worker image
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-          ECR_REPOSITORY: mip-aws-dev-worker
         run: |
+          set -euo pipefail
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
           docker build -f Dockerfile.Worker \
             --build-arg SOURCE_REVISION=${{ github.sha }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            -t "$IMAGE_URI:${WORKER_IMAGE_PREFIX}-${IMAGE_TAG}" \
+            -t "$IMAGE_URI:${WORKER_IMAGE_PREFIX}-latest" .
+          docker push "$IMAGE_URI:${WORKER_IMAGE_PREFIX}-${IMAGE_TAG}"
+          docker push "$IMAGE_URI:${WORKER_IMAGE_PREFIX}-latest"
+          echo "Pushed $IMAGE_URI:${WORKER_IMAGE_PREFIX}-${IMAGE_TAG}"
+          echo "Pushed $IMAGE_URI:${WORKER_IMAGE_PREFIX}-latest"
 
       - uses: hashicorp/setup-terraform@v4
         if: github.event.inputs.apply_terraform == 'true'
@@ -124,7 +165,33 @@ jobs:
         working-directory: infra/terraform
         run: terraform apply -auto-approve tfplan
 
-      - name: Force ECS API service redeploy
+      - name: Force ECS service redeploy
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          aws ecs update-service --cluster mip-aws-dev-cluster --service mip-aws-dev-api --force-new-deployment --region $AWS_REGION
-          aws ecs update-service --cluster mip-aws-dev-cluster --service mip-aws-dev-worker --force-new-deployment --region $AWS_REGION || true
+          set -euo pipefail
+          echo "Note: ECS task definitions must reference:"
+          echo "  API:    $ECR_REGISTRY/$ECR_REPOSITORY:${API_IMAGE_PREFIX}-latest"
+          echo "  Worker: $ECR_REGISTRY/$ECR_REPOSITORY:${WORKER_IMAGE_PREFIX}-latest"
+          echo "force-new-deployment only rolls tasks; it does not change the image URI in the task definition."
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_API_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          if aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_WORKER_SERVICE" \
+              --region "$AWS_REGION" \
+              --query "services[0].status" \
+              --output text 2>/dev/null | grep -Eq 'ACTIVE|DRAINING'; then
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" \
+              --service "$ECS_WORKER_SERVICE" \
+              --force-new-deployment \
+              --region "$AWS_REGION"
+          else
+            echo "::warning::Worker service '$ECS_WORKER_SERVICE' not found/active yet — skipped (Infra sheet: service not created)."
+          fi
