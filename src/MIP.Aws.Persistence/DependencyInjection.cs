@@ -41,12 +41,13 @@ public static class DependencyInjection
         services.Configure<IdentitySeedOptions>(configuration.GetSection(IdentitySeedOptions.SectionName));
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<MediaIntelligenceDbContext>());
+        // Migrations must run before identity/catalog seeds (IHostedService start order = registration order).
+        services.AddHostedService<ProductionDatabaseMigrationHostedService>();
         services.AddHostedService<IdentitySeedHostedService>();
         services.AddHostedService<NewsSourceTemplateSeedHostedService>();
         services.AddHostedService<NewspaperCatalogSeedHostedService>();
         services.AddHostedService<AutoAiDownloadRecoverySettingsSeedHostedService>();
         services.AddHostedService<DarAlKhaleejPressReaderCredentialStartupSyncHostedService>();
-        services.AddHostedService<ProductionDatabaseMigrationHostedService>();
         services.AddHostedService<HangfireRecurringJobsHostedService>();
 
         return services;

@@ -19,6 +19,44 @@ public static class DatabaseBootstrap
     }
 
     /// <summary>
+    /// Creates the main (and Hangfire, if separate) SQL catalogs when missing.
+    /// Call before Hangfire <c>UseSqlServerStorage</c> so schema prepare can connect on first boot.
+    /// </summary>
+    public static async Task EnsurePrimaryAndAuxiliaryCatalogsAsync(
+        IConfiguration configuration,
+        CancellationToken cancellationToken = default)
+    {
+        var main = configuration.GetConnectionString("DefaultConnection");
+        if (!string.IsNullOrWhiteSpace(main))
+        {
+            await SqlServerDatabaseEnsurer.EnsureDatabaseExistsAsync(main, cancellationToken).ConfigureAwait(false);
+        }
+
+        await EnsureAuxiliarySqlCatalogAsync(configuration, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Production first-boot: ensure empty SQL catalogs exist before Hangfire storage initializes.
+    /// </summary>
+    public static Task EnsureSqlCatalogsBeforeHangfireIfRequestedAsync(
+        IHostEnvironment environment,
+        IConfiguration configuration,
+        CancellationToken cancellationToken = default)
+    {
+        if (environment.IsDevelopment())
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!configuration.GetValue("Database:AutoMigrateOnStartup", false))
+        {
+            return Task.CompletedTask;
+        }
+
+        return EnsurePrimaryAndAuxiliaryCatalogsAsync(configuration, cancellationToken);
+    }
+
+    /// <summary>
     /// Ensures the Hangfire catalog exists when it differs from the main EF catalog.
     /// </summary>
     public static async Task EnsureAuxiliarySqlCatalogAsync(IConfiguration configuration, CancellationToken cancellationToken = default)

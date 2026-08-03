@@ -8,7 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace MIP.Aws.Persistence;
 
 /// <summary>
-/// Applies production EF migrations after Kestrel starts so ECS /health/live can pass while migrations run.
+/// Creates the application database (if missing) and applies EF migrations on production startup
+/// when <c>Database:AutoMigrateOnStartup</c> is enabled. Registered before seed hosted services.
 /// Uses a SQL application lock so only one task migrates when several ECS tasks start together.
 /// </summary>
 public sealed class ProductionDatabaseMigrationHostedService(
@@ -38,9 +39,8 @@ public sealed class ProductionDatabaseMigrationHostedService(
             return;
         }
 
-        await DatabaseBootstrap.EnsureAuxiliarySqlCatalogAsync(configuration, cancellationToken)
+        await DatabaseBootstrap.EnsurePrimaryAndAuxiliaryCatalogsAsync(configuration, cancellationToken)
             .ConfigureAwait(false);
-        await SqlServerDatabaseEnsurer.EnsureDatabaseExistsAsync(main, cancellationToken).ConfigureAwait(false);
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MediaIntelligenceDbContext>();

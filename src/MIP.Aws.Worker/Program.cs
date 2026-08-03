@@ -7,6 +7,12 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddApplication();
 builder.Services.AddPersistence(builder.Configuration);
+
+// Create empty SQL catalogs before Hangfire UseSqlServerStorage connects (first-boot / empty RDS).
+await DatabaseBootstrap.EnsureSqlCatalogsBeforeHangfireIfRequestedAsync(
+    builder.Environment,
+    builder.Configuration).ConfigureAwait(false);
+
 builder.Services.AddMipAwsInfrastructure(builder.Configuration, builder.Environment, enableHangfireProcessing: true);
 
 var host = builder.Build();
