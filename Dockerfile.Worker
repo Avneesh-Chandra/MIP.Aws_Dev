@@ -34,8 +34,9 @@ RUN apt-get update \
     && dpkg -i packages-microsoft-prod.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends powershell \
-    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb \
-    && pwsh ./playwright.ps1 install --with-deps chromium
+    && apt-get update \
+    && pwsh ./playwright.ps1 install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
@@ -54,11 +55,12 @@ RUN apt-get update \
     && dpkg -i packages-microsoft-prod.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends powershell \
-    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb \
+    && apt-get update \
     && pwsh ./playwright.ps1 install-deps \
     && find /app/.playwright -type f \( -name node -o -name '*.sh' \) -exec chmod 755 {} + \
     && mkdir -p /app/storage \
-    && chown -R mip:mip /app /ms-playwright
+    && chown -R mip:mip /app /ms-playwright \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb
 USER mip
 
 ENTRYPOINT ["dotnet", "MIP.Aws.Worker.dll"]
