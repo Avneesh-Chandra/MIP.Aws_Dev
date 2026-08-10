@@ -146,8 +146,21 @@ public sealed class SendTestReportEmailCommandHandler(IReportEmailSender sender)
 {
     public async Task<TestEmailResponseDto> Handle(SendTestReportEmailCommand request, CancellationToken cancellationToken)
     {
+        var recipients = ParseRecipientList(request.To);
+        if (recipients.Count == 0)
+        {
+            return new TestEmailResponseDto(
+                false,
+                string.Empty,
+                null,
+                null,
+                null,
+                null,
+                "No valid recipients. Use semicolon- or comma-separated email addresses.");
+        }
+
         var result = await sender.SendAsync(
-            new ReportEmailMessage([request.To.Trim()], request.Subject, request.HtmlBody, []),
+            new ReportEmailMessage(recipients, request.Subject, request.HtmlBody, []),
             cancellationToken).ConfigureAwait(false);
 
         return new TestEmailResponseDto(
@@ -159,6 +172,14 @@ public sealed class SendTestReportEmailCommandHandler(IReportEmailSender sender)
             result.EmailLogIds.FirstOrDefault(),
             result.ErrorMessage);
     }
+
+    private static IReadOnlyList<string> ParseRecipientList(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 }
 
 public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonitorDailyStatusEmailService statusEmail)
