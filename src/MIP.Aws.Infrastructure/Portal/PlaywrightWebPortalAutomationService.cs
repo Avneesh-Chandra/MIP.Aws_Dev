@@ -105,10 +105,7 @@ public sealed class PlaywrightWebPortalAutomationService(
             // Clear sticky manual-action gate after a successful probe (prior selector/CAPTCHA failures set this).
             // Use ExecuteUpdate so Hangfire/recovery RowVersion changes during the Playwright run do not
             // surface as DbUpdateConcurrencyException and wipe a successful probe result.
-            if (source.RequiresManualAction)
-            {
-                await ClearRequiresManualActionAsync(source, cancellationToken).ConfigureAwait(false);
-            }
+            await ClearRequiresManualActionAsync(source, cancellationToken).ConfigureAwait(false);
 
             return new NewsPortalLoginTestResultDto(true, "Login test succeeded.", null, null, null);
         }
@@ -148,6 +145,11 @@ public sealed class PlaywrightWebPortalAutomationService(
 
     public async Task<NewsPortalDownloadTestResultDto> TestDownloadAsync(Guid newsSourceId, CancellationToken cancellationToken)
     {
+        if (db is DbContext downloadProbeContext)
+        {
+            downloadProbeContext.ChangeTracker.Clear();
+        }
+
         var source = await db.NewsSources
             .Include(s => s.Credential)
             .FirstAsync(s => s.Id == newsSourceId && !s.IsDeleted, cancellationToken).ConfigureAwait(false);
@@ -217,7 +219,7 @@ public sealed class PlaywrightWebPortalAutomationService(
             var viewUrl = downloadOutcome.DownloadedFileId is Guid fid
                 ? $"/api/v1/news-sources/{newsSourceId}/pdf/{fid}"
                 : downloadOutcome.StoredRelativePath is not null
-                    ? $"/api/v1/news-sources/{newsSourceId}/pdf/latest"
+                    ? $"/api/v1/portal-artifacts?key={Uri.EscapeDataString(downloadOutcome.StoredRelativePath.Replace('\\', '/'))}"
                     : null;
 
             return new NewsPortalDownloadTestResultDto(
@@ -746,12 +748,12 @@ public sealed class PlaywrightWebPortalAutomationService(
             return (false, $"Could not open login page: {ex.Message}", "NavigationFailed");
         }
 
-        if (await DetectCaptchaAsync(page).ConfigureAwait(false))
+        if (await PortalChallengeDetector.DetectCaptchaAsync(page).ConfigureAwait(false))
         {
             return (false, "CAPTCHA detected on the login page.", "CaptchaOnLoginPage");
         }
 
-        if (await DetectMfaAsync(page).ConfigureAwait(false))
+        if (await PortalChallengeDetector.DetectMfaAsync(page).ConfigureAwait(false))
         {
             return (false, "MFA or OTP challenge detected on the login page.", "MfaOnLoginPage");
         }
@@ -782,12 +784,12 @@ public sealed class PlaywrightWebPortalAutomationService(
             // some SPAs never reach networkidle
         }
 
-        if (await DetectCaptchaAsync(page).ConfigureAwait(false))
+        if (await PortalChallengeDetector.DetectCaptchaAsync(page).ConfigureAwait(false))
         {
             return (false, "CAPTCHA appeared after submitting credentials.", "CaptchaAfterLogin");
         }
 
-        if (await DetectMfaAsync(page).ConfigureAwait(false))
+        if (await PortalChallengeDetector.DetectMfaAsync(page).ConfigureAwait(false))
         {
             return (false, "MFA challenge appeared after submitting credentials.", "MfaAfterLogin");
         }
@@ -965,7 +967,7 @@ public sealed class PlaywrightWebPortalAutomationService(
     {
         var now = DateTimeOffset.UtcNow;
         await db.NewsSources
-            .Where(s => s.Id == source.Id && s.RequiresManualAction && !s.IsDeleted)
+            .Where(s => s.Id == source.Id && !s.IsDeleted)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(s => s.RequiresManualAction, false)
@@ -1115,46 +1117,6 @@ public sealed class PlaywrightWebPortalAutomationService(
         var max = Math.Max(min, _compliance.PortalActionDelayMaxMs);
         var ms = Random.Shared.Next(min, max + 1);
         await Task.Delay(ms, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task<bool> DetectCaptchaAsync(IPage page)
-    {
-        try
-        {
-            var locator = page.Locator("iframe[src*='recaptcha'],iframe[title*='reCAPTCHA'],.g-recaptcha,[class*='h-captcha'],[data-sitekey],#cf-turnstile");
-            return await locator.CountAsync().ConfigureAwait(false) > 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task<bool> DetectMfaAsync(IPage page)
-    {
-        try
-        {
-            var otp = page.Locator("input[autocomplete='one-time-code'],input[name*='otp' i],input[id*='otp' i]");
-            if (await otp.CountAsync().ConfigureAwait(false) > 0)
-            {
-                return true;
-            }
-
-            var body = await page.InnerTextAsync("body").ConfigureAwait(false);
-            if (body.Contains("two-factor", StringComparison.OrdinalIgnoreCase) ||
-                body.Contains("two step", StringComparison.OrdinalIgnoreCase) ||
-                body.Contains("verification code", StringComparison.OrdinalIgnoreCase) ||
-                body.Contains("authenticator", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-
-        return false;
     }
 
     private async Task<IBrowserContext> CreateBrowserContextAsync(

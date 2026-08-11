@@ -5,6 +5,7 @@ using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Portal;
 using MIP.Aws.Domain.Entities;
+using MIP.Aws.Domain.Enums;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
@@ -94,11 +95,40 @@ public sealed class GenericWebPortalDownloadStrategy(
             await fileStorage.WriteAsync(editionFileRel, bytes, cancellationToken).ConfigureAwait(false);
             if (session.DownloadJobId is null)
             {
+                var now = DateTimeOffset.UtcNow;
+                var testJobId = Guid.NewGuid();
+                db.DownloadJobs.Add(new DownloadJob
+                {
+                    Id = testJobId,
+                    NewsSourceId = source.Id,
+                    Status = DownloadJobStatus.Succeeded,
+                    Trigger = DownloadJobTrigger.Manual,
+                    StartedAt = now,
+                    CompletedAt = now,
+                    HttpStatusCode = 200,
+                    CorrelationId = "portal-download-test",
+                    CreatedAt = now
+                });
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+                var testFileId = await PortalStoragePaths.CreateDownloadedFileAsync(
+                    db,
+                    testJobId,
+                    source.EditionUrl!,
+                    editionFileRel,
+                    bytes,
+                    validation.ContentType,
+                    cancellationToken).ConfigureAwait(false);
+
+                source.LastSavedPdfPath = editionFileRel.Replace(Path.DirectorySeparatorChar, '/');
+                source.LastPdfDownloadedAt = now;
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
                 return new PortalEditionDownloadStepResult(
                     true,
                     "Edition downloaded (test run).",
                     null,
-                    null,
+                    testFileId,
                     editionFileRel,
                     Convert.ToHexString(SHA256.HashData(bytes)),
                     bytes.LongLength);

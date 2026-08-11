@@ -4,12 +4,25 @@ namespace MIP.Aws.Infrastructure.Portal;
 
 internal static class PortalChallengeDetector
 {
+    /// <summary>
+    /// Detects an interactive CAPTCHA challenge that would block automation.
+    /// Invisible / always-present widgets (e.g. reCAPTCHA v3, bare data-sitekey) are ignored —
+    /// those caused false "CAPTCHA or MFA" failures after a successful login probe.
+    /// </summary>
     public static async Task<bool> DetectCaptchaAsync(IPage page)
     {
         try
         {
-            var locator = page.Locator("iframe[src*='recaptcha'],iframe[title*='reCAPTCHA'],.g-recaptcha,[class*='h-captcha'],[data-sitekey],#cf-turnstile");
-            return await locator.CountAsync().ConfigureAwait(false) > 0;
+            var candidates = page.Locator(
+                "iframe[src*='recaptcha']:visible," +
+                "iframe[title*='reCAPTCHA']:visible," +
+                "iframe[src*='hcaptcha']:visible," +
+                ".g-recaptcha:visible," +
+                "[class*='h-captcha']:visible," +
+                "#cf-turnstile:visible," +
+                "div.cf-turnstile:visible");
+
+            return await candidates.CountAsync().ConfigureAwait(false) > 0;
         }
         catch
         {
@@ -17,31 +30,29 @@ internal static class PortalChallengeDetector
         }
     }
 
+    /// <summary>
+    /// Detects a visible OTP/MFA input. Page marketing text alone is not enough — PressReader
+    /// and news pages often mention verification without presenting a real challenge.
+    /// </summary>
     public static async Task<bool> DetectMfaAsync(IPage page)
     {
         try
         {
-            var otp = page.Locator("input[autocomplete='one-time-code'],input[name*='otp' i],input[id*='otp' i]");
-            if (await otp.CountAsync().ConfigureAwait(false) > 0)
-            {
-                return true;
-            }
+            var otp = page.Locator(
+                "input[autocomplete='one-time-code']:visible," +
+                "input[name*='otp' i]:visible," +
+                "input[id*='otp' i]:visible," +
+                "input[name*='totp' i]:visible," +
+                "input[id*='totp' i]:visible," +
+                "input[name*='verificationcode' i]:visible," +
+                "input[id*='verificationcode' i]:visible");
 
-            var body = await page.InnerTextAsync("body").ConfigureAwait(false);
-            if (body.Contains("two-factor", StringComparison.OrdinalIgnoreCase)
-                || body.Contains("two step", StringComparison.OrdinalIgnoreCase)
-                || body.Contains("verification code", StringComparison.OrdinalIgnoreCase)
-                || body.Contains("authenticator", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            return await otp.CountAsync().ConfigureAwait(false) > 0;
         }
         catch
         {
-            // ignore
+            return false;
         }
-
-        return false;
     }
 
     public static async Task<bool> DetectPaywallOrUpgradeAsync(IPage page)

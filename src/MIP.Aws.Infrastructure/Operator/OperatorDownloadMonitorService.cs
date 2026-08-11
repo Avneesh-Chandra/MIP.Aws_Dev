@@ -1364,6 +1364,12 @@ public sealed class OperatorDownloadMonitorService(
             return null;
         }
 
+        if (message.Contains("requires manual action", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Resolve alerts before retrying", StringComparison.OrdinalIgnoreCase))
+        {
+            return "RequiresManualAction";
+        }
+
         if (message.Contains("credential", StringComparison.OrdinalIgnoreCase))
         {
             return "InvalidCredentials";

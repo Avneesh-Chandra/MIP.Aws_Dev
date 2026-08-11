@@ -172,6 +172,14 @@ public static class PressReaderPortalLogin
         {
             if (!await OpenBrandedSignInModalAsync(page, source, cancellationToken).ConfigureAwait(false))
             {
+                // Already authenticated: Sign in / lock key is gone and replaced by the subscriber chip.
+                // Detection can lag behind the UI; re-check before failing.
+                await Task.Delay(1_000, cancellationToken).ConfigureAwait(false);
+                if (await IsBrandedDarAlKhaleejLoggedInAsync(page, source).ConfigureAwait(false))
+                {
+                    return (true, "Reusing existing Dar Al Khaleej PressReader subscriber session.", null);
+                }
+
                 return (false, "PressReader lock key icon or Sign in control not found on edition page.", "SelectorNotFound");
             }
         }
@@ -474,18 +482,45 @@ public static class PressReaderPortalLogin
         page.EvaluateAsync<bool>(
             """
             () => {
+              // Dar Al Khaleej / PressReader subscriber chips look like JM37955283.
               const pattern = /\b[A-Z]{2}\d{5,}\b/;
-              const top = document.querySelector('header')?.innerText ?? '';
-              if (pattern.test(top)) return true;
-              const vw = window.innerWidth;
-              const vh = window.innerHeight;
-              for (const el of document.querySelectorAll('button, a, span, div, [role="button"]')) {
-                const text = (el.innerText || '').trim();
+              const readText = (el) => ((el && (el.innerText || el.textContent || el.getAttribute?.('aria-label') || '')) + '').trim();
+
+              const header = document.querySelector('header, [role="banner"], [class*="toolbar"], [class*="top-bar"], [class*="TopBar"], [class*="app-bar"]');
+              if (header && pattern.test(readText(header))) return true;
+
+              // Body-level scan: chip is often outside <header> on branded PressReader.
+              const bodyTop = (document.body?.innerText || '').slice(0, 2500);
+              if (pattern.test(bodyTop)) {
+                // Confirm a matching visible chip is in the upper portion of the viewport
+                // (avoid false positives from article text later on the page).
+                const vw = window.innerWidth || 0;
+                const vh = window.innerHeight || 0;
+                for (const el of document.querySelectorAll('button, a, span, div, [role="button"], [role="menuitem"]')) {
+                  const text = readText(el);
+                  if (!pattern.test(text)) continue;
+                  // Prefer exact-ish chip text (avoid large containers that merely contain the id).
+                  if (text.length > 32 && !/^[A-Z]{2}\d{5,}$/.test(text)) continue;
+                  const r = el.getBoundingClientRect();
+                  if (r.width < 1 || r.height < 1) continue;
+                  const cy = r.y + r.height / 2;
+                  const cx = r.x + r.width / 2;
+                  // Top band, prefer right side (account chip) but allow full width.
+                  if (cy <= Math.max(120, vh * 0.35) && cx >= vw * 0.35) return true;
+                }
+              }
+
+              const vw = window.innerWidth || 0;
+              const vh = window.innerHeight || 0;
+              for (const el of document.querySelectorAll('button, a, span, div, [role="button"], [role="menuitem"]')) {
+                const text = readText(el);
                 if (!pattern.test(text)) continue;
+                if (text.length > 32 && !/^[A-Z]{2}\d{5,}$/.test(text)) continue;
                 const r = el.getBoundingClientRect();
+                if (r.width < 1 || r.height < 1) continue;
                 const cy = r.y + r.height / 2;
                 const cx = r.x + r.width / 2;
-                if (cx >= vw * 0.55 && cy <= vh * 0.22) return true;
+                if (cx >= vw * 0.45 && cy <= Math.max(140, vh * 0.35)) return true;
               }
               return false;
             }
