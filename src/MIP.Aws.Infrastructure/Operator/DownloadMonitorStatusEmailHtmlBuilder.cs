@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using MIP.Aws.Application.Features.Operator;
+using MIP.Aws.Application.Features.Operator;
 using MIP.Aws.Application.Time;
 
 namespace MIP.Aws.Infrastructure.Operator;
@@ -50,6 +51,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         sb.Append("<p style=\"font-size:12px;color:#6b7280;margin-top:24px;\">")
             .Append("Automated daily status from GFH Media Intelligence. Replies are not monitored.")
+            .Append(" PDF links require VPN or corporate network access to the internal portal, sign-in, and Latest PDF view permission.")
             .Append($" All times are {MipDisplayTimeZone.ZoneSuffix()} ({MipDisplayTimeZone.DefaultIanaId}, UTC+3).")
             .Append("</p></div>");
 
@@ -220,8 +222,8 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
             return "Not available";
         }
 
-        var viewUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf?inline=true";
-        var downloadUrl = $"{portalBaseUrl.TrimEnd('/')}/api/v1/operator/sources/{row.SourceId}/latest-pdf";
+        var viewUrl = OperatorLatestPdfLinks.BuildPortalUrl(portalBaseUrl, row.SourceId, inline: true);
+        var downloadUrl = OperatorLatestPdfLinks.BuildPortalUrl(portalBaseUrl, row.SourceId, inline: false);
         return $"{EmailHtmlLinkFormatter.Link(viewUrl, "View")} · {EmailHtmlLinkFormatter.Link(downloadUrl, "Download")}";
     }
 

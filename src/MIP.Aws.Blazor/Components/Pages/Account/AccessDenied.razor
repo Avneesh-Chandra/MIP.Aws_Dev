@@ -1,0 +1,21 @@
+@page "/Account/AccessDenied"
+@layout MIP.Aws.Blazor.Components.Layout.AuthLayout
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+<PageTitle>Access denied</PageTitle>
+
+<div class="mi-auth-card">
+    <h1>Access denied</h1>
+    <p>You are signed in, but your account does not have permission to view newspaper PDFs from Download Monitor emails.</p>
+    <p>Ask a GFH administrator to grant <strong>Latest PDF view</strong> (MIP Operator, Content Admin, or Executive Viewer).</p>
+    @if (!string.IsNullOrWhiteSpace(ReturnUrl))
+    {
+        <p><a href="@ReturnUrl">Return to the page you requested</a></p>
+    }
+    <p><a href="/">Go to home</a></p>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+}

@@ -50,7 +50,10 @@ public sealed class AwsBedrockAiProvider(
         try
         {
             var bedrock = GetOrCreateClient();
-            var adapter = adapterFactory.Resolve(_bedrock.ModelId);
+            var invokeModelId = BedrockInferenceProfileResolver.ResolveInvokeModelId(
+                _bedrock.ModelId,
+                clientFactory.ResolveRegion());
+            var adapter = adapterFactory.Resolve(invokeModelId);
             var body = adapter.BuildRequestBody(
                 request.SystemPrompt,
                 request.UserPrompt,
@@ -61,7 +64,7 @@ public sealed class AwsBedrockAiProvider(
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body));
             var invoke = new InvokeModelRequest
             {
-                ModelId = _bedrock.ModelId,
+                ModelId = invokeModelId,
                 ContentType = "application/json",
                 Accept = "application/json",
                 Body = stream
@@ -96,7 +99,11 @@ public sealed class AwsBedrockAiProvider(
         catch (Exception ex)
         {
             var message = BedrockErrorClassifier.Classify(ex);
-            logger.LogWarning(ex, "Bedrock text generation failed for model {ModelId}.", _bedrock.ModelId);
+            logger.LogWarning(
+                ex,
+                "Bedrock text generation failed for model {ModelId} (invoke {InvokeModelId}).",
+                _bedrock.ModelId,
+                BedrockInferenceProfileResolver.ResolveInvokeModelId(_bedrock.ModelId, clientFactory.ResolveRegion()));
             telemetry.RecordFailure(ProviderName, "Generate", message);
             return new AiTextGenerationResult(false, null, message, ProviderName);
         }

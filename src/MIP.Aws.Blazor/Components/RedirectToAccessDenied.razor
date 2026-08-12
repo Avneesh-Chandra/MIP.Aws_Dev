@@ -1,0 +1,12 @@
+@inject NavigationManager Navigation
+@code {
+    protected override void OnInitialized()
+    {
+        var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var returnUrl = string.IsNullOrWhiteSpace(relative) ? null : $"/{relative}";
+        var target = string.IsNullOrWhiteSpace(returnUrl)
+            ? "/Account/AccessDenied"
+            : $"/Account/AccessDenied?returnUrl={Uri.EscapeDataString(returnUrl)}";
+        Navigation.NavigateTo(target, forceLoad: true);
+    }
+}

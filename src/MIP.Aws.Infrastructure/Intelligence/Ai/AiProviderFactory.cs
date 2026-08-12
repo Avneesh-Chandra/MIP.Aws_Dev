@@ -35,7 +35,7 @@ public sealed class AiProviderFactory(
             ai.Enabled,
             ai.MockMode || string.Equals(active, "Mock", StringComparison.OrdinalIgnoreCase),
             clientFactory.ResolveRegion(),
-            bedrock.ModelId,
+            BedrockInferenceProfileResolver.ResolveInvokeModelId(bedrock.ModelId, clientFactory.ResolveRegion()),
             bedrock.Enabled,
             string.IsNullOrWhiteSpace(profile) ? null : profile,
             status,

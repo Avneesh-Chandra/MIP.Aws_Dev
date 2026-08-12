@@ -39,6 +39,46 @@ public sealed class AwsBedrockOptions
     public int TimeoutSeconds { get; set; } = 60;
 }
 
+/// <summary>
+/// Maps foundation-model IDs to geo inference profiles when on-demand invoke is not supported
+/// (e.g. amazon.nova-lite-v1:0 in eu-west-1 requires eu.amazon.nova-lite-v1:0).
+/// </summary>
+public static class BedrockInferenceProfileResolver
+{
+    public static string ResolveInvokeModelId(string? modelId, string? region)
+    {
+        if (string.IsNullOrWhiteSpace(modelId))
+        {
+            return string.Empty;
+        }
+
+        var id = modelId.Trim();
+        if (id.Contains('.', StringComparison.Ordinal) && !id.StartsWith("amazon.", StringComparison.OrdinalIgnoreCase)
+            && !id.StartsWith("anthropic.", StringComparison.OrdinalIgnoreCase)
+            && !id.StartsWith("meta.", StringComparison.OrdinalIgnoreCase)
+            && !id.StartsWith("mistral.", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already an inference profile (eu.amazon..., us.amazon..., etc.)
+            return id;
+        }
+
+        var regionName = region?.Trim() ?? string.Empty;
+        if (regionName.StartsWith("eu-", StringComparison.OrdinalIgnoreCase)
+            && id.StartsWith("amazon.nova-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"eu.{id}";
+        }
+
+        if (regionName.StartsWith("us-", StringComparison.OrdinalIgnoreCase)
+            && id.StartsWith("amazon.nova-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"us.{id}";
+        }
+
+        return id;
+    }
+}
+
 public sealed class AwsSecretsManagerOptions
 {
     public bool Enabled { get; set; }

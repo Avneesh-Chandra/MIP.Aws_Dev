@@ -3,6 +3,7 @@ using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Features.NewsSources.PdfEdition;
 using MIP.Aws.Application.Features.Operator;
 using MIP.Aws.Application.Features.Reports;
+using MIP.Aws.Application.Security;
 using MIP.Aws.Domain.Security;
 using MIP.Aws.Shared.Responses;
 using MediatR;
@@ -113,6 +114,11 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
         var link = await mediator.Send(new GetOperatorLatestPdfQuery(id), cancellationToken).ConfigureAwait(false);
         if (link?.Available != true || link.FileId is null)
         {
+            if (BrowserNavigationHelper.WantsHtmlPage(Request.Headers.Accept.ToString()))
+            {
+                return Redirect(OperatorLatestPdfLinks.BuildPortalPath(id, inline));
+            }
+
             return NotFound();
         }
 

@@ -1,4 +1,5 @@
 @page "/Account/Login"
+@using MIP.Aws.Application.Security
 @layout MIP.Aws.Blazor.Components.Layout.AuthLayout
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 
@@ -7,6 +8,10 @@
 <div class="mi-auth-card">
     <h1>GFH Media Intelligence</h1>
     <form method="post" action="/account/cookie-login">
+        @if (!string.IsNullOrWhiteSpace(NormalizedReturnUrl))
+        {
+            <input type="hidden" name="returnUrl" value="@NormalizedReturnUrl" />
+        }
         <p>
             <label for="login-email">Email</label>
             <input id="login-email"
@@ -37,7 +42,13 @@
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
 
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
     private string? _errorMessage;
+
+    private string? NormalizedReturnUrl =>
+        LocalReturnUrlValidator.IsValid(ReturnUrl) ? ReturnUrl!.Trim() : null;
 
     protected override void OnParametersSet()
     {

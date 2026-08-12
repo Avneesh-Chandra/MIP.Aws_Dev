@@ -1,5 +1,6 @@
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Security;
+using MIP.Aws.Application.Security;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,7 +22,8 @@ public static class AccountEndpoints
         SignInManager<ApplicationUser> signInManager,
         UserManager<ApplicationUser> userManager,
         [FromForm] string email,
-        [FromForm] string password)
+        [FromForm] string password,
+        [FromForm] string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
@@ -41,6 +43,12 @@ public static class AccountEndpoints
             var roles = user is null
                 ? Array.Empty<string>()
                 : (IReadOnlyList<string>)(await userManager.GetRolesAsync(user).ConfigureAwait(false)).ToArray();
+
+            if (LocalReturnUrlValidator.IsValid(returnUrl))
+            {
+                return Results.Redirect(returnUrl!.Trim());
+            }
+
             return Results.Redirect(RoleDashboardRoutes.GetHomeRoute(roles));
         }
 

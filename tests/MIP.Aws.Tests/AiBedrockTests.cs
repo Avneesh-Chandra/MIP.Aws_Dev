@@ -425,3 +425,20 @@ public sealed class AiAdminControllerAuthTests
             new AiRecoveryProviderAdapter(recovery));
     }
 }
+
+public sealed class BedrockInferenceProfileResolverTests
+{
+    [Theory]
+    [InlineData("amazon.nova-lite-v1:0", "eu-west-1", "eu.amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-lite-v1:0", "eu-north-1", "eu.amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-pro-v1:0", "us-east-1", "us.amazon.nova-pro-v1:0")]
+    [InlineData("eu.amazon.nova-lite-v1:0", "eu-west-1", "eu.amazon.nova-lite-v1:0")]
+    [InlineData("anthropic.claude-3-5-haiku-20241022-v1:0", "eu-north-1", "anthropic.claude-3-5-haiku-20241022-v1:0")]
+    public void ResolveInvokeModelId_maps_nova_foundation_ids_to_geo_profiles(
+        string modelId,
+        string region,
+        string expected)
+    {
+        Assert.Equal(expected, BedrockInferenceProfileResolver.ResolveInvokeModelId(modelId, region));
+    }
+}

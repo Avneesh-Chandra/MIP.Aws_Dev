@@ -1,0 +1,78 @@
+@page "/operator/sources/{SourceId:guid}/latest-pdf"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = AuthPolicies.OperatorLatestPdf)]
+@using MIP.Aws.Application.Features.Operator
+@using MIP.Aws.Domain.Security
+@inject IMediator Mediator
+@inject NavigationManager Navigation
+
+<PageTitle>Latest PDF</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-6">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mb-4" />
+        <MudText Typo="Typo.body1">Opening latest PDF…</MudText>
+    }
+    else if (_state == PdfLinkState.SourceNotFound)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">
+            <strong>Source not found.</strong> This newspaper source does not exist or was removed.
+        </MudAlert>
+    }
+    else if (_state == PdfLinkState.NotAvailable)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-3">
+            <strong>No PDF available.</strong> There is no downloaded edition for this source yet.
+            Check Download Monitor for the latest status.
+        </MudAlert>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            If the PDF did not open automatically,
+            <MudLink Href="@_apiUrl">click here</MudLink>.
+        </MudAlert>
+    }
+
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+        This link requires VPN or corporate network access to the internal GFH MIP portal.
+    </MudText>
+
+    <MudButton Variant="Variant.Outlined" Href="/operator/download-monitor">Open Download Monitor</MudButton>
+</MudContainer>
+
+@code {
+    [Parameter] public Guid SourceId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "inline")]
+    public bool Inline { get; set; } = true;
+
+    private enum PdfLinkState { Loading, Ready, NotAvailable, SourceNotFound }
+
+    private PdfLinkState _state = PdfLinkState.Loading;
+    private bool _loading = true;
+    private string _apiUrl = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _apiUrl = OperatorLatestPdfLinks.BuildApiPath(SourceId, Inline);
+        var link = await Mediator.Send(new GetOperatorLatestPdfQuery(SourceId)).ConfigureAwait(false);
+        _loading = false;
+
+        if (link is null)
+        {
+            _state = PdfLinkState.SourceNotFound;
+            return;
+        }
+
+        if (link.Available != true || link.FileId is null)
+        {
+            _state = PdfLinkState.NotAvailable;
+            return;
+        }
+
+        _state = PdfLinkState.Ready;
+        Navigation.NavigateTo(_apiUrl, forceLoad: true);
+    }
+}

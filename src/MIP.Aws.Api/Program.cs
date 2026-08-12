@@ -333,6 +333,17 @@ builder.Services.ConfigureApplicationCookie(o =>
 
     {
 
+        if (ctx.Request.Path.StartsWithSegments("/api")
+            && MIP.Aws.Application.Features.Operator.OperatorLatestPdfLinks.TryMapApiPathToPortal(
+                ctx.Request.Path.Value,
+                ctx.Request.QueryString.Value,
+                out var portalPath)
+            && MIP.Aws.Application.Security.BrowserNavigationHelper.WantsHtmlPage(ctx.Request.Headers.Accept.ToString()))
+        {
+            ctx.Response.Redirect($"/Account/Login?returnUrl={Uri.EscapeDataString(portalPath)}");
+            return Task.CompletedTask;
+        }
+
         if (ctx.Request.Path.StartsWithSegments("/api"))
 
         {
@@ -366,6 +377,18 @@ builder.Services.ConfigureApplicationCookie(o =>
     o.Events.OnRedirectToAccessDenied = ctx =>
 
     {
+
+        if (ctx.Request.Path.StartsWithSegments("/api")
+            && MIP.Aws.Application.Features.Operator.OperatorLatestPdfLinks.TryMapApiPathToPortal(
+                ctx.Request.Path.Value,
+                ctx.Request.QueryString.Value,
+                out var portalPath)
+            && MIP.Aws.Application.Security.BrowserNavigationHelper.WantsHtmlPage(ctx.Request.Headers.Accept.ToString()))
+        {
+            ctx.Response.Redirect(
+                $"/Account/AccessDenied?returnUrl={Uri.EscapeDataString(portalPath)}");
+            return Task.CompletedTask;
+        }
 
         if (ctx.Request.Path.StartsWithSegments("/api"))
 

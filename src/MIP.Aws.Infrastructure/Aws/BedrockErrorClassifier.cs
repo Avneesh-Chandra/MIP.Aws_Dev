@@ -37,12 +37,14 @@ public static class BedrockErrorClassifier
                 "Missing or invalid AWS credentials. Run aws configure --profile mip-dev and set AWS_PROFILE=mip-dev.",
             "AccessDeniedException" =>
                 "Access denied. Enable model access in AWS Console → Amazon Bedrock → Model access, and verify IAM permissions for bedrock:InvokeModel.",
+            "ValidationException" when ex.Message.Contains("inference profile", StringComparison.OrdinalIgnoreCase) =>
+                "This region requires a Bedrock inference profile. Use eu.amazon.nova-lite-v1:0 in EU (not amazon.nova-lite-v1:0).",
             "ValidationException" =>
-                $"Invalid model ID for region eu-north-1: {ex.Message}. Use amazon.nova-lite-v1:0 or eu.anthropic.claude-haiku-4-5-20251001-v1:0 (not Claude 3.5 Haiku, which is US-only).",
+                $"Invalid Bedrock model ID: {ex.Message}. In EU use eu.amazon.nova-lite-v1:0 (Nova Lite inference profile).",
             "ThrottlingException" =>
                 "Bedrock request was throttled. Wait and retry, or reduce concurrent AI recovery jobs.",
             "ResourceNotFoundException" =>
-                "Model not available in this region. Verify Aws:Bedrock:ModelId and Aws:Bedrock:Region (eu-north-1).",
+                "Model not available in this region. Verify Aws:Bedrock:ModelId (EU: eu.amazon.nova-lite-v1:0) and Aws:Bedrock:Region.",
             _ when ex.StatusCode == System.Net.HttpStatusCode.Forbidden =>
                 "Access denied. Enable Bedrock model access in the AWS Console for this account and region.",
             _ when ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests =>

@@ -18,7 +18,7 @@ public sealed class AiBedrockTestService(
         var status = providerFactory.GetAdminStatus();
         var bedrock = awsOptions.Value.Bedrock;
         var region = clientFactory.ResolveRegion();
-        var modelId = bedrock.ModelId;
+        var modelId = BedrockInferenceProfileResolver.ResolveInvokeModelId(bedrock.ModelId, region);
 
         if (aiOptions.Value.MockMode)
         {
