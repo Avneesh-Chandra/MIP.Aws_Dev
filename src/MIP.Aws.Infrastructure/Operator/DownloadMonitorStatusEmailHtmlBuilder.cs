@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using MIP.Aws.Application.Features.Operator;
-using MIP.Aws.Application.Features.Operator;
 using MIP.Aws.Application.Time;
 
 namespace MIP.Aws.Infrastructure.Operator;
@@ -222,8 +221,18 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
             return "Not available";
         }
 
-        var viewUrl = OperatorLatestPdfLinks.BuildPortalUrl(portalBaseUrl, row.SourceId, inline: true);
-        var downloadUrl = OperatorLatestPdfLinks.BuildPortalUrl(portalBaseUrl, row.SourceId, inline: false);
+        var viewUrl = OperatorLatestPdfLinks.BuildPortalUrl(
+            portalBaseUrl,
+            row.SourceId,
+            inline: true,
+            fileId: fileId,
+            editionDate: row.LatestPdfEditionDate);
+        var downloadUrl = OperatorLatestPdfLinks.BuildPortalUrl(
+            portalBaseUrl,
+            row.SourceId,
+            inline: false,
+            fileId: fileId,
+            editionDate: row.LatestPdfEditionDate);
         return $"{EmailHtmlLinkFormatter.Link(viewUrl, "View")} · {EmailHtmlLinkFormatter.Link(downloadUrl, "Download")}";
     }
 

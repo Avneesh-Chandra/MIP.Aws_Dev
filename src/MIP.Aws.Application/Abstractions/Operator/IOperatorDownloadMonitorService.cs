@@ -13,6 +13,8 @@ public interface IOperatorDownloadMonitorService
 
     Task<LatestPdfLinkDto?> GetLatestPdfLinkAsync(Guid sourceId, CancellationToken cancellationToken);
 
+    Task<LatestPdfLinkDto?> GetPdfLinkAsync(Guid sourceId, Guid fileId, CancellationToken cancellationToken);
+
     Task<DownloadFailureDetailsDto?> GetFailureDetailsAsync(Guid downloadJobId, CancellationToken cancellationToken);
 
     Task<AiRecoverySuccessDetailsDto?> GetAiRecoverySuccessDetailsAsync(

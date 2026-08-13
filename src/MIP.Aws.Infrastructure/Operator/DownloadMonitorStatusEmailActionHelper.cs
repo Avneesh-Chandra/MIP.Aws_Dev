@@ -15,7 +15,7 @@ public static class DownloadMonitorStatusEmailActionHelper
             return string.Empty;
         }
 
-        return $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor?jobId={downloadJobId:D}";
+        return $"{OperatorLatestPdfLinks.NormalizePortalBaseUrl(portalBaseUrl)}/operator/download-monitor?jobId={downloadJobId:D}";
     }
 
     public static string? BuildInformAdminMailTo(
@@ -57,7 +57,7 @@ public static class DownloadMonitorStatusEmailActionHelper
             return string.Empty;
         }
 
-        return $"{portalBaseUrl.TrimEnd('/')}/operator/download-monitor?jobId={downloadJobId:D}&informAdmin=1";
+        return $"{OperatorLatestPdfLinks.NormalizePortalBaseUrl(portalBaseUrl)}/operator/download-monitor?jobId={downloadJobId:D}&informAdmin=1";
     }
 
     public static string? PickInformAdminEmailHref(

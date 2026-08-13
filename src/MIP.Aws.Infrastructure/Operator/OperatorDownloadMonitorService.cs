@@ -256,6 +256,30 @@ public sealed class OperatorDownloadMonitorService(
         return BuildPdfLink(sourceId, file.Id, file.DownloadJobId, file.CreatedAt);
     }
 
+    public async Task<LatestPdfLinkDto?> GetPdfLinkAsync(Guid sourceId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var sourceExists = await db.NewsSources.AsNoTracking()
+            .AnyAsync(s => s.Id == sourceId && !s.IsDeleted, cancellationToken)
+            .ConfigureAwait(false);
+        if (!sourceExists)
+        {
+            return null;
+        }
+
+        var file = await db.DownloadedFiles.AsNoTracking()
+            .Where(f => f.Id == fileId && !f.IsDeleted && f.DownloadJob!.NewsSourceId == sourceId)
+            .Select(f => new { f.Id, f.DownloadJobId, f.CreatedAt })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (file is null)
+        {
+            return new LatestPdfLinkDto(sourceId, fileId, null, null, null, false, null);
+        }
+
+        return BuildPdfLink(sourceId, file.Id, file.DownloadJobId, file.CreatedAt);
+    }
+
     public async Task<DownloadFailureDetailsDto?> GetFailureDetailsAsync(Guid downloadJobId, CancellationToken cancellationToken)
     {
         var job = await db.DownloadJobs.AsNoTracking()
@@ -1420,8 +1444,8 @@ public sealed class OperatorDownloadMonitorService(
             sourceId,
             fileId,
             jobId,
-            $"/api/v1/operator/sources/{sourceId}/latest-pdf?inline=true",
-            $"/api/v1/operator/sources/{sourceId}/latest-pdf",
+            OperatorLatestPdfLinks.BuildApiPath(sourceId, inline: true, fileId),
+            OperatorLatestPdfLinks.BuildApiPath(sourceId, inline: false, fileId),
             true,
             downloadedAt);
 

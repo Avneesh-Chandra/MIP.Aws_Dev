@@ -295,9 +295,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
     };
 
     private static string ResolvePortalBaseUrl(string? configured) =>
-        string.IsNullOrWhiteSpace(configured)
-            ? string.Empty
-            : configured.TrimEnd('/');
+        OperatorLatestPdfLinks.NormalizePortalBaseUrl(configured);
 
     private static IReadOnlyList<string> ParseRecipients(string value) =>
         value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

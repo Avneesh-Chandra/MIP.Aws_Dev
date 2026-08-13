@@ -1,4 +1,5 @@
 @page "/operator/sources/{SourceId:guid}/latest-pdf"
+@page "/operator/sources/{SourceId:guid}/pdf/{FileId:guid}"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = AuthPolicies.OperatorLatestPdf)]
 @using MIP.Aws.Application.Features.Operator
@@ -6,13 +7,13 @@
 @inject IMediator Mediator
 @inject NavigationManager Navigation
 
-<PageTitle>Latest PDF</PageTitle>
+<PageTitle>@(string.IsNullOrWhiteSpace(_editionLabel) ? "Latest PDF" : $"{_editionLabel} PDF")</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Small" Class="mt-6">
     @if (_loading)
     {
         <MudProgressLinear Indeterminate="true" Class="mb-4" />
-        <MudText Typo="Typo.body1">Opening latest PDF…</MudText>
+        <MudText Typo="Typo.body1">@_openingMessage</MudText>
     }
     else if (_state == PdfLinkState.SourceNotFound)
     {
@@ -23,7 +24,15 @@
     else if (_state == PdfLinkState.NotAvailable)
     {
         <MudAlert Severity="Severity.Warning" Class="mb-3">
-            <strong>No PDF available.</strong> There is no downloaded edition for this source yet.
+            <strong>No PDF available.</strong>
+            @if (!string.IsNullOrWhiteSpace(_editionLabel))
+            {
+                <span> There is no downloaded PDF for @_editionLabel for this source.</span>
+            }
+            else
+            {
+                <span> There is no downloaded edition for this source yet.</span>
+            }
             Check Download Monitor for the latest status.
         </MudAlert>
     }
@@ -45,19 +54,31 @@
 @code {
     [Parameter] public Guid SourceId { get; set; }
 
+    [Parameter] public Guid FileId { get; set; }
+
     [SupplyParameterFromQuery(Name = "inline")]
     public bool Inline { get; set; } = true;
+
+    [SupplyParameterFromQuery(Name = "edition")]
+    public string? Edition { get; set; }
 
     private enum PdfLinkState { Loading, Ready, NotAvailable, SourceNotFound }
 
     private PdfLinkState _state = PdfLinkState.Loading;
     private bool _loading = true;
     private string _apiUrl = string.Empty;
+    private string? _editionLabel;
+    private string _openingMessage = "Opening PDF…";
 
     protected override async Task OnInitializedAsync()
     {
-        _apiUrl = OperatorLatestPdfLinks.BuildApiPath(SourceId, Inline);
-        var link = await Mediator.Send(new GetOperatorLatestPdfQuery(SourceId)).ConfigureAwait(false);
+        Guid? fileId = FileId == Guid.Empty ? null : FileId;
+        _editionLabel = DateOnly.TryParse(Edition, out var editionDate) ? editionDate.ToString("yyyy-MM-dd") : null;
+        _openingMessage = string.IsNullOrWhiteSpace(_editionLabel)
+            ? "Opening PDF…"
+            : $"Opening {_editionLabel} PDF…";
+        _apiUrl = OperatorLatestPdfLinks.BuildApiPath(SourceId, Inline, fileId);
+        var link = await Mediator.Send(new GetOperatorLatestPdfQuery(SourceId, fileId)).ConfigureAwait(false);
         _loading = false;
 
         if (link is null)
@@ -72,6 +93,7 @@
             return;
         }
 
+        _apiUrl = OperatorLatestPdfLinks.BuildApiPath(SourceId, Inline, link.FileId);
         _state = PdfLinkState.Ready;
         Navigation.NavigateTo(_apiUrl, forceLoad: true);
     }

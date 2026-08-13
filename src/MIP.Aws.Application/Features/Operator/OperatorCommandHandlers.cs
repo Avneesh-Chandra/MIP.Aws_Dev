@@ -65,7 +65,9 @@ public sealed class GetOperatorLatestPdfQueryHandler(
 {
     public async Task<LatestPdfLinkDto?> Handle(GetOperatorLatestPdfQuery request, CancellationToken cancellationToken)
     {
-        var result = await service.GetLatestPdfLinkAsync(request.SourceId, cancellationToken).ConfigureAwait(false);
+        var result = request.FileId is Guid fileId
+            ? await service.GetPdfLinkAsync(request.SourceId, fileId, cancellationToken).ConfigureAwait(false)
+            : await service.GetLatestPdfLinkAsync(request.SourceId, cancellationToken).ConfigureAwait(false);
         if (result?.Available == true)
         {
             await audit.RecordAdminActionAsync(

@@ -10,7 +10,7 @@ public sealed record ReconcileDownloadMonitorStateCommand(TimeSpan? MaxDuration 
 
 public sealed record GetSourceDownloadStatusQuery(Guid SourceId, DateOnly? MonitorDate = null) : IRequest<SourceDownloadStatusDto?>;
 
-public sealed record GetOperatorLatestPdfQuery(Guid SourceId) : IRequest<LatestPdfLinkDto?>;
+public sealed record GetOperatorLatestPdfQuery(Guid SourceId, Guid? FileId = null) : IRequest<LatestPdfLinkDto?>;
 
 public sealed record GetDownloadFailureDetailsQuery(Guid DownloadJobId) : IRequest<DownloadFailureDetailsDto?>;
 

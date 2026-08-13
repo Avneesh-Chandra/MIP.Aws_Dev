@@ -122,7 +122,40 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
             return NotFound();
         }
 
-        var stream = await mediator.Send(new StreamPdfEditionQuery(id, link.FileId.Value, inline), cancellationToken)
+        return await StreamOperatorPdfAsync(id, link.FileId.Value, inline, cancellationToken).ConfigureAwait(false);
+    }
+
+    [HttpGet("sources/{id:guid}/pdf/{fileId:guid}")]
+    [Authorize(Policy = AuthPolicies.OperatorLatestPdf)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSourcePdfAsync(
+        Guid id,
+        Guid fileId,
+        [FromQuery] bool inline = false,
+        CancellationToken cancellationToken = default)
+    {
+        var link = await mediator.Send(new GetOperatorLatestPdfQuery(id, fileId), cancellationToken).ConfigureAwait(false);
+        if (link?.Available != true || link.FileId is null)
+        {
+            if (BrowserNavigationHelper.WantsHtmlPage(Request.Headers.Accept.ToString()))
+            {
+                return Redirect(OperatorLatestPdfLinks.BuildPortalPath(id, inline, fileId));
+            }
+
+            return NotFound();
+        }
+
+        return await StreamOperatorPdfAsync(id, link.FileId.Value, inline, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IActionResult> StreamOperatorPdfAsync(
+        Guid sourceId,
+        Guid fileId,
+        bool inline,
+        CancellationToken cancellationToken)
+    {
+        var stream = await mediator.Send(new StreamPdfEditionQuery(sourceId, fileId, inline), cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
         {
