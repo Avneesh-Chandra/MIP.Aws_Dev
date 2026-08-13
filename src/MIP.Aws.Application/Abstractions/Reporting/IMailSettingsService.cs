@@ -15,7 +15,10 @@ public sealed record EffectiveSchedulerMailSettings(
     bool MailAutomationEnabled,
     string StatusEmailTimeUtc,
     string? AdminPortalUrl,
-    string AdminRecipientEmail);
+    string AdminRecipientEmail,
+    string BatchScheduleTimeUtc,
+    string BatchRecurrence,
+    string? BatchRecurrenceDays);
 
 public interface IMailSettingsService
 {
@@ -35,5 +38,8 @@ public interface IMailSettingsService
         string? statusEmailRecipient,
         bool mailAutomationEnabled,
         string? adminRecipientEmail,
+        string? batchScheduleTimeUtc,
+        string? batchRecurrence,
+        string? batchRecurrenceDays,
         CancellationToken cancellationToken);
 }

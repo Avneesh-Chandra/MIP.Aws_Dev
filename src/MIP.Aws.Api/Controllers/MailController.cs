@@ -54,7 +54,10 @@ public sealed class MailController(IMediator mediator) : ControllerBase
             body.StatusEmailEnabled,
             body.StatusEmailRecipient,
             body.MailAutomationEnabled,
-            body.AdminRecipientEmail), cancellationToken).ConfigureAwait(false);
+            body.AdminRecipientEmail,
+            body.BatchScheduleTimeUtc,
+            body.BatchRecurrence,
+            body.BatchRecurrenceDays), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse.Ok("Scheduler mail settings updated"));
     }
 
@@ -109,5 +112,8 @@ public sealed class MailController(IMediator mediator) : ControllerBase
         bool StatusEmailEnabled,
         string? StatusEmailRecipient,
         bool MailAutomationEnabled,
-        string? AdminRecipientEmail);
+        string? AdminRecipientEmail,
+        string? BatchScheduleTimeUtc = null,
+        string? BatchRecurrence = null,
+        string? BatchRecurrenceDays = null);
 }

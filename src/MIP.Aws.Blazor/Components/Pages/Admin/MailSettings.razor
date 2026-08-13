@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
 @using MIP.Aws.Application.Configuration
 @using MIP.Aws.Application.Features.Reports
+@using MIP.Aws.Application.Scheduling
 @using MIP.Aws.Domain.Security
 @using MIP.Aws.Application.Time
 @using Microsoft.AspNetCore.WebUtilities
@@ -35,6 +36,30 @@
     <MudGrid Spacing="3">
         <MudItem xs="12" lg="6">
             <MudPaper Class="pa-4" Outlined="true">
+                <MudText Typo="Typo.h6" Class="mb-3">Download batch schedule</MudText>
+                <MudTextField T="string" Label="Start time (UTC)" @bind-Value="_batchScheduleTimeUtc"
+                              Variant="Variant.Outlined"
+                              HelperText="@($"24-hour UTC, e.g. 04:30. Bahrain: {_batchLocalTime}.")" />
+                <MudSelect T="string" Label="Recurrence" @bind-Value="_batchRecurrence" Variant="Variant.Outlined" Class="mt-2">
+                    <MudSelectItem T="string" Value="@("Daily")">Every day</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("Weekdays")">Weekdays (Monday–Friday)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("CustomDays")">Selected days</MudSelectItem>
+                </MudSelect>
+                @if (string.Equals(_batchRecurrence, "CustomDays", StringComparison.OrdinalIgnoreCase))
+                {
+                    <MudStack Row="true" Spacing="1" Wrap="Wrap.Wrap" Class="mt-2">
+                        @foreach (var day in DownloadBatchSchedule.WeekDays)
+                        {
+                            <MudCheckBox T="bool" Value="_batchDays.Contains(day.CronDay)"
+                                         ValueChanged="@(on => ToggleBatchDay(day.CronDay, on))"
+                                         Label="@day.Label" Dense="true" />
+                        }
+                    </MudStack>
+                }
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                    Hangfire job runs <strong>@_batchSummary</strong>. Status email is sent when the batch finishes (and after Execute PDF download task).
+                </MudText>
+                <MudDivider Class="my-3" />
                 <MudText Typo="Typo.h6" Class="mb-3">Download monitor status email</MudText>
                 <MudSwitch T="bool" @bind-Value="_statusEmailEnabled" Label="Send daily status email" Color="Color.Primary" />
                 <MudTextField T="string" Label="Status email recipient" @bind-Value="_statusEmailRecipient"
@@ -43,9 +68,6 @@
                 <MudTextField T="string" Label="Admin intervention recipient" @bind-Value="_adminRecipientEmail"
                               Variant="Variant.Outlined" Class="mt-2"
                               HelperText="Inform Admin mailto links in status emails open a draft to this address (e.g. admin_mip@gfh.com)" />
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
-                    Scheduled at @_statusEmailLocalTime @MipDisplayTimeZone.ZoneSuffix() (@_statusEmailTimeUtc UTC; also sent after Execute PDF download task completes).
-                </MudText>
                 <MudSwitch T="bool" @bind-Value="_mailAutomationEnabled" Label="Mail automation enabled" Color="Color.Primary" Class="mt-3" />
                 <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSchedulerAsync">
                     Save scheduler settings
@@ -175,10 +197,20 @@
     private string _adminRecipientEmail = "admin_mip@gfh.com";
     private string _statusEmailTimeUtc = "05:00";
     private string _statusEmailLocalTime = "08:00";
+    private string _batchScheduleTimeUtc = "04:30";
+    private string _batchRecurrence = nameof(DownloadBatchRecurrence.Daily);
+    private readonly HashSet<int> _batchDays = [];
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
     private DateTime? _logDate = DateTime.Today;
     private MailActiveProvider _activeProvider = MailActiveProvider.MicrosoftGraph;
+
+    private string _batchLocalTime => MipDisplayTimeZone.FormatUtcTimeOfDay(_batchScheduleTimeUtc);
+
+    private string _batchSummary => DownloadBatchSchedule.Describe(
+        _batchScheduleTimeUtc,
+        DownloadBatchSchedule.ParseRecurrence(_batchRecurrence),
+        string.Join(',', _batchDays));
 
     private string _providerLabel => _status?.ActiveProvider switch
     {
@@ -232,6 +264,13 @@
             _adminRecipientEmail = settings.AdminRecipientEmail;
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
             _statusEmailLocalTime = MipDisplayTimeZone.FormatUtcTimeOfDay(settings.StatusEmailTimeUtc);
+            _batchScheduleTimeUtc = settings.BatchScheduleTimeUtc;
+            _batchRecurrence = settings.BatchRecurrence;
+            _batchDays.Clear();
+            foreach (var day in DownloadBatchSchedule.ParseDays(settings.BatchRecurrenceDays))
+            {
+                _batchDays.Add(day);
+            }
             await ReloadLogsAsync();
         }
         catch (Exception ex)
@@ -272,13 +311,32 @@
                 _statusEmailEnabled,
                 _statusEmailRecipient,
                 _mailAutomationEnabled,
-                _adminRecipientEmail));
-            Snackbar.Add("Scheduler mail settings saved.", Severity.Success);
+                _adminRecipientEmail,
+                _batchScheduleTimeUtc,
+                _batchRecurrence,
+                string.Join(',', _batchDays)));
+            Snackbar.Add("Scheduler settings saved. The download batch Hangfire job was updated.", Severity.Success);
             await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not save scheduler settings: {ex.Message}", Severity.Error);
         }
         finally
         {
             _busy = false;
+        }
+    }
+
+    private void ToggleBatchDay(int cronDay, bool selected)
+    {
+        if (selected)
+        {
+            _batchDays.Add(cronDay);
+        }
+        else
+        {
+            _batchDays.Remove(cronDay);
         }
     }
 

@@ -34,14 +34,10 @@ public sealed class HangfireScheduledJobRegistry(
             "15 */4 * * *");
 
         var pdfEdition = pdfEditionOptions.Value;
-        var staggerCron = ToUtcCronDirect(
+        ApplyDownloadBatchSchedule(
             pdfEdition.FirstSourceScheduleTimeUtc,
-            fallbackUtcHour: 4,
-            fallbackUtcMinute: 30);
-        recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
-            "download-monitor-stagger-schedule",
-            job => job.ScheduleStaggeredDailyDownloadsAsync(null),
-            staggerCron);
+            DownloadBatchRecurrence.Daily,
+            customDays: null);
         recurringJobs.RemoveIfExists("pdf-edition-daily");
 
         if (pdfEdition.StatusEmailEnabled && !pdfEdition.StatusEmailAfterBatchOnly)
@@ -59,6 +55,19 @@ public sealed class HangfireScheduledJobRegistry(
         {
             recurringJobs.RemoveIfExists("download-monitor-daily-status-email");
         }
+    }
+
+    public void ApplyDownloadBatchSchedule(
+        string timeUtc,
+        DownloadBatchRecurrence recurrence,
+        string? customDays)
+    {
+        var cron = DownloadBatchSchedule.ToUtcCron(timeUtc, recurrence, customDays);
+        recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
+            DownloadBatchSchedule.RecurringJobId,
+            job => job.ScheduleStaggeredDailyDownloadsAsync(null),
+            cron,
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 
     private static string ToUtcCronDirect(string utcTime, int fallbackUtcHour, int fallbackUtcMinute = 0) =>

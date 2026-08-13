@@ -6,4 +6,9 @@ namespace MIP.Aws.Application.Scheduling;
 public interface IScheduledJobRegistry
 {
     void RegisterRecurringJobs();
+
+    void ApplyDownloadBatchSchedule(
+        string timeUtc,
+        DownloadBatchRecurrence recurrence,
+        string? customDays);
 }

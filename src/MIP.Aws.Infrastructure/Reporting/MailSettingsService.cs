@@ -1,6 +1,7 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Scheduling;
 using MIP.Aws.Domain.Entities;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -46,6 +47,19 @@ public sealed class MailSettingsService(
         var automation = mailAutomationOptions.Value;
         var row = await TryLoadMailSettingsRowAsync(cancellationToken).ConfigureAwait(false);
 
+        var batchTime = !string.IsNullOrWhiteSpace(row?.BatchScheduleTimeUtc)
+            ? row!.BatchScheduleTimeUtc!.Trim()
+            : scheduler.FirstSourceScheduleTimeUtc;
+        if (!DownloadBatchSchedule.TryNormalizeTimeUtc(batchTime, out var normalizedTime, out _))
+        {
+            normalizedTime = scheduler.FirstSourceScheduleTimeUtc;
+        }
+
+        var recurrence = DownloadBatchSchedule.ParseRecurrence(row?.BatchRecurrence);
+        var days = recurrence == DownloadBatchRecurrence.CustomDays
+            ? DownloadBatchSchedule.FormatDays(DownloadBatchSchedule.ParseDays(row?.BatchRecurrenceDays))
+            : recurrence == DownloadBatchRecurrence.Weekdays ? "1,2,3,4,5" : null;
+
         return new EffectiveSchedulerMailSettings(
             row?.StatusEmailEnabled ?? scheduler.StatusEmailEnabled,
             !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient) ? row!.StatusEmailRecipient!.Trim() : scheduler.StatusEmailRecipient,
@@ -54,7 +68,10 @@ public sealed class MailSettingsService(
             scheduler.AdminPortalUrl,
             !string.IsNullOrWhiteSpace(row?.AdminRecipientEmail)
                 ? row!.AdminRecipientEmail!.Trim()
-                : scheduler.AdminRecipientEmail);
+                : scheduler.AdminRecipientEmail,
+            normalizedTime,
+            recurrence.ToString(),
+            days);
     }
 
     public async Task UpdateAsync(
@@ -78,13 +95,41 @@ public sealed class MailSettingsService(
         string? statusEmailRecipient,
         bool mailAutomationEnabled,
         string? adminRecipientEmail,
+        string? batchScheduleTimeUtc,
+        string? batchRecurrence,
+        string? batchRecurrenceDays,
         CancellationToken cancellationToken)
     {
+        if (!DownloadBatchSchedule.TryNormalizeTimeUtc(batchScheduleTimeUtc, out var timeUtc, out var timeError))
+        {
+            throw new InvalidOperationException(timeError);
+        }
+
+        var recurrence = DownloadBatchSchedule.ParseRecurrence(batchRecurrence);
+        string? days = null;
+        if (recurrence == DownloadBatchRecurrence.CustomDays)
+        {
+            var parsedDays = DownloadBatchSchedule.ParseDays(batchRecurrenceDays);
+            if (parsedDays.Count == 0)
+            {
+                throw new InvalidOperationException("Select at least one weekday for a custom batch schedule.");
+            }
+
+            days = DownloadBatchSchedule.FormatDays(parsedDays);
+        }
+        else if (recurrence == DownloadBatchRecurrence.Weekdays)
+        {
+            days = "1,2,3,4,5";
+        }
+
         var row = await GetOrCreateRowAsync(cancellationToken).ConfigureAwait(false);
         row.StatusEmailEnabled = statusEmailEnabled;
         row.StatusEmailRecipient = statusEmailRecipient?.Trim();
         row.MailAutomationEnabled = mailAutomationEnabled;
         row.AdminRecipientEmail = adminRecipientEmail?.Trim();
+        row.BatchScheduleTimeUtc = timeUtc;
+        row.BatchRecurrence = recurrence.ToString();
+        row.BatchRecurrenceDays = days;
         row.ModifiedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -139,6 +184,8 @@ public sealed class MailSettingsService(
             }
 
             if (current.Message.Contains("AdminRecipientEmail", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("BatchScheduleTimeUtc", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("BatchRecurrence", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("Invalid column name", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

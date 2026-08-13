@@ -1,3 +1,4 @@
+using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -28,7 +29,26 @@ public sealed class HangfireRecurringJobsHostedService(
         try
         {
             using var scope = scopeFactory.CreateScope();
-            scope.ServiceProvider.GetRequiredService<IScheduledJobRegistry>().RegisterRecurringJobs();
+            var registry = scope.ServiceProvider.GetRequiredService<IScheduledJobRegistry>();
+            registry.RegisterRecurringJobs();
+            try
+            {
+                var mailSettings = scope.ServiceProvider.GetRequiredService<IMailSettingsService>();
+                var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
+                registry.ApplyDownloadBatchSchedule(
+                    scheduler.BatchScheduleTimeUtc,
+                    DownloadBatchSchedule.ParseRecurrence(scheduler.BatchRecurrence),
+                    scheduler.BatchRecurrenceDays);
+                logger.LogInformation(
+                    "Hangfire download batch schedule applied: {TimeUtc} {Recurrence} {Days}.",
+                    scheduler.BatchScheduleTimeUtc,
+                    scheduler.BatchRecurrence,
+                    scheduler.BatchRecurrenceDays ?? "*");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Hangfire recurring jobs registered; SuperAdmin batch schedule override was not applied.");
+            }
             logger.LogInformation("Hangfire recurring jobs registered.");
         }
         catch (Exception ex)

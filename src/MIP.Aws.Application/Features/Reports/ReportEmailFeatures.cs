@@ -2,6 +2,7 @@ using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Scheduling;
 using MIP.Aws.Application.Time;
 using MIP.Aws.Domain.Enums;
 using MediatR;
@@ -49,7 +50,10 @@ public sealed record UpdateMailSchedulerSettingsCommand(
     bool StatusEmailEnabled,
     string? StatusEmailRecipient,
     bool MailAutomationEnabled,
-    string? AdminRecipientEmail) : IRequest;
+    string? AdminRecipientEmail,
+    string? BatchScheduleTimeUtc = null,
+    string? BatchRecurrence = null,
+    string? BatchRecurrenceDays = null) : IRequest;
 
 public sealed record SendDownloadMonitorStatusEmailCommand(
     DateOnly? MonitorDate,
@@ -67,7 +71,11 @@ public sealed record MailSettingsDto(
     string StatusEmailRecipient,
     bool MailAutomationEnabled,
     string StatusEmailTimeUtc,
-    string AdminRecipientEmail);
+    string AdminRecipientEmail,
+    string BatchScheduleTimeUtc,
+    string BatchRecurrence,
+    string? BatchRecurrenceDays,
+    string BatchScheduleSummary);
 
 public sealed record EmailLogListItemDto(
     Guid Id,
@@ -104,6 +112,7 @@ public sealed class GetMailSettingsQueryHandler(IMailSettingsService mailSetting
     {
         var effective = await mailSettings.GetEffectiveAsync(cancellationToken).ConfigureAwait(false);
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
+        var recurrence = DownloadBatchSchedule.ParseRecurrence(scheduler.BatchRecurrence);
         return new MailSettingsDto(
             effective.ActiveProvider,
             effective.DevelopmentSafetyEnabled,
@@ -113,7 +122,14 @@ public sealed class GetMailSettingsQueryHandler(IMailSettingsService mailSetting
             scheduler.StatusEmailRecipient,
             scheduler.MailAutomationEnabled,
             scheduler.StatusEmailTimeUtc,
-            scheduler.AdminRecipientEmail);
+            scheduler.AdminRecipientEmail,
+            scheduler.BatchScheduleTimeUtc,
+            recurrence.ToString(),
+            scheduler.BatchRecurrenceDays,
+            DownloadBatchSchedule.Describe(
+                scheduler.BatchScheduleTimeUtc,
+                recurrence,
+                scheduler.BatchRecurrenceDays));
     }
 }
 
@@ -129,16 +145,29 @@ public sealed class UpdateMailSettingsCommandHandler(IMailSettingsService mailSe
             cancellationToken);
 }
 
-public sealed class UpdateMailSchedulerSettingsCommandHandler(IMailSettingsService mailSettings)
+public sealed class UpdateMailSchedulerSettingsCommandHandler(
+    IMailSettingsService mailSettings,
+    IScheduledJobRegistry scheduledJobs)
     : IRequestHandler<UpdateMailSchedulerSettingsCommand>
 {
-    public Task Handle(UpdateMailSchedulerSettingsCommand request, CancellationToken cancellationToken) =>
-        mailSettings.UpdateSchedulerAsync(
+    public async Task Handle(UpdateMailSchedulerSettingsCommand request, CancellationToken cancellationToken)
+    {
+        await mailSettings.UpdateSchedulerAsync(
             request.StatusEmailEnabled,
             request.StatusEmailRecipient,
             request.MailAutomationEnabled,
             request.AdminRecipientEmail,
-            cancellationToken);
+            request.BatchScheduleTimeUtc,
+            request.BatchRecurrence,
+            request.BatchRecurrenceDays,
+            cancellationToken).ConfigureAwait(false);
+
+        var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
+        scheduledJobs.ApplyDownloadBatchSchedule(
+            scheduler.BatchScheduleTimeUtc,
+            DownloadBatchSchedule.ParseRecurrence(scheduler.BatchRecurrence),
+            scheduler.BatchRecurrenceDays);
+    }
 }
 
 public sealed class SendTestReportEmailCommandHandler(IReportEmailSender sender)
