@@ -3057,7 +3057,7 @@ namespace MIP.Aws.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DownloadJobId");
+                    b.HasIndex("DownloadJobId", "CreatedAt");
 
                     b.HasIndex("NewsSourceId", "CreatedAt");
 

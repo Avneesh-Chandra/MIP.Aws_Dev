@@ -178,6 +178,7 @@ public sealed class SourceRecoveryService(
             auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
                 .Where(a => !a.IsDeleted && a.DownloadJobId == job.Id)
                 .OrderByDescending(a => a.CreatedAt)
+                .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
         }

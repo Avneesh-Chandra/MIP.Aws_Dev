@@ -370,6 +370,7 @@ public sealed class PortalDownloadAuditLogConfiguration : IEntityTypeConfigurati
         builder.Property(x => x.ScreenshotRelativePath).HasMaxLength(2048);
         builder.Property(x => x.HtmlSnapshotRelativePath).HasMaxLength(2048);
         builder.HasIndex(x => new { x.NewsSourceId, x.CreatedAt });
+        builder.HasIndex(x => new { x.DownloadJobId, x.CreatedAt });
         builder.HasOne(x => x.NewsSource).WithMany(x => x.PortalAuditLogs).HasForeignKey(x => x.NewsSourceId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.DownloadJob).WithMany().HasForeignKey(x => x.DownloadJobId).OnDelete(DeleteBehavior.SetNull);
         builder.Property(x => x.RowVersion).IsRowVersion();

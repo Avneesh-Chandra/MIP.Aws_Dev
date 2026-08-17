@@ -39,6 +39,7 @@ public sealed class PdfEditionFailureArtifactService(
         var existingLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
             .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
             .OrderByDescending(a => a.CreatedAt)
+            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

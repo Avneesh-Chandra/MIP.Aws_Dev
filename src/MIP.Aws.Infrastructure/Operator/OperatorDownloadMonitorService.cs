@@ -295,6 +295,7 @@ public sealed class OperatorDownloadMonitorService(
         var auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
             .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
             .OrderByDescending(a => a.CreatedAt)
+            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -317,6 +318,7 @@ public sealed class OperatorDownloadMonitorService(
                 auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
                     .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
                     .OrderByDescending(a => a.CreatedAt)
+                    .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -543,6 +545,7 @@ public sealed class OperatorDownloadMonitorService(
                 var auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
                     .Where(a => !a.IsDeleted && a.DownloadJobId == originalJobId)
                     .OrderByDescending(a => a.CreatedAt)
+                    .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
 
@@ -568,6 +571,7 @@ public sealed class OperatorDownloadMonitorService(
                         auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
                             .Where(a => !a.IsDeleted && a.DownloadJobId == originalJobId)
                             .OrderByDescending(a => a.CreatedAt)
+                            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
                             .ToListAsync(cancellationToken)
                             .ConfigureAwait(false);
                     }
