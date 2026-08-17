@@ -24,14 +24,20 @@ public sealed class SourceRecoveryContextBuilder(
         string? failureCode,
         CancellationToken cancellationToken)
     {
-        var auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.DownloadJobId == job.Id)
-            .OrderByDescending(a => a.CreatedAt)
-            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        List<PortalDownloadAuditLog> auditLogs;
+        try
+        {
+            auditLogs = await PortalDownloadAuditLogLoader
+                .RecentForJob(db, job.Id, job.CreatedAt.AddHours(-1))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not load portal audit logs for recovery context on job {JobId}.", job.Id);
+            auditLogs = [];
+        }
 
-        var latestAudit = auditLogs.FirstOrDefault();
         var (screenshotPath, htmlSnapshotPath) = PortalAuditArtifactResolver.ResolvePaths(auditLogs);
         var playwrightLog = BuildPlaywrightLogExcerpt(auditLogs);
         var browserConsole = auditLogs
@@ -62,12 +68,6 @@ public sealed class SourceRecoveryContextBuilder(
                         && v.NewsSourceId == source.Id
                         && v.Status == SourceConfigurationVersionStatus.Active)
             .OrderByDescending(v => v.VersionNumber)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var lastSuccessJob = await db.DownloadJobs.AsNoTracking()
-            .Where(j => !j.IsDeleted && j.NewsSourceId == source.Id && j.Status == DownloadJobStatus.Succeeded)
-            .OrderByDescending(j => j.CompletedAt)
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 

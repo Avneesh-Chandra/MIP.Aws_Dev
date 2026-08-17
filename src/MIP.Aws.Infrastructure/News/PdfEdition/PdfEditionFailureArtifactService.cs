@@ -36,10 +36,8 @@ public sealed class PdfEditionFailureArtifactService(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
 
-        var existingLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
-            .OrderByDescending(a => a.CreatedAt)
-            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
+        var existingLogs = await PortalDownloadAuditLogLoader
+            .RecentForJob(db, downloadJobId)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

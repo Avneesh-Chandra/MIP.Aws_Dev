@@ -9,6 +9,7 @@ using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.News.PdfEdition;
 using MIP.Aws.Infrastructure.Portal;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace MIP.Aws.Infrastructure.Intelligence.Recovery;
 
@@ -19,7 +20,8 @@ public sealed class SourceRecoveryService(
     SourceRecoveryContextBuilder contextBuilder,
     IPdfEditionFailureArtifactService failureArtifacts,
     PortalArtifactUrlBuilder artifactUrls,
-    IAuditService audit) : ISourceRecoveryAnalysisService
+    IAuditService audit,
+    ILogger<SourceRecoveryService> logger) : ISourceRecoveryAnalysisService
 {
     private static readonly JsonSerializerOptions AnalysisJsonOptions = new()
     {
@@ -31,6 +33,7 @@ public sealed class SourceRecoveryService(
         Guid actorUserId,
         CancellationToken cancellationToken)
     {
+        using var timeout = EfCommandTimeoutScope.TryBegin(db, 90);
         var job = await db.DownloadJobs.AsNoTracking()
             .Include(j => j.NewsSource)
             .FirstOrDefaultAsync(j => j.Id == downloadJobId && !j.IsDeleted, cancellationToken)
@@ -38,13 +41,27 @@ public sealed class SourceRecoveryService(
             ?? throw new InvalidOperationException("Download job was not found.");
 
         var source = job.NewsSource;
-        await EnsureFailureArtifactsIfMissingAsync(job, source, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureFailureArtifactsIfMissingAsync(job, source, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Skipped failure-artifact capture before analysis for job {JobId}.", downloadJobId);
+        }
 
-        var auditRow = await db.PortalDownloadAuditLogs.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
-            .OrderByDescending(a => a.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
+        PortalDownloadAuditLog? auditRow = null;
+        try
+        {
+            auditRow = await PortalDownloadAuditLogLoader
+                .RecentForJob(db, downloadJobId, job.CreatedAt.AddHours(-1))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsSqlTimeout(ex))
+        {
+            logger.LogWarning(ex, "Portal audit lookup timed out for job {JobId}; analyzing from the job error only.", downloadJobId);
+        }
 
         var failureCode = auditRow?.FailureCode;
         var failureType = SourceRecoveryFailureTypeMapper.Map(failureCode, job.ErrorMessage);
@@ -101,11 +118,6 @@ public sealed class SourceRecoveryService(
         }
 
         var (options, recommended) = DeserializeAnalysis(attempt.AnalysisJson);
-        var auditRow = await db.PortalDownloadAuditLogs.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.DownloadJobId == attempt.DownloadJobId)
-            .OrderByDescending(a => a.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
 
         var context = attempt.DownloadJob is null
             ? null
@@ -175,12 +187,18 @@ public sealed class SourceRecoveryService(
         }
         else
         {
-            auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-                .Where(a => !a.IsDeleted && a.DownloadJobId == job.Id)
-                .OrderByDescending(a => a.CreatedAt)
-                .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                auditLogs = await PortalDownloadAuditLogLoader
+                    .RecentForJob(db, job.Id, job.CreatedAt.AddHours(-1))
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsSqlTimeout(ex))
+            {
+                logger.LogWarning(ex, "Portal audit load timed out while building analysis DTO for job {JobId}.", job.Id);
+                auditLogs = Array.Empty<PortalDownloadAuditLog>();
+            }
         }
 
         var (screenshot, html) = await artifactUrls.BuildUrlsAsync(auditLogs, cancellationToken).ConfigureAwait(false);
@@ -237,5 +255,19 @@ public sealed class SourceRecoveryService(
         {
             return Array.Empty<string>();
         }
+    }
+
+    private static bool IsSqlTimeout(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("Execution Timeout Expired", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("timeout period elapsed", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

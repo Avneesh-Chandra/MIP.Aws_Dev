@@ -292,10 +292,8 @@ public sealed class OperatorDownloadMonitorService(
         }
 
         var source = job.NewsSource;
-        var auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
-            .OrderByDescending(a => a.CreatedAt)
-            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
+        var auditLogs = await PortalDownloadAuditLogLoader
+            .RecentForJob(db, downloadJobId, job.CreatedAt.AddHours(-1))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -315,10 +313,8 @@ public sealed class OperatorDownloadMonitorService(
                     ExtractFailureCode(job.ErrorMessage),
                     cancellationToken).ConfigureAwait(false);
 
-                auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-                    .Where(a => !a.IsDeleted && a.DownloadJobId == downloadJobId)
-                    .OrderByDescending(a => a.CreatedAt)
-                    .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
+                auditLogs = await PortalDownloadAuditLogLoader
+                    .RecentForJob(db, downloadJobId, job.CreatedAt.AddHours(-1))
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -542,10 +538,8 @@ public sealed class OperatorDownloadMonitorService(
             if (originalJob is not null)
             {
                 originalFailedAt = originalJob.CompletedAt ?? originalJob.StartedAt ?? originalJob.CreatedAt;
-                var auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-                    .Where(a => !a.IsDeleted && a.DownloadJobId == originalJobId)
-                    .OrderByDescending(a => a.CreatedAt)
-                    .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
+                var auditLogs = await PortalDownloadAuditLogLoader
+                    .RecentForJob(db, originalJobId, originalJob.CreatedAt.AddHours(-1))
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
 
@@ -568,10 +562,8 @@ public sealed class OperatorDownloadMonitorService(
                             attempt.FailureCode ?? ExtractFailureCode(originalJob.ErrorMessage),
                             cancellationToken).ConfigureAwait(false);
 
-                        auditLogs = await db.PortalDownloadAuditLogs.AsNoTracking()
-                            .Where(a => !a.IsDeleted && a.DownloadJobId == originalJobId)
-                            .OrderByDescending(a => a.CreatedAt)
-                            .Take(PortalAuditArtifactResolver.MaxLogsPerJob)
+                        auditLogs = await PortalDownloadAuditLogLoader
+                            .RecentForJob(db, originalJobId, originalJob.CreatedAt.AddHours(-1))
                             .ToListAsync(cancellationToken)
                             .ConfigureAwait(false);
                     }
