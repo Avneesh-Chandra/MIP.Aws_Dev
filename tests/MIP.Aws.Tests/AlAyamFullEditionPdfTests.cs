@@ -10,11 +10,13 @@ public sealed class AlAyamFullEditionPdfTests
 {
     [Theory]
     [InlineData("https://i.alayam.com/ayamnewsa/upload/issue/2026/13584/PDF/INAF_20260617000803888.pdf", true)]
+    [InlineData("https://i.alayam.com/ayamnewsa/upload/issue/2026/13646/PDF/INAF_20260817220424378.pdf?utm_source=epaper", true)]
     [InlineData("https://www.alayam.com/epaper", false)]
     [InlineData("https://i.alayam.com/other/file.pdf", false)]
     public void IsDirectPdfUrl_recognizes_inaf_issue_pdfs(string url, bool expected)
     {
         Assert.Equal(expected, AlAyamFullEditionPdf.IsDirectPdfUrl(new Uri(url)));
+        Assert.Equal(expected, AlAyamFullEditionPdf.IsDirectPdfUrl(url));
     }
 
     [Fact]

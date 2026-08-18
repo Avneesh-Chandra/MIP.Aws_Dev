@@ -143,7 +143,7 @@ public static class SourceRecoveryHeuristicBuilder
                 ? "Restore Al Ayam e-paper and retry via Playwright"
                 : "Restore Al Ayam e-paper PDF link selector and page URL",
             blocked
-                ? "Reset Al Ayam to the known-good e-paper page, embedded viewer Save button, and all-pages link, then retry through Playwright instead of blocked HTTP HTML."
+                ? "Reset Al Ayam to the known-good e-paper page and كل الصفحات click, then save the PDF from the browser session instead of a blocked HTTP GET."
                 : "Reset Al Ayam PDF discovery to the e-paper viewer Save button and all-pages link selectors.",
             blocked
                 ? "Restores PdfLinkSelector, BaseUrl, EditionUrl, PdfDiscoveryPageUrl, and UseHeadlessBrowser for anti-block fetch."

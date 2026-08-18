@@ -1106,7 +1106,7 @@ public sealed class PdfEditionDownloadService(
                     false,
                     null,
                     null,
-                    "Al Ayam all-pages click path could not download a PDF from i.alayam.com.");
+                    "Al Ayam all-pages click path could not download a PDF from i.alayam.com after clicking كل الصفحات.");
                 continue;
             }
 

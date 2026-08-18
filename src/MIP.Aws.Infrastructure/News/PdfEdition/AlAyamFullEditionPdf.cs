@@ -12,7 +12,8 @@ using Microsoft.Playwright;
 namespace MIP.Aws.Infrastructure.News.PdfEdition;
 
 /// <summary>
-/// Bahrain Al Ayam: HTTP epaper HTML → INAF PDF, then Playwright click path as fallback.
+/// Bahrain Al Ayam: Playwright clicks كل الصفحات on the e-paper page and saves the INAF PDF
+/// from that browser session (same path as a manual download). HTTP is only a fallback.
 /// </summary>
 public static class AlAyamFullEditionPdf
 {
@@ -31,6 +32,11 @@ public static class AlAyamFullEditionPdf
 
     public static bool UsesClickPath(NewsSource source) =>
         string.Equals(source.ConnectorKey, AlAyamEditionDiscovery.Key, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsDirectPdfUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url)
+        && Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && IsDirectPdfUrl(uri);
 
     public static bool IsDirectPdfUrl(Uri url) =>
         url.Host.Contains("i.alayam.com", StringComparison.OrdinalIgnoreCase)
@@ -166,9 +172,16 @@ public static class AlAyamFullEditionPdf
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        var result = await RunClickPathAsync(startPageUrl, source, logger, downloadBytes: true, cancellationToken)
+            .ConfigureAwait(false);
+        if (result?.PdfBytes is not null && PdfEditionContentFetcher.IsPdf(result.PdfBytes))
+        {
+            return result.PdfBytes;
+        }
+
         if (httpClientFactory is not null && source is not null)
         {
-            var knownPdf = IsDirectPdfUrl(startPageUrl) ? startPageUrl : null;
+            var knownPdf = IsDirectPdfUrl(startPageUrl) ? startPageUrl : result?.PdfUrl;
             var fromHttp = await AlAyamHttpPdfPath.TryDownloadBytesAsync(
                     httpClientFactory,
                     outbound,
@@ -183,8 +196,6 @@ public static class AlAyamFullEditionPdf
             }
         }
 
-        var result = await RunClickPathAsync(startPageUrl, source, logger, downloadBytes: true, cancellationToken)
-            .ConfigureAwait(false);
         return result?.PdfBytes;
     }
 
@@ -227,25 +238,9 @@ public static class AlAyamFullEditionPdf
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        if (httpClientFactory is not null)
-        {
-            var knownPdf = IsDirectPdfUrl(candidateOrPage) ? candidateOrPage : null;
-            var fromHttp = await AlAyamHttpPdfPath.TryDownloadBytesAsync(
-                    httpClientFactory,
-                    outbound,
-                    source,
-                    knownPdf,
-                    logger,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (fromHttp is not null && fromHttp.Length > 0 && PdfEditionContentFetcher.IsPdf(fromHttp))
-            {
-                return fromHttp;
-            }
-        }
-
         var starts = new List<Uri>();
-        if (IsDirectPdfUrl(candidateOrPage))
+        if (!IsDirectPdfUrl(candidateOrPage)
+            && candidateOrPage.Host.Contains("alayam.com", StringComparison.OrdinalIgnoreCase))
         {
             starts.Add(candidateOrPage);
         }
@@ -350,12 +345,26 @@ public static class AlAyamFullEditionPdf
                 }
             }
 
+            if (downloadBytes)
+            {
+                var captured = await ClickAllPagesAndCapturePdfAsync(page, timeoutMs, logger, cancellationToken)
+                    .ConfigureAwait(false);
+                if (captured.Bytes is not null && PdfEditionContentFetcher.IsPdf(captured.Bytes))
+                {
+                    logger.LogInformation(
+                        "Al Ayam PDF saved after clicking كل الصفحات ({Bytes} bytes) from {Url}",
+                        captured.Bytes.Length,
+                        captured.PdfUrl);
+                    return new AlAyamFullEditionResult(captured.PdfUrl, captured.Bytes);
+                }
+            }
+
             var resolve = await ResolvePdfUrlAsync(page, epaperUri, timeoutMs, logger, cancellationToken)
                 .ConfigureAwait(false);
             if (resolve.AccessBlocked)
             {
                 logger.LogWarning(
-                    "Al Ayam e-paper blocked by publisher bot protection on {Url} (datacenter egress; HTTP path already attempted).",
+                    "Al Ayam e-paper blocked by publisher bot protection on {Url}.",
                     epaperUri);
                 return new AlAyamFullEditionResult(null, null, AccessBlocked: true);
             }
@@ -380,27 +389,6 @@ public static class AlAyamFullEditionPdf
                     timeoutMs,
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (bytes is null || !PdfEditionContentFetcher.IsPdf(bytes))
-            {
-                if (await TryClickAllPagesLinkAsync(page, cancellationToken).ConfigureAwait(false))
-                {
-                    try
-                    {
-                        var download = await page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = timeoutMs })
-                            .ConfigureAwait(false);
-                        var path = await download.PathAsync().ConfigureAwait(false);
-                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                        {
-                            bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogDebug(ex, "Al Ayam Playwright download event failed.");
-                    }
-                }
-            }
-
             if (bytes is null || bytes.Length == 0 || !PdfEditionContentFetcher.IsPdf(bytes))
             {
                 logger.LogWarning("Al Ayam click path: PDF fetch failed for {Url}", resolve.PdfUrl);
@@ -555,9 +543,7 @@ public static class AlAyamFullEditionPdf
                 if (await TryClickAllPagesLinkAsync(page, cancellationToken).ConfigureAwait(false))
                 {
                     await page.WaitForURLAsync(
-                        url => url.Contains("i.alayam.com", StringComparison.OrdinalIgnoreCase)
-                               && url.Contains("INAF_", StringComparison.OrdinalIgnoreCase)
-                               && url.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase),
+                        IsDirectPdfUrl,
                         new PageWaitForURLOptions { Timeout = Math.Min(timeoutMs, 60_000) })
                         .ConfigureAwait(false);
                     return (StripTrackingQuery(new Uri(page.Url)), false);
@@ -599,27 +585,203 @@ public static class AlAyamFullEditionPdf
         return null;
     }
 
+    private static async Task<(Uri? PdfUrl, byte[]? Bytes)> ClickAllPagesAndCapturePdfAsync(
+        IPage page,
+        int timeoutMs,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = timeoutMs });
+        var responseTask = page.WaitForResponseAsync(
+            IsAlAyamPdfResponse,
+            new PageWaitForResponseOptions { Timeout = timeoutMs });
+        var extraPageTask = page.Context.WaitForPageAsync(new BrowserContextWaitForPageOptions { Timeout = timeoutMs });
+        ObserveFault(downloadTask);
+        ObserveFault(responseTask);
+        ObserveFault(extraPageTask);
+
+        if (!await TryClickAllPagesLinkAsync(page, cancellationToken).ConfigureAwait(false))
+        {
+            logger.LogWarning("Al Ayam: كل الصفحات was not clickable on the e-paper page.");
+            return (null, null);
+        }
+
+        logger.LogInformation("Al Ayam clicked كل الصفحات; capturing the PDF from the browser session.");
+
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        var triedViewerFetch = false;
+        var triedExtraPage = false;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var fromDownload = await TryReadCompletedDownloadAsync(downloadTask, cancellationToken).ConfigureAwait(false);
+            if (fromDownload.Bytes is not null && PdfEditionContentFetcher.IsPdf(fromDownload.Bytes))
+            {
+                return fromDownload;
+            }
+
+            if (responseTask.IsCompletedSuccessfully)
+            {
+                var response = await responseTask.ConfigureAwait(false);
+                var fromResponse = await TryReadResponsePdfAsync(response).ConfigureAwait(false);
+                if (fromResponse.Bytes is not null && PdfEditionContentFetcher.IsPdf(fromResponse.Bytes))
+                {
+                    return fromResponse;
+                }
+            }
+
+            if (!triedExtraPage && extraPageTask.IsCompletedSuccessfully)
+            {
+                triedExtraPage = true;
+                var extraPage = await extraPageTask.ConfigureAwait(false);
+                extraPage.SetDefaultTimeout(timeoutMs);
+                var fromPopup = await TryCapturePdfFromOpenedPageAsync(extraPage, timeoutMs, cancellationToken)
+                    .ConfigureAwait(false);
+                if (fromPopup.Bytes is not null && PdfEditionContentFetcher.IsPdf(fromPopup.Bytes))
+                {
+                    return fromPopup;
+                }
+            }
+
+            if (!triedViewerFetch && IsDirectPdfUrl(page.Url))
+            {
+                triedViewerFetch = true;
+                var fromViewer = await TryCapturePdfFromOpenedPageAsync(page, timeoutMs, cancellationToken)
+                    .ConfigureAwait(false);
+                if (fromViewer.Bytes is not null && PdfEditionContentFetcher.IsPdf(fromViewer.Bytes))
+                {
+                    return fromViewer;
+                }
+            }
+
+            await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+        }
+
+        return (IsDirectPdfUrl(page.Url) ? StripTrackingQuery(new Uri(page.Url)) : null, null);
+    }
+
+    private static bool IsAlAyamPdfResponse(IResponse response) =>
+        response.Status is >= 200 and < 400 && IsDirectPdfUrl(response.Url);
+
+    private static async Task<(Uri? PdfUrl, byte[]? Bytes)> TryReadCompletedDownloadAsync(
+        Task<IDownload> downloadTask,
+        CancellationToken cancellationToken)
+    {
+        if (!downloadTask.IsCompletedSuccessfully)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var download = await downloadTask.ConfigureAwait(false);
+            var path = await download.PathAsync().ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return (null, null);
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            Uri.TryCreate(download.Url, UriKind.Absolute, out var url);
+            return (url is not null && IsDirectPdfUrl(url) ? StripTrackingQuery(url) : url, bytes);
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+    }
+
+    private static async Task<(Uri? PdfUrl, byte[]? Bytes)> TryReadResponsePdfAsync(IResponse response)
+    {
+        try
+        {
+            var bytes = await response.BodyAsync().ConfigureAwait(false);
+            Uri.TryCreate(response.Url, UriKind.Absolute, out var url);
+            return (url is not null ? StripTrackingQuery(url) : null, bytes);
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+    }
+
+    private static async Task<(Uri? PdfUrl, byte[]? Bytes)> TryCapturePdfFromOpenedPageAsync(
+        IPage page,
+        int timeoutMs,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsDirectPdfUrl(page.Url))
+        {
+            try
+            {
+                await page.WaitForURLAsync(
+                    IsDirectPdfUrl,
+                    new PageWaitForURLOptions { Timeout = Math.Min(timeoutMs, 30_000) })
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                return (null, null);
+            }
+        }
+
+        if (!Uri.TryCreate(page.Url, UriKind.Absolute, out var pdfUrl) || !IsDirectPdfUrl(pdfUrl))
+        {
+            return (null, null);
+        }
+
+        var fromContext = await FetchPdfBytesViaPlaywrightRequestAsync(
+                page.Context,
+                pdfUrl,
+                new Uri(EpaperUrl),
+                timeoutMs,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return (StripTrackingQuery(pdfUrl), fromContext);
+    }
+
     private static async Task<bool> TryClickAllPagesLinkAsync(IPage page, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var locator = page.Locator("a#aPDFdownloadAllPages, a:has-text('كل الصفحات')");
-        if (await locator.CountAsync().ConfigureAwait(false) == 0)
+        ILocator[] locators =
+        [
+            page.Locator("a#aPDFdownloadAllPages"),
+            page.GetByRole(AriaRole.Link, new() { Name = "كل الصفحات" }),
+            page.Locator("a").Filter(new LocatorFilterOptions { HasText = "كل الصفحات" }),
+            page.GetByText("كل الصفحات", new PageGetByTextOptions { Exact = true })
+        ];
+
+        foreach (var locator in locators)
         {
-            return false;
+            try
+            {
+                if (await locator.CountAsync().ConfigureAwait(false) == 0)
+                {
+                    continue;
+                }
+
+                var target = locator.First;
+                await target.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
+                await target.ClickAsync(new LocatorClickOptions { Timeout = 15_000 }).ConfigureAwait(false);
+                return true;
+            }
+            catch (PlaywrightException)
+            {
+                // Try the next locator that matches the on-page كل الصفحات control.
+            }
         }
 
-        var link = locator.First;
-        try
-        {
-            await link.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
-            await link.ClickAsync(new LocatorClickOptions { Timeout = 30_000 }).ConfigureAwait(false);
-            return true;
-        }
-        catch (PlaywrightException)
-        {
-            return false;
-        }
+        return false;
     }
+
+    private static void ObserveFault(Task task) =>
+        task.ContinueWith(
+            t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
 
     private static Uri StripTrackingQuery(Uri uri)
     {

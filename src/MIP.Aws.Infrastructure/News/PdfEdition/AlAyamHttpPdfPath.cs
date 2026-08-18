@@ -9,7 +9,7 @@ namespace MIP.Aws.Infrastructure.News.PdfEdition;
 
 /// <summary>
 /// Fast HTTP discovery/download for Al Ayam (epaper HTML → INAF PDF on i.alayam.com).
-/// Used before Playwright because datacenter browsers often hit Cloudflare while plain HTTP succeeds.
+/// Used after the Playwright كل الصفحات click path when the browser session cannot save the PDF.
 /// </summary>
 internal static class AlAyamHttpPdfPath
 {
