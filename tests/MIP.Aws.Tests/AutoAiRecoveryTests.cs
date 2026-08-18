@@ -301,6 +301,25 @@ public sealed class AutoAiRecoveryTests
     }
 
     [Fact]
+    public void HasKnownGoodConfiguration_accepts_successful_inaf_wait_selector()
+    {
+        var source = new NewsSource
+        {
+            Name = AlAyamPublicPdfBaseline.SourceName,
+            ConnectorKey = AlAyamPublicPdfBaseline.ConnectorKey,
+            UseHeadlessBrowser = true,
+            BaseUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            EditionUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfDiscoveryPageUrl = AlAyamPublicPdfBaseline.EpaperUrl,
+            PdfLinkSelector = AlAyamPublicPdfBaseline.InafDirectPdfLinkSelector,
+            DownloadWaitTimeoutSeconds = AlAyamPublicPdfBaseline.ExtendedWaitTimeoutSeconds
+        };
+
+        Assert.True(AlAyamPublicPdfBaseline.IsAcceptedPdfLinkSelector(source.PdfLinkSelector));
+        Assert.True(AlAyamPublicPdfBaseline.HasKnownGoodConfiguration(source));
+    }
+
+    [Fact]
     public void Does_not_filter_redundant_AlAyam_baseline_option_for_auto_recovery()
     {
         var source = new NewsSource

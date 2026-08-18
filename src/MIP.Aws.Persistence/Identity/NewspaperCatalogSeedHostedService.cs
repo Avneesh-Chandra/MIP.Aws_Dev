@@ -606,12 +606,15 @@ public sealed class NewspaperCatalogSeedHostedService(
         source.PdfDiscoveryEnabled = true;
         source.PdfDiscoveryMode = PdfDiscoveryMode.ManualSelector;
         source.PdfDiscoveryPageUrl = "https://www.alayam.com/epaper";
-        source.PdfLinkSelector = "a#aPDFdownloadAllPages, a:has-text('كل الصفحات')";
+        source.PdfLinkSelector = AlAyamPublicPdfBaseline.InafDirectPdfLinkSelector;
         source.PdfLinkKeywords ??= "pdf,download,all pages,كل الصفحات,النسخة الورقية,epaper,INAF";
         source.PreferTodayEdition = true;
         source.PreferLatestEdition = true;
         source.RequirePdfContentType = true;
         source.MinimumPdfSizeKb = Math.Max(source.MinimumPdfSizeKb, 100);
+        source.DownloadWaitTimeoutSeconds = Math.Max(
+            source.DownloadWaitTimeoutSeconds,
+            AlAyamPublicPdfBaseline.ExtendedWaitTimeoutSeconds);
         source.UseHeadlessBrowser = true;
         source.ModifiedAt = DateTimeOffset.UtcNow;
 

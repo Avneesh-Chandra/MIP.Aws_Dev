@@ -47,7 +47,7 @@ public static class PublisherRecoveryBaseline
 
         if (string.Equals(connectorKey, AlAyamPublicPdfBaseline.ConnectorKey, StringComparison.OrdinalIgnoreCase))
         {
-            return string.Equals(patch.PdfLinkSelector, AlAyamPublicPdfBaseline.PdfLinkSelector, StringComparison.Ordinal)
+            return AlAyamPublicPdfBaseline.IsAcceptedPdfLinkSelector(patch.PdfLinkSelector)
                    && string.Equals(patch.BaseUrl, AlAyamPublicPdfBaseline.EpaperUrl, StringComparison.OrdinalIgnoreCase)
                    && patch.UseHeadlessBrowser == true;
         }

@@ -71,11 +71,16 @@ public static class AlAyamPublicPdfBaseline
         string.Equals(source.ConnectorKey, ConnectorKey, StringComparison.OrdinalIgnoreCase)
         || source.Name.Contains(SourceName, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>True when the source already matches the known-good Al Ayam recovery baseline.</summary>
+    public static bool IsAcceptedPdfLinkSelector(string? selector) =>
+        string.Equals(selector, PdfLinkSelector, StringComparison.Ordinal)
+        || string.Equals(selector, InafDirectPdfLinkSelector, StringComparison.Ordinal);
+
+    /// <summary>True when the source already matches a known-good Al Ayam recovery baseline.</summary>
     public static bool HasKnownGoodConfiguration(NewsSource source) =>
         source.UseHeadlessBrowser
         && string.Equals(source.BaseUrl, EpaperUrl, StringComparison.OrdinalIgnoreCase)
         && string.Equals(source.EditionUrl, EpaperUrl, StringComparison.OrdinalIgnoreCase)
         && string.Equals(source.PdfDiscoveryPageUrl, EpaperUrl, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(source.PdfLinkSelector, PdfLinkSelector, StringComparison.Ordinal);
+        && IsAcceptedPdfLinkSelector(source.PdfLinkSelector)
+        && source.DownloadWaitTimeoutSeconds >= 180;
 }

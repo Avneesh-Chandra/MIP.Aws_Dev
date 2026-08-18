@@ -6,8 +6,8 @@ using Microsoft.Extensions.Logging;
 namespace MIP.Aws.Infrastructure.News.PdfEdition;
 
 /// <summary>
-/// Ensures Bahrain - Al Ayam keeps known-good PDF discovery settings before each download attempt.
-/// Prevents scheduled batches from running with stale/broken selectors that trigger Cloudflare failures.
+/// Ensures Bahrain - Al Ayam keeps a known-good PDF discovery configuration before each download.
+/// Accepts both the original كل الصفحات selector and the successful INAF href + 300s wait settings.
 /// </summary>
 internal static class AlAyamSourceBaselineGuard
 {
@@ -31,9 +31,11 @@ internal static class AlAyamSourceBaselineGuard
         source.BaseUrl = AlAyamPublicPdfBaseline.EpaperUrl;
         source.EditionUrl = AlAyamPublicPdfBaseline.EpaperUrl;
         source.PdfDiscoveryPageUrl = AlAyamPublicPdfBaseline.EpaperUrl;
-        source.PdfLinkSelector = AlAyamPublicPdfBaseline.PdfLinkSelector;
+        source.PdfLinkSelector = AlAyamPublicPdfBaseline.InafDirectPdfLinkSelector;
         source.UseHeadlessBrowser = true;
-        source.DownloadWaitTimeoutSeconds = Math.Max(source.DownloadWaitTimeoutSeconds, 180);
+        source.DownloadWaitTimeoutSeconds = Math.Max(
+            source.DownloadWaitTimeoutSeconds,
+            AlAyamPublicPdfBaseline.ExtendedWaitTimeoutSeconds);
         source.ModifiedAt = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -46,5 +48,5 @@ internal static class AlAyamSourceBaselineGuard
         || !string.Equals(source.BaseUrl, AlAyamPublicPdfBaseline.EpaperUrl, StringComparison.OrdinalIgnoreCase)
         || !string.Equals(source.EditionUrl, AlAyamPublicPdfBaseline.EpaperUrl, StringComparison.OrdinalIgnoreCase)
         || !string.Equals(source.PdfDiscoveryPageUrl, AlAyamPublicPdfBaseline.EpaperUrl, StringComparison.OrdinalIgnoreCase)
-        || !string.Equals(source.PdfLinkSelector, AlAyamPublicPdfBaseline.PdfLinkSelector, StringComparison.Ordinal);
+        || !AlAyamPublicPdfBaseline.IsAcceptedPdfLinkSelector(source.PdfLinkSelector);
 }
