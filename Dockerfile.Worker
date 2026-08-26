@@ -49,18 +49,25 @@ COPY --from=build /app/publish .
 COPY --from=playwright-install /ms-playwright /ms-playwright
 COPY --from=playwright-install /install/.playwright /app/.playwright
 USER root
+# Browsers already copied from playwright-install; only OS libs are needed here.
+# Clean apt metadata aggressively so GitHub Actions runners do not hit ENOSPC
+# during the final chown of /ms-playwright.
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends wget ca-certificates bash \
     && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
     && dpkg -i packages-microsoft-prod.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends powershell \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb \
     && apt-get update \
     && pwsh ./playwright.ps1 install-deps \
     && find /app/.playwright -type f \( -name node -o -name '*.sh' \) -exec chmod 755 {} + \
     && mkdir -p /app/storage \
-    && chown -R mip:mip /app /ms-playwright \
-    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb
+    && apt-get purge -y powershell \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && chown -R mip:mip /app /ms-playwright
 USER mip
 
 ENTRYPOINT ["dotnet", "MIP.Aws.Worker.dll"]
