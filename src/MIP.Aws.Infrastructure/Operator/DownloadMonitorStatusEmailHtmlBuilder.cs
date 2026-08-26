@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.Operator;
 using MIP.Aws.Application.Time;
 
@@ -51,6 +52,8 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
         sb.Append("<p style=\"font-size:12px;color:#6b7280;margin-top:24px;\">")
             .Append("Automated daily status from GFH Media Intelligence. Replies are not monitored.")
             .Append(" PDF links require VPN or corporate network access to the internal portal, sign-in, and Latest PDF view permission.")
+            .Append(" When Bahrain - Al Ayam was not saved in MIP today, the status email includes a direct publisher e-paper link")
+            .Append(" that opens in the recipient's browser (office network), matching the GFH newspaper site workaround.")
             .Append($" All times are {MipDisplayTimeZone.ZoneSuffix()} ({MipDisplayTimeZone.DefaultIanaId}, UTC+3).")
             .Append("</p></div>");
 
@@ -216,6 +219,35 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
     private static string LatestPdfCell(DownloadMonitorSourceRowDto row, string portalBaseUrl)
     {
+        var missingTodayEdition = row.LatestPdfFileId is null || !row.EditionDateMatchesMonitor;
+        if (missingTodayEdition && IsAlAyamSource(row))
+        {
+            // Same workaround as GFH XAMPP index.php: open publisher e-paper in the recipient's browser
+            // so Cloudflare sees the office IP, not AWS. Does not store a PDF in MIP.
+            var publisherLink = EmailHtmlLinkFormatter.Link(
+                AlAyamPublicPdfBaseline.EpaperUrl,
+                "Open today's Al Ayam e-paper");
+            if (row.LatestPdfFileId is not Guid existingFileId)
+            {
+                return $"{publisherLink} <span style=\"color:#6b7280;font-size:11px;\">(not saved in MIP today)</span>";
+            }
+
+            var portalView = OperatorLatestPdfLinks.BuildPortalUrl(
+                portalBaseUrl,
+                row.SourceId,
+                inline: true,
+                fileId: existingFileId,
+                editionDate: row.LatestPdfEditionDate);
+            var portalDownload = OperatorLatestPdfLinks.BuildPortalUrl(
+                portalBaseUrl,
+                row.SourceId,
+                inline: false,
+                fileId: existingFileId,
+                editionDate: row.LatestPdfEditionDate);
+            return $"{EmailHtmlLinkFormatter.Link(portalView, "View prior")} · {EmailHtmlLinkFormatter.Link(portalDownload, "Download prior")}"
+                   + $" · {publisherLink}";
+        }
+
         if (row.LatestPdfFileId is not Guid fileId)
         {
             return "Not available";
@@ -235,6 +267,10 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
             editionDate: row.LatestPdfEditionDate);
         return $"{EmailHtmlLinkFormatter.Link(viewUrl, "View")} · {EmailHtmlLinkFormatter.Link(downloadUrl, "Download")}";
     }
+
+    internal static bool IsAlAyamSource(DownloadMonitorSourceRowDto row) =>
+        row.SourceName.Contains(AlAyamPublicPdfBaseline.SourceName, StringComparison.OrdinalIgnoreCase)
+        || row.SourceName.Contains("alayam", StringComparison.OrdinalIgnoreCase);
 
     private static string ActionsCell(
         DownloadMonitorSourceRowDto row,
