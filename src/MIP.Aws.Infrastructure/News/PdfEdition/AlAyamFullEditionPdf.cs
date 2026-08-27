@@ -17,6 +17,8 @@ namespace MIP.Aws.Infrastructure.News.PdfEdition;
 /// </summary>
 public static class AlAyamFullEditionPdf
 {
+    private const int HumanLikeRetryCount = 1;
+
     public const string EpaperUrl = "https://www.alayam.com/epaper";
 
     public const string AllPagesLinkSelector =
@@ -322,86 +324,144 @@ public static class AlAyamFullEditionPdf
             }
 
             var selector = source?.PdfLinkSelector?.Split(',')[0].Trim() ?? AllPagesLinkSelector;
-            if (!await WaitForEpaperReadyAsync(page, selector, source, logger, cancellationToken).ConfigureAwait(false))
+            var accessBlocked = false;
+            for (var attempt = 0; attempt <= HumanLikeRetryCount; attempt++)
             {
-                logger.LogWarning("Al Ayam e-paper page did not become ready on {Url}", epaperUri);
-                return null;
-            }
+                if (attempt > 0
+                    && !await RefreshAfterBlockedAttemptAsync(page, timeoutMs, logger, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    break;
+                }
 
-            if (source is not null)
-            {
-                var editionCheck = await SourcePageEditionDatePageVerifier.VerifyAsync(
-                    page,
-                    source,
-                    DateOnly.FromDateTime(DateTime.UtcNow),
-                    cancellationToken).ConfigureAwait(false);
-                if (editionCheck.BlocksDownload)
+                if (!await WaitForEpaperReadyAsync(page, selector, source, logger, cancellationToken).ConfigureAwait(false))
                 {
                     logger.LogWarning(
-                        "Al Ayam edition date verification failed for {Url}: {Message}",
+                        "Al Ayam e-paper page did not become ready on {Url} (attempt {Attempt}).",
                         epaperUri,
-                        editionCheck.FailureMessage);
-                    return null;
+                        attempt + 1);
+                    continue;
                 }
-            }
 
-            if (downloadBytes)
-            {
-                var captured = await ClickAllPagesAndCapturePdfAsync(page, timeoutMs, logger, cancellationToken)
-                    .ConfigureAwait(false);
-                if (captured.Bytes is not null && PdfEditionContentFetcher.IsPdf(captured.Bytes))
+                if (source is not null)
                 {
-                    logger.LogInformation(
-                        "Al Ayam PDF saved after clicking كل الصفحات ({Bytes} bytes) from {Url}",
-                        captured.Bytes.Length,
-                        captured.PdfUrl);
-                    return new AlAyamFullEditionResult(captured.PdfUrl, captured.Bytes);
+                    var editionCheck = await SourcePageEditionDatePageVerifier.VerifyAsync(
+                        page,
+                        source,
+                        DateOnly.FromDateTime(DateTime.UtcNow),
+                        cancellationToken).ConfigureAwait(false);
+                    if (editionCheck.BlocksDownload)
+                    {
+                        logger.LogWarning(
+                            "Al Ayam edition date verification failed for {Url}: {Message}",
+                            epaperUri,
+                            editionCheck.FailureMessage);
+                        return null;
+                    }
                 }
+
+                if (downloadBytes)
+                {
+                    var captured = await ClickAllPagesAndCapturePdfAsync(page, timeoutMs, logger, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (captured.Bytes is not null && PdfEditionContentFetcher.IsPdf(captured.Bytes))
+                    {
+                        logger.LogInformation(
+                            "Al Ayam PDF saved after clicking كل الصفحات ({Bytes} bytes) from {Url}",
+                            captured.Bytes.Length,
+                            captured.PdfUrl);
+                        return new AlAyamFullEditionResult(captured.PdfUrl, captured.Bytes);
+                    }
+                }
+
+                var resolve = await ResolvePdfUrlAsync(page, epaperUri, timeoutMs, logger, cancellationToken)
+                    .ConfigureAwait(false);
+                accessBlocked |= resolve.AccessBlocked;
+                if (resolve.PdfUrl is null)
+                {
+                    if (resolve.AccessBlocked)
+                    {
+                        logger.LogWarning(
+                            "Al Ayam e-paper blocked by publisher bot protection on {Url} (attempt {Attempt}).",
+                            epaperUri,
+                            attempt + 1);
+                    }
+
+                    continue;
+                }
+
+                logger.LogInformation("Al Ayam all-pages PDF resolved -> {Url}", resolve.PdfUrl);
+
+                if (!downloadBytes)
+                {
+                    return new AlAyamFullEditionResult(resolve.PdfUrl, null);
+                }
+
+                var bytes = await FetchPdfBytesViaPlaywrightRequestAsync(
+                        context,
+                        resolve.PdfUrl,
+                        epaperUri,
+                        timeoutMs,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (bytes is not null && bytes.Length > 0 && PdfEditionContentFetcher.IsPdf(bytes))
+                {
+                    logger.LogInformation("Al Ayam PDF downloaded ({Bytes} bytes) from {Url}", bytes.Length, resolve.PdfUrl);
+                    return new AlAyamFullEditionResult(resolve.PdfUrl, bytes);
+                }
+
+                logger.LogWarning("Al Ayam click path: PDF fetch failed for {Url} (attempt {Attempt}).", resolve.PdfUrl, attempt + 1);
             }
 
-            var resolve = await ResolvePdfUrlAsync(page, epaperUri, timeoutMs, logger, cancellationToken)
-                .ConfigureAwait(false);
-            if (resolve.AccessBlocked)
-            {
-                logger.LogWarning(
-                    "Al Ayam e-paper blocked by publisher bot protection on {Url}.",
-                    epaperUri);
-                return new AlAyamFullEditionResult(null, null, AccessBlocked: true);
-            }
-
-            if (resolve.PdfUrl is null)
-            {
-                logger.LogWarning("Al Ayam click path: all-pages PDF link not found from {Url}", epaperUri);
-                return null;
-            }
-
-            logger.LogInformation("Al Ayam all-pages PDF resolved -> {Url}", resolve.PdfUrl);
-
-            if (!downloadBytes)
-            {
-                return new AlAyamFullEditionResult(resolve.PdfUrl, null);
-            }
-
-            var bytes = await FetchPdfBytesViaPlaywrightRequestAsync(
-                    context,
-                    resolve.PdfUrl,
-                    epaperUri,
-                    timeoutMs,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (bytes is null || bytes.Length == 0 || !PdfEditionContentFetcher.IsPdf(bytes))
-            {
-                logger.LogWarning("Al Ayam click path: PDF fetch failed for {Url}", resolve.PdfUrl);
-                return null;
-            }
-
-            logger.LogInformation("Al Ayam PDF downloaded ({Bytes} bytes) from {Url}", bytes.Length, resolve.PdfUrl);
-            return new AlAyamFullEditionResult(resolve.PdfUrl, bytes);
+            return accessBlocked
+                ? new AlAyamFullEditionResult(null, null, AccessBlocked: true)
+                : null;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Al Ayam all-pages click path failed from {Url}", epaperUri);
             return null;
+        }
+    }
+
+    private static async Task<bool> RefreshAfterBlockedAttemptAsync(
+        IPage page,
+        int timeoutMs,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            logger.LogInformation(
+                "Al Ayam first attempt did not produce the PDF; moving through the page and refreshing before retry.");
+            await page.Mouse.MoveAsync(220, 180).ConfigureAwait(false);
+            await Task.Delay(350, cancellationToken).ConfigureAwait(false);
+            await page.Mouse.MoveAsync(520, 320).ConfigureAwait(false);
+            await Task.Delay(650, cancellationToken).ConfigureAwait(false);
+            await page.ReloadAsync(
+                new PageReloadOptions { WaitUntil = WaitUntilState.Load, Timeout = timeoutMs })
+                .ConfigureAwait(false);
+
+            try
+            {
+                await page.WaitForLoadStateAsync(
+                        LoadState.NetworkIdle,
+                        new PageWaitForLoadStateOptions { Timeout = 30_000 })
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Ads or the publisher challenge may prevent network idle.
+            }
+
+            return true;
+        }
+        catch (PlaywrightException ex)
+        {
+            logger.LogWarning(ex, "Al Ayam human-like refresh retry failed.");
+            return false;
         }
     }
 
@@ -447,6 +507,7 @@ public static class AlAyamFullEditionPdf
         var maxAttempts = source is null
             ? 30
             : Math.Max(30, Math.Clamp(source.DownloadWaitTimeoutSeconds, 60, 600) / 2);
+        var blockedAttempts = 0;
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -464,11 +525,20 @@ public static class AlAyamFullEditionPdf
 
             if (PublisherAccessGuard.IsAccessBlocked(html))
             {
+                blockedAttempts++;
                 logger.LogDebug("Al Ayam: waiting for Cloudflare challenge (attempt {Attempt})", attempt + 1);
+                if (blockedAttempts >= 5)
+                {
+                    return false;
+                }
             }
             else if (ExtractPdfUrlFromHtml(html) is not null)
             {
                 return true;
+            }
+            else
+            {
+                blockedAttempts = 0;
             }
 
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
