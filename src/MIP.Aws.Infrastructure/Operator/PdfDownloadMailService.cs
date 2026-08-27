@@ -107,7 +107,13 @@ public sealed class PdfDownloadMailService(
         }
 
         var editionDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        var candidates = await db.PdfEditionDownloads.AsNoTracking()
+        var sourceNames = await db.NewsSources.AsNoTracking()
+            .Where(source => !source.IsDeleted && sourceIds.Contains(source.Id))
+            .Select(source => new { source.Id, source.Name })
+            .ToDictionaryAsync(source => source.Id, source => source.Name, cancellationToken)
+            .ConfigureAwait(false);
+
+        var editionRows = await db.PdfEditionDownloads.AsNoTracking()
             .Where(edition => !edition.IsDeleted
                               && sourceIds.Contains(edition.NewsSourceId)
                               && edition.DownloadedFileId != null
@@ -115,20 +121,21 @@ public sealed class PdfDownloadMailService(
                               && (edition.Status == PdfEditionStatus.Downloaded
                                   || edition.Status == PdfEditionStatus.SkippedDuplicate
                                   || edition.Status == PdfEditionStatus.Validated))
-            .Join(
-                db.NewsSources.AsNoTracking().Where(source => !source.IsDeleted),
-                edition => edition.NewsSourceId,
-                source => source.Id,
-                (edition, source) => new Candidate(
-                    edition.NewsSourceId,
-                    source.Name,
-                    edition.DownloadedFileId!.Value,
-                    edition.FileName,
-                    edition.FileSizeBytes ?? 0,
-                    edition.DownloadedAt ?? edition.CreatedAt))
-            .OrderByDescending(candidate => candidate.OccurredAt)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        var candidates = editionRows
+            .Where(edition => edition.DownloadedFileId is Guid
+                              && sourceNames.ContainsKey(edition.NewsSourceId))
+            .Select(edition => new Candidate(
+                edition.NewsSourceId,
+                sourceNames[edition.NewsSourceId],
+                edition.DownloadedFileId!.Value,
+                edition.FileName,
+                edition.FileSizeBytes ?? 0,
+                edition.DownloadedAt ?? edition.CreatedAt))
+            .OrderByDescending(candidate => candidate.OccurredAt)
+            .ToList();
 
         var selected = candidates
             .GroupBy(candidate => candidate.SourceId)
