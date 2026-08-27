@@ -1,3 +1,4 @@
+using System.Globalization;
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Operator;
 using MIP.Aws.Application.Abstractions.Reporting;
@@ -130,16 +131,69 @@ public sealed class PdfDownloadMailService(
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var candidates = editionRows
+        var publicCandidates = editionRows
             .Where(edition => edition.DownloadedFileId is Guid
                               && sourceNames.ContainsKey(edition.NewsSourceId))
             .Select(edition => new Candidate(
                 edition.NewsSourceId,
                 sourceNames[edition.NewsSourceId],
                 edition.DownloadedFileId!.Value,
-                edition.FileName,
+                BuildEditionFileName(sourceNames[edition.NewsSourceId], editionDate),
                 edition.FileSizeBytes ?? 0,
                 edition.DownloadedAt ?? edition.CreatedAt))
+            .ToList();
+
+        // Licensed portal downloads (for example PressReader) are recorded as successful
+        // DownloadJobs with DownloadedFiles, rather than PdfEditionDownloads.
+        var portalJobs = await db.DownloadJobs.AsNoTracking()
+            .Where(job => !job.IsDeleted
+                          && sourceIds.Contains(job.NewsSourceId)
+                          && (job.Status == DownloadJobStatus.Succeeded
+                              || job.Status == DownloadJobStatus.SuccessWithAutoAiRecovery)
+                          && job.CompletedAt >= editionDayStart
+                          && job.CompletedAt < editionDayEnd)
+            .Select(job => new
+            {
+                job.Id,
+                job.NewsSourceId,
+                job.CompletedAt,
+                job.CreatedAt
+            })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var portalJobIds = portalJobs.Select(job => job.Id).ToList();
+        var portalFiles = portalJobIds.Count == 0
+            ? []
+            : await db.DownloadedFiles.AsNoTracking()
+                .Where(file => !file.IsDeleted && portalJobIds.Contains(file.DownloadJobId))
+                .Select(file => new
+                {
+                    file.Id,
+                    file.DownloadJobId,
+                    file.SizeBytes
+                })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+        var portalCandidates = portalJobs
+            .Join(
+                portalFiles,
+                job => job.Id,
+                file => file.DownloadJobId,
+                (job, file) => new { job, file })
+            .Where(item => sourceNames.ContainsKey(item.job.NewsSourceId))
+            .Select(item => new Candidate(
+                item.job.NewsSourceId,
+                sourceNames[item.job.NewsSourceId],
+                item.file.Id,
+                BuildEditionFileName(sourceNames[item.job.NewsSourceId], editionDate),
+                item.file.SizeBytes,
+                item.job.CompletedAt ?? item.job.CreatedAt))
+            .ToList();
+
+        var candidates = publicCandidates
+            .Concat(portalCandidates)
             .OrderByDescending(candidate => candidate.OccurredAt)
             .ToList();
 
@@ -169,13 +223,20 @@ public sealed class PdfDownloadMailService(
             return false;
         }
 
-        var subject = string.IsNullOrWhiteSpace(scheduler.PdfDownloadMailSubject)
-            ? "GFH PDF Download"
-            : scheduler.PdfDownloadMailSubject.Trim().Replace(
+        var configuredSubject = scheduler.PdfDownloadMailSubject?.Trim();
+        var subject = string.IsNullOrWhiteSpace(configuredSubject)
+            || string.Equals(configuredSubject, "GFH PDF Download", StringComparison.OrdinalIgnoreCase)
+            ? $"GFH Media Intelligence | Daily Newspaper Editions | {editionDate.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)}"
+            : configuredSubject.Replace(
                 "{date}",
                 editionDate.ToString("yyyy-MM-dd"),
                 StringComparison.OrdinalIgnoreCase);
-        if (!await PdfDownloadMailGuard.TryClaimAsync(db, batchStartedAt, subject, cancellationToken)
+        if (!await PdfDownloadMailGuard.TryClaimAsync(
+                db,
+                batchStartedAt,
+                subject,
+                cancellationToken,
+                allowResend: bypassSchedule)
                 .ConfigureAwait(false))
         {
             logger.LogInformation(
@@ -270,6 +331,18 @@ public sealed class PdfDownloadMailService(
     private static bool IsScheduleDue(string timeUtc) =>
         TimeOnly.TryParse(timeUtc, out var configuredTime)
         && TimeOnly.FromDateTime(DateTime.UtcNow) >= configuredTime;
+
+    private static string BuildEditionFileName(string sourceName, DateOnly editionDate)
+    {
+        var baseName = $"{sourceName} - {editionDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var safeName = new string(
+            baseName
+                .Select(character => invalidCharacters.Contains(character) ? '-' : character)
+                .ToArray())
+            .Trim();
+        return $"{(string.IsNullOrWhiteSpace(safeName) ? "newspaper-edition" : safeName)}.pdf";
+    }
 
     private sealed record Candidate(
         Guid SourceId,

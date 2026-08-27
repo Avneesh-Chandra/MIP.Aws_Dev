@@ -12,18 +12,24 @@ internal static class PdfDownloadMailGuard
         IApplicationDbContext db,
         DateTimeOffset batchStartedAt,
         string subject,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowResend = false)
     {
-        if (await HasConfirmedDeliveryAsync(db, subject, batchStartedAt, cancellationToken).ConfigureAwait(false))
+        if (!allowResend
+            && await HasConfirmedDeliveryAsync(db, subject, batchStartedAt, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        await ReleaseStaleClaimAsync(db, batchStartedAt, subject, cancellationToken).ConfigureAwait(false);
+        if (!allowResend)
+        {
+            await ReleaseStaleClaimAsync(db, batchStartedAt, subject, cancellationToken).ConfigureAwait(false);
+        }
+
         return await db.DownloadMonitorBatchRuns
             .Where(batch => !batch.IsDeleted
                             && batch.StartedAt == batchStartedAt
-                            && batch.PdfDownloadMailSentAt == null)
+                            && (allowResend || batch.PdfDownloadMailSentAt == null))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     batch => batch.PdfDownloadMailSentAt,

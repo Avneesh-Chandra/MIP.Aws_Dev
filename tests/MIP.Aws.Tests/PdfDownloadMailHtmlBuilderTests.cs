@@ -26,5 +26,9 @@ public sealed class PdfDownloadMailHtmlBuilderTests
         Assert.Contains("edition &amp; today.pdf", html);
         Assert.DoesNotContain("Alayam <source>", html);
         Assert.Contains("5.22 MB", html);
+        Assert.Contains("GFH", html);
+        Assert.Contains("MEDIA INTELLIGENCE", html);
+        Assert.Contains("SECURE ACCESS", html);
+        Assert.Contains("Your newspaper editions are ready", html);
     }
 }

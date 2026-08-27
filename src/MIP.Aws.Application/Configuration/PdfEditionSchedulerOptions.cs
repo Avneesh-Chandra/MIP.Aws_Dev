@@ -54,7 +54,7 @@ public sealed class PdfEditionSchedulerOptions
     public string PdfDownloadMailRecipient { get; set; } = string.Empty;
 
     /// <summary>Subject for the separate PDF Download mail.</summary>
-    public string PdfDownloadMailSubject { get; set; } = "GFH PDF Download";
+    public string PdfDownloadMailSubject { get; set; } = "GFH Media Intelligence | Daily Newspaper Editions | {date}";
 
     /// <summary>UTC time for the separate PDF Download mail (24-hour HH:mm).</summary>
     public string PdfDownloadMailTimeUtc { get; set; } = "06:00";

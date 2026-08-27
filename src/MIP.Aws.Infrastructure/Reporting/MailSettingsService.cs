@@ -68,6 +68,14 @@ public sealed class MailSettingsService(
             normalizedPdfMailTime = scheduler.PdfDownloadMailTimeUtc;
         }
 
+        var pdfMailSubject = !string.IsNullOrWhiteSpace(row?.PdfDownloadMailSubject)
+            ? row!.PdfDownloadMailSubject!.Trim()
+            : scheduler.PdfDownloadMailSubject;
+        if (string.Equals(pdfMailSubject, "GFH PDF Download", StringComparison.OrdinalIgnoreCase))
+        {
+            pdfMailSubject = scheduler.PdfDownloadMailSubject;
+        }
+
         return new EffectiveSchedulerMailSettings(
             row?.StatusEmailEnabled ?? scheduler.StatusEmailEnabled,
             !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient) ? row!.StatusEmailRecipient!.Trim() : scheduler.StatusEmailRecipient,
@@ -84,9 +92,7 @@ public sealed class MailSettingsService(
             !string.IsNullOrWhiteSpace(row?.PdfDownloadMailRecipient)
                 ? row!.PdfDownloadMailRecipient!.Trim()
                 : scheduler.PdfDownloadMailRecipient,
-            !string.IsNullOrWhiteSpace(row?.PdfDownloadMailSubject)
-                ? row!.PdfDownloadMailSubject!.Trim()
-                : scheduler.PdfDownloadMailSubject,
+            pdfMailSubject,
             normalizedPdfMailTime);
     }
 
