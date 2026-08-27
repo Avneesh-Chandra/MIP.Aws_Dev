@@ -92,13 +92,11 @@ public sealed class PdfDownloadMailService(
 
         foreach (var sourceId in sourceIds)
         {
-            var latestJob = await DownloadMonitorBatchOutcomeHelper.GetLatestJobSinceBatchAsync(
+            if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
                     db,
                     sourceId,
                     batchStartedAt,
-                    cancellationToken).ConfigureAwait(false);
-            if (latestJob is null
-                || !DownloadMonitorBatchOutcomeHelper.IsSuccessfulDownloadStatus(latestJob.Status))
+                    cancellationToken).ConfigureAwait(false))
             {
                 logger.LogInformation(
                     "PDF Download mail skipped for {BatchStartedAt:u}: source {SourceId} is not successful.",

@@ -482,6 +482,10 @@ app.UseAntiforgery();
 
 
 
+app.UseStaticFiles();
+
+
+
 app.MapStaticAssets().AllowAnonymous();
 
 
