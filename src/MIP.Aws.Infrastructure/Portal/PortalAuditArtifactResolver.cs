@@ -6,9 +6,10 @@ namespace MIP.Aws.Infrastructure.Portal;
 public static class PortalAuditArtifactResolver
 {
     /// <summary>
-    /// Playwright can write thousands of console/network rows per job. Loading them all times out RDS.
+    /// Playwright can write thousands of console/network rows per job. Keep a bounded window while
+    /// retaining enough rows for the download chronology and failure artifacts.
     /// </summary>
-    public const int MaxLogsPerJob = 40;
+    public const int MaxLogsPerJob = 120;
 
     public static (string? ScreenshotRelativePath, string? HtmlSnapshotRelativePath) ResolvePaths(
         IReadOnlyList<PortalDownloadAuditLog> logs)

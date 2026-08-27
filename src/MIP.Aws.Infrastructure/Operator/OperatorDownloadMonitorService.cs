@@ -345,6 +345,14 @@ public sealed class OperatorDownloadMonitorService(
             .ConfigureAwait(false);
 
         var lastSuccess = await GetLatestPdfLinkAsync(source.Id, cancellationToken).ConfigureAwait(false);
+        var timeline = auditLogs
+            .OrderBy(a => a.CreatedAt)
+            .Select(a => new DownloadJobTimelineEventDto(
+                a.EventKind,
+                a.Message,
+                a.CreatedAt,
+                a.HttpStatus))
+            .ToList();
 
         return new DownloadFailureDetailsDto(
             source.Id,
@@ -361,7 +369,8 @@ public sealed class OperatorDownloadMonitorService(
             complianceBlocked,
             source.RequiresManualAction,
             lastSuccess?.Available == true ? lastSuccess : null,
-            notes);
+            notes,
+            timeline);
     }
 
     public async Task<AiRecoverySuccessDetailsDto?> GetAiRecoverySuccessDetailsAsync(

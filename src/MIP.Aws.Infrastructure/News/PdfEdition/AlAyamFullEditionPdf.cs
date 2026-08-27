@@ -17,7 +17,7 @@ namespace MIP.Aws.Infrastructure.News.PdfEdition;
 /// </summary>
 public static class AlAyamFullEditionPdf
 {
-    private const int HumanLikeRetryCount = 1;
+    private const int HumanLikeRetryCount = 5;
 
     public const string EpaperUrl = "https://www.alayam.com/epaper";
 
@@ -141,7 +141,13 @@ public static class AlAyamFullEditionPdf
             }
         }
 
-        return await RunClickPathAsync(startPageUrl, source, logger, downloadBytes: false, cancellationToken)
+        return await RunClickPathAsync(
+                startPageUrl,
+                source,
+                logger,
+                downloadBytes: false,
+                cancellationToken,
+                processEvent: null)
             .ConfigureAwait(false);
     }
 
@@ -172,9 +178,16 @@ public static class AlAyamFullEditionPdf
         IHttpClientFactory? httpClientFactory,
         IAlAyamOutboundHttpClient outbound,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent = null)
     {
-        var result = await RunClickPathAsync(startPageUrl, source, logger, downloadBytes: true, cancellationToken)
+        var result = await RunClickPathAsync(
+                startPageUrl,
+                source,
+                logger,
+                downloadBytes: true,
+                cancellationToken,
+                processEvent)
             .ConfigureAwait(false);
         if (result?.PdfBytes is not null && PdfEditionContentFetcher.IsPdf(result.PdfBytes))
         {
@@ -238,7 +251,8 @@ public static class AlAyamFullEditionPdf
         IHttpClientFactory? httpClientFactory,
         IAlAyamOutboundHttpClient outbound,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent = null)
     {
         var starts = new List<Uri>();
         if (!IsDirectPdfUrl(candidateOrPage)
@@ -264,12 +278,23 @@ public static class AlAyamFullEditionPdf
                      .Where(u => u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
                      .DistinctBy(u => u.ToString().TrimEnd('/'), StringComparer.OrdinalIgnoreCase))
         {
-            var bytes = await TryDownloadBytesAsync(start, source, httpClientFactory, outbound, logger, cancellationToken)
+            EmitProcessEvent(processEvent, $"Starting Al Ayam acquisition from {start}.");
+            var bytes = await TryDownloadBytesAsync(
+                    start,
+                    source,
+                    httpClientFactory,
+                    outbound,
+                    logger,
+                    cancellationToken,
+                    processEvent)
                 .ConfigureAwait(false);
             if (bytes is not null && bytes.Length > 0 && PdfEditionContentFetcher.IsPdf(bytes))
             {
+                EmitProcessEvent(processEvent, $"Valid PDF bytes captured from {start} ({bytes.Length} bytes).");
                 return bytes;
             }
+
+            EmitProcessEvent(processEvent, $"No valid PDF returned from {start}; trying the next configured start URL.");
         }
 
         return null;
@@ -280,7 +305,8 @@ public static class AlAyamFullEditionPdf
         NewsSource? source,
         ILogger logger,
         bool downloadBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent)
     {
         var epaperUri = ResolveEpaperUri(startPageUrl, source);
         var timeoutMs = ResolveTimeoutMs(source);
@@ -312,6 +338,7 @@ public static class AlAyamFullEditionPdf
                 epaperUri.ToString(),
                 new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = timeoutMs })
                 .ConfigureAwait(false);
+            EmitProcessEvent(processEvent, $"Loaded Al Ayam e-paper page {epaperUri}.");
 
             try
             {
@@ -328,13 +355,26 @@ public static class AlAyamFullEditionPdf
             for (var attempt = 0; attempt <= HumanLikeRetryCount; attempt++)
             {
                 if (attempt > 0
-                    && !await RefreshAfterBlockedAttemptAsync(page, timeoutMs, logger, cancellationToken)
+                    && !await RefreshAfterBlockedAttemptAsync(
+                        page,
+                        timeoutMs,
+                        attempt,
+                        logger,
+                        cancellationToken,
+                        processEvent)
                         .ConfigureAwait(false))
                 {
                     break;
                 }
 
-                if (!await WaitForEpaperReadyAsync(page, selector, source, logger, cancellationToken).ConfigureAwait(false))
+                if (!await WaitForEpaperReadyAsync(
+                        page,
+                        selector,
+                        source,
+                        logger,
+                        cancellationToken,
+                        processEvent)
+                    .ConfigureAwait(false))
                 {
                     logger.LogWarning(
                         "Al Ayam e-paper page did not become ready on {Url} (attempt {Attempt}).",
@@ -362,7 +402,12 @@ public static class AlAyamFullEditionPdf
 
                 if (downloadBytes)
                 {
-                    var captured = await ClickAllPagesAndCapturePdfAsync(page, timeoutMs, logger, cancellationToken)
+                    var captured = await ClickAllPagesAndCapturePdfAsync(
+                            page,
+                            timeoutMs,
+                            logger,
+                            cancellationToken,
+                            processEvent)
                         .ConfigureAwait(false);
                     if (captured.Bytes is not null && PdfEditionContentFetcher.IsPdf(captured.Bytes))
                     {
@@ -370,11 +415,20 @@ public static class AlAyamFullEditionPdf
                             "Al Ayam PDF saved after clicking كل الصفحات ({Bytes} bytes) from {Url}",
                             captured.Bytes.Length,
                             captured.PdfUrl);
+                        EmitProcessEvent(
+                            processEvent,
+                            $"PDF captured after clicking كل الصفحات ({captured.Bytes.Length} bytes) from {captured.PdfUrl}.");
                         return new AlAyamFullEditionResult(captured.PdfUrl, captured.Bytes);
                     }
                 }
 
-                var resolve = await ResolvePdfUrlAsync(page, epaperUri, timeoutMs, logger, cancellationToken)
+                var resolve = await ResolvePdfUrlAsync(
+                        page,
+                        epaperUri,
+                        timeoutMs,
+                        logger,
+                        cancellationToken,
+                        processEvent)
                     .ConfigureAwait(false);
                 accessBlocked |= resolve.AccessBlocked;
                 if (resolve.PdfUrl is null)
@@ -407,6 +461,9 @@ public static class AlAyamFullEditionPdf
                 if (bytes is not null && bytes.Length > 0 && PdfEditionContentFetcher.IsPdf(bytes))
                 {
                     logger.LogInformation("Al Ayam PDF downloaded ({Bytes} bytes) from {Url}", bytes.Length, resolve.PdfUrl);
+                    EmitProcessEvent(
+                        processEvent,
+                        $"PDF downloaded from resolved direct URL ({bytes.Length} bytes): {resolve.PdfUrl}");
                     return new AlAyamFullEditionResult(resolve.PdfUrl, bytes);
                 }
 
@@ -427,19 +484,22 @@ public static class AlAyamFullEditionPdf
     private static async Task<bool> RefreshAfterBlockedAttemptAsync(
         IPage page,
         int timeoutMs,
+        int retryAttempt,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
             logger.LogInformation(
-                "Al Ayam first attempt did not produce the PDF; moving through the page and refreshing before retry.");
+                "Al Ayam block detected; performing human-like retry {RetryAttempt} with immediate mouse movement and refresh.",
+                retryAttempt);
+            EmitProcessEvent(
+                processEvent,
+                $"Block detected; moved mouse and immediately refreshed page (retry {retryAttempt} of {HumanLikeRetryCount}).");
             await page.Mouse.MoveAsync(220, 180).ConfigureAwait(false);
-            await Task.Delay(350, cancellationToken).ConfigureAwait(false);
-            await page.Mouse.MoveAsync(520, 320).ConfigureAwait(false);
-            await Task.Delay(650, cancellationToken).ConfigureAwait(false);
             await page.ReloadAsync(
                 new PageReloadOptions { WaitUntil = WaitUntilState.Load, Timeout = timeoutMs })
                 .ConfigureAwait(false);
@@ -502,12 +562,12 @@ public static class AlAyamFullEditionPdf
         string selector,
         NewsSource? source,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent)
     {
         var maxAttempts = source is null
             ? 30
             : Math.Max(30, Math.Clamp(source.DownloadWaitTimeoutSeconds, 60, 600) / 2);
-        var blockedAttempts = 0;
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -525,22 +585,14 @@ public static class AlAyamFullEditionPdf
 
             if (PublisherAccessGuard.IsAccessBlocked(html))
             {
-                blockedAttempts++;
                 logger.LogDebug("Al Ayam: waiting for Cloudflare challenge (attempt {Attempt})", attempt + 1);
-                if (blockedAttempts >= 5)
-                {
-                    return false;
-                }
+                EmitProcessEvent(processEvent, "Blocked page detected before edition link became ready.");
+                return false;
             }
             else if (ExtractPdfUrlFromHtml(html) is not null)
             {
                 return true;
             }
-            else
-            {
-                blockedAttempts = 0;
-            }
-
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
         }
 
@@ -554,9 +606,9 @@ public static class AlAyamFullEditionPdf
         Uri epaperUri,
         int timeoutMs,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent)
     {
-        var blockedStreak = 0;
         var deadline = DateTime.UtcNow.AddMilliseconds(Math.Min(timeoutMs, 120_000));
         while (DateTime.UtcNow < deadline)
         {
@@ -570,6 +622,7 @@ public static class AlAyamFullEditionPdf
             var href = await TryReadAllPagesHrefAsync(page).ConfigureAwait(false);
             if (href is not null)
             {
+                EmitProcessEvent(processEvent, $"Resolved current direct PDF URL: {href}");
                 return (href, false);
             }
 
@@ -578,23 +631,16 @@ public static class AlAyamFullEditionPdf
             {
                 if (ExtractPdfUrlFromHtml(html) is { } fromHtml)
                 {
+                    EmitProcessEvent(processEvent, $"Resolved current direct PDF URL from page HTML: {fromHtml}");
                     return (StripTrackingQuery(fromHtml), false);
                 }
 
                 if (PublisherAccessGuard.IsAccessBlocked(html))
                 {
-                    blockedStreak++;
                     logger.LogWarning(
-                        "Al Ayam e-paper still behind access challenge (attempt {Attempt}); retrying…",
-                        blockedStreak);
-                    if (blockedStreak >= 8)
-                    {
-                        return (null, true);
-                    }
-                }
-                else if (PublisherAccessGuard.LooksLikePublisherEpaper(html))
-                {
-                    blockedStreak = 0;
+                        "Al Ayam e-paper is blocked; returning immediately for human-like refresh retry.");
+                    EmitProcessEvent(processEvent, "Blocked page detected while resolving the direct PDF URL.");
+                    return (null, true);
                 }
             }
 
@@ -607,6 +653,7 @@ public static class AlAyamFullEditionPdf
                 href = await TryReadAllPagesHrefAsync(page).ConfigureAwait(false);
                 if (href is not null)
                 {
+                    EmitProcessEvent(processEvent, $"Resolved current direct PDF URL after waiting: {href}");
                     return (href, false);
                 }
 
@@ -627,7 +674,7 @@ public static class AlAyamFullEditionPdf
             await Task.Delay(2_000, cancellationToken).ConfigureAwait(false);
         }
 
-        return (null, blockedStreak >= 3);
+        return (null, false);
     }
 
     private static async Task<Uri?> TryReadAllPagesHrefAsync(IPage page)
@@ -659,7 +706,8 @@ public static class AlAyamFullEditionPdf
         IPage page,
         int timeoutMs,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? processEvent)
     {
         var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = timeoutMs });
         var responseTask = page.WaitForResponseAsync(
@@ -673,10 +721,12 @@ public static class AlAyamFullEditionPdf
         if (!await TryClickAllPagesLinkAsync(page, cancellationToken).ConfigureAwait(false))
         {
             logger.LogWarning("Al Ayam: كل الصفحات was not clickable on the e-paper page.");
+            EmitProcessEvent(processEvent, "The كل الصفحات control was not clickable.");
             return (null, null);
         }
 
         logger.LogInformation("Al Ayam clicked كل الصفحات; capturing the PDF from the browser session.");
+        EmitProcessEvent(processEvent, "Clicked كل الصفحات; waiting for browser download or PDF response.");
 
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         var triedViewerFetch = false;
@@ -684,6 +734,15 @@ public static class AlAyamFullEditionPdf
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var currentHtml = await page.ContentAsync().ConfigureAwait(false);
+            if (PublisherAccessGuard.IsAccessBlocked(currentHtml))
+            {
+                logger.LogWarning(
+                    "Al Ayam block page appeared after clicking كل الصفحات; returning immediately for refresh retry.");
+                EmitProcessEvent(processEvent, "Blocked page appeared after clicking كل الصفحات.");
+                return (null, null);
+            }
 
             var fromDownload = await TryReadCompletedDownloadAsync(downloadTask, cancellationToken).ConfigureAwait(false);
             if (fromDownload.Bytes is not null && PdfEditionContentFetcher.IsPdf(fromDownload.Bytes))
@@ -852,6 +911,9 @@ public static class AlAyamFullEditionPdf
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted,
             TaskScheduler.Default);
+
+    private static void EmitProcessEvent(Action<string>? processEvent, string message) =>
+        processEvent?.Invoke(message);
 
     private static Uri StripTrackingQuery(Uri uri)
     {

@@ -31,6 +31,35 @@
                 </MudSimpleTable>
                 <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Suggested intervention</MudText>
                 <MudText Typo="Typo.body2">@_details.SuggestedIntervention</MudText>
+                @if (_details.Timeline.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:600;">Download chronology</MudText>
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Event</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var step in _details.Timeline)
+                            {
+                                <tr>
+                                    <td style="white-space:nowrap;">@FormatWhen(step.OccurredAt)</td>
+                                    <td style="white-space:nowrap;">@step.EventKind</td>
+                                    <td>
+                                        @step.Message
+                                        @if (step.HttpStatus is int status)
+                                        {
+                                            <span> (HTTP @status)</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
                 @if (_details.LastSuccessfulPdf?.Available == true)
                 {
                     <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PictureAsPdf"

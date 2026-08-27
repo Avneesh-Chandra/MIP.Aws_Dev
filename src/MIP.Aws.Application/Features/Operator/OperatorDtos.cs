@@ -117,7 +117,14 @@ public sealed record DownloadFailureDetailsDto(
     bool ComplianceBlocked,
     bool RequiresManualAction,
     LatestPdfLinkDto? LastSuccessfulPdf,
-    IReadOnlyList<DownloadOperatorNoteDto> OperatorNotes);
+    IReadOnlyList<DownloadOperatorNoteDto> OperatorNotes,
+    IReadOnlyList<DownloadJobTimelineEventDto> Timeline);
+
+public sealed record DownloadJobTimelineEventDto(
+    string EventKind,
+    string Message,
+    DateTimeOffset OccurredAt,
+    int? HttpStatus);
 
 public sealed record DownloadOperatorNoteDto(
     Guid Id,

@@ -209,7 +209,8 @@ public sealed class PdfEditionDownloadService(
             source,
             ResolveWarmUpUrl(source),
             useHeadlessBrowser: source.UseHeadlessBrowser,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            processEvents: null).ConfigureAwait(false);
 
         if (best is null || validation is null || !validation.IsValid)
         {
@@ -295,6 +296,15 @@ public sealed class PdfEditionDownloadService(
                          ?? throw new InvalidOperationException("News source not found.");
             }
 
+            var processEvents = download && AlAyamFullEditionPdf.UsesClickPath(source)
+                ? new List<PdfEditionProcessEvent>()
+                : null;
+            AddProcessEvent(
+                processEvents,
+                "JobStarted",
+                $"PDF download job started for {source.Name}.");
+            await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
+
             await audit.RecordAdminActionAsync(
                 PdfEditionAuditEvents.DiscoveryStarted,
                 "NewsSource",
@@ -310,6 +320,20 @@ public sealed class PdfEditionDownloadService(
             // Discover-only still needs Playwright for ManualSelector sources (e.g. Aawsat Download → Full Publication).
             var allowPlaywright = download || source.UseHeadlessBrowser;
             var discoveryResult = await discovery.DiscoverAsync(source, allowPlaywright, cancellationToken).ConfigureAwait(false);
+            AddProcessEvent(
+                processEvents,
+                "DiscoveryCompleted",
+                discoveryResult.Candidates.Count == 0
+                    ? "PDF discovery completed without a candidate."
+                    : $"PDF discovery completed with {discoveryResult.Candidates.Count} candidate(s).");
+            if (discoveryResult.Candidates.Count > 0)
+            {
+                AddProcessEvent(
+                    processEvents,
+                    "CandidateFound",
+                    $"Best discovered candidate: {discoveryResult.BestCandidate?.Url ?? discoveryResult.Candidates[0].Url}.");
+            }
+            await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
 
         var candidateDtos = discoveryResult.Candidates
             .Select(c => new PdfEditionCandidateDto(
@@ -363,11 +387,14 @@ public sealed class PdfEditionDownloadService(
             source,
             warmUpUrl,
             useHeadlessBrowser: allowPlaywright && source.UseHeadlessBrowser,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            processEvents).ConfigureAwait(false);
 
         if (best is null || validation is null || !validation.IsValid)
         {
             var failureReason = validation?.FailureReason ?? "No PDF candidate could be validated.";
+            AddProcessEvent(processEvents, "ValidationFailed", failureReason);
+            await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
             await audit.RecordAdminActionAsync(
                 PdfEditionAuditEvents.DownloadFailed,
                 "NewsSource",
@@ -417,7 +444,8 @@ public sealed class PdfEditionDownloadService(
             candidateDtos,
             enqueueOcr,
             cancellationToken,
-            validation).ConfigureAwait(false);
+            validation,
+            processEvents).ConfigureAwait(false);
         }
         finally
         {
@@ -434,10 +462,13 @@ public sealed class PdfEditionDownloadService(
         IReadOnlyList<PdfEditionCandidateDto> candidateDtos,
         bool enqueueOcr,
         CancellationToken cancellationToken,
-        PdfEditionValidationResult? prevalidated = null)
+        PdfEditionValidationResult? prevalidated = null,
+        List<PdfEditionProcessEvent>? processEvents = null)
     {
         var newsSourceId = source.Id;
         var warmUpUrl = ResolveWarmUpUrl(source);
+        AddProcessEvent(processEvents, "CandidateSelected", $"Selected Al Ayam candidate {best.Url}.");
+        await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
 
         if (!source.IsDownloadAllowed)
         {
@@ -503,6 +534,8 @@ public sealed class PdfEditionDownloadService(
             new { url = best.Url.ToString() },
             cancellationToken).ConfigureAwait(false);
 
+        AddProcessEvent(processEvents, "DownloadStarted", $"Downloading validated Al Ayam candidate {best.Url}.");
+        await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
         progress.Report(newsSourceId, 68, "Downloading PDF…");
 
         try
@@ -562,7 +595,15 @@ public sealed class PdfEditionDownloadService(
                         httpClientFactory,
                         alAyamOutbound,
                         logger,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        message => AddProcessEvent(processEvents, "BrowserProcess", message)).ConfigureAwait(false);
+                    AddProcessEvent(
+                        processEvents,
+                        bytes is null ? "DownloadFailed" : "DownloadCandidateCaptured",
+                        bytes is null
+                            ? "Al Ayam did not return valid PDF bytes after all browser retries."
+                            : $"Al Ayam returned {bytes.Length} bytes for PDF validation.");
+                    await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -604,6 +645,8 @@ public sealed class PdfEditionDownloadService(
                     updateLastPdfUrl: true,
                     capturePageUrl: null,
                     cancellationToken).ConfigureAwait(false);
+                AddProcessEvent(processEvents, "DuplicateDetected", "The downloaded PDF matched today's existing file.");
+                await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
                 progress.Complete(newsSourceId);
                 return MapOutcome(existing, candidateDtos);
             }
@@ -636,12 +679,19 @@ public sealed class PdfEditionDownloadService(
                 new { path = stored.RelativeKey, hash, jobId = outcome.DownloadJobId, fileId = outcome.DownloadedFileId },
                 cancellationToken).ConfigureAwait(false);
 
+            AddProcessEvent(
+                processEvents,
+                "DownloadCompleted",
+                $"PDF saved successfully to {stored.RelativeKey} ({stored.SizeBytes} bytes).");
+            await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
             progress.Complete(newsSourceId);
             return outcome;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "PDF download failed for {Source}", source.Name);
+            AddProcessEvent(processEvents, "DownloadFailed", $"PDF download failed: {ex.Message}");
+            await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
             await audit.RecordAdminActionAsync(
                 PdfEditionAuditEvents.DownloadFailed,
                 "NewsSource",
@@ -981,6 +1031,60 @@ public sealed class PdfEditionDownloadService(
             CreatedAt = DateTimeOffset.UtcNow
         };
 
+    private async Task FlushProcessEventsAsync(
+        NewsSource source,
+        List<PdfEditionProcessEvent>? processEvents,
+        CancellationToken cancellationToken)
+    {
+        if (processEvents is null || processEvents.Count == 0)
+        {
+            return;
+        }
+
+        var jobId = _boundDownloadJobId;
+        var events = processEvents.ToList();
+        processEvents.Clear();
+        if (jobId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await WithDbContextAsync(async (db, ct) =>
+            {
+                db.PortalDownloadAuditLogs.AddRange(events.Select(item => new PortalDownloadAuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    NewsSourceId = source.Id,
+                    DownloadJobId = jobId,
+                    EventKind = item.EventKind,
+                    Message = item.Message,
+                    CreatedAt = item.OccurredAt
+                }));
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not persist PDF download chronology for job {DownloadJobId}.", jobId);
+        }
+    }
+
+    private static void AddProcessEvent(
+        List<PdfEditionProcessEvent>? processEvents,
+        string eventKind,
+        string message)
+    {
+        processEvents?.Add(new PdfEditionProcessEvent(eventKind, message, DateTimeOffset.UtcNow));
+    }
+
+    private sealed record PdfEditionProcessEvent(
+        string EventKind,
+        string Message,
+        DateTimeOffset OccurredAt);
+
     private Task FailBoundDownloadJobAsync(Guid downloadJobId, string errorMessage, CancellationToken cancellationToken) =>
         WithDbContextAsync(async (db, ct) =>
         {
@@ -1014,7 +1118,8 @@ public sealed class PdfEditionDownloadService(
         NewsSource source,
         Uri? warmUpUrl,
         bool useHeadlessBrowser,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        List<PdfEditionProcessEvent>? processEvents = null)
     {
         PdfEditionValidationResult? lastResult = null;
         foreach (var candidate in candidates
@@ -1069,6 +1174,11 @@ public sealed class PdfEditionDownloadService(
 
             if (AlAyamFullEditionPdf.UsesClickPath(source))
             {
+                AddProcessEvent(
+                    processEvents,
+                    "ValidationStarted",
+                    $"Validating Al Ayam candidate through the browser click path: {candidate.Url}");
+                await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
                 var clickBytes = await AlAyamFullEditionPdf.TryDownloadBytesWithFallbacksAsync(
                     candidate.Url,
                     source,
@@ -1076,7 +1186,15 @@ public sealed class PdfEditionDownloadService(
                     httpClientFactory,
                     alAyamOutbound,
                     logger,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    message => AddProcessEvent(processEvents, "BrowserProcess", message)).ConfigureAwait(false);
+                AddProcessEvent(
+                    processEvents,
+                    clickBytes is null ? "ValidationFailed" : "ValidationCandidateCaptured",
+                    clickBytes is null
+                        ? "Al Ayam browser click path returned no valid PDF bytes."
+                        : $"Al Ayam browser click path returned {clickBytes.Length} bytes for validation.");
+                await FlushProcessEventsAsync(source, processEvents, cancellationToken).ConfigureAwait(false);
                 if (clickBytes is not null && clickBytes.Length > 0)
                 {
                     if (PdfEditionContentFetcher.IsPdf(clickBytes))
