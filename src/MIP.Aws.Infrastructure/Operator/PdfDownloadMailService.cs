@@ -106,7 +106,11 @@ public sealed class PdfDownloadMailService(
             }
         }
 
-        var editionDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+        // Keep file selection consistent with IsSourceSuccessfulAsync: a PDF downloaded today
+        // counts even when the publisher's EditionDate is stored in a different timezone.
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var editionDayStart = new DateTimeOffset(editionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var editionDayEnd = editionDayStart.AddDays(1);
         var sourceNames = await db.NewsSources.AsNoTracking()
             .Where(source => !source.IsDeleted && sourceIds.Contains(source.Id))
             .Select(source => new { source.Id, source.Name })
@@ -117,7 +121,9 @@ public sealed class PdfDownloadMailService(
             .Where(edition => !edition.IsDeleted
                               && sourceIds.Contains(edition.NewsSourceId)
                               && edition.DownloadedFileId != null
-                              && edition.EditionDate == editionDate
+                              && (edition.EditionDate == editionDate
+                                  || (edition.DownloadedAt >= editionDayStart
+                                      && edition.DownloadedAt < editionDayEnd))
                               && (edition.Status == PdfEditionStatus.Downloaded
                                   || edition.Status == PdfEditionStatus.SkippedDuplicate
                                   || edition.Status == PdfEditionStatus.Validated))
