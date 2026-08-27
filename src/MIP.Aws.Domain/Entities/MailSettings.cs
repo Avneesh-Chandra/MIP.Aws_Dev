@@ -30,4 +30,16 @@ public sealed class MailSettings : AuditableEntity
 
     /// <summary>Hangfire cron days of week (0=Sunday … 6=Saturday), e.g. 1,2,3,4,5.</summary>
     public string? BatchRecurrenceDays { get; set; }
+
+    /// <summary>Whether the separate all-success PDF Download mail is enabled.</summary>
+    public bool? PdfDownloadMailEnabled { get; set; }
+
+    /// <summary>Recipients for the separate PDF Download mail.</summary>
+    public string? PdfDownloadMailRecipient { get; set; }
+
+    /// <summary>Subject for the separate PDF Download mail.</summary>
+    public string? PdfDownloadMailSubject { get; set; }
+
+    /// <summary>UTC HH:mm for the separate PDF Download mail.</summary>
+    public string? PdfDownloadMailTimeUtc { get; set; }
 }

@@ -18,6 +18,9 @@ public sealed class MailSettingsConfiguration : IEntityTypeConfiguration<MailSet
         builder.Property(x => x.BatchScheduleTimeUtc).HasMaxLength(5);
         builder.Property(x => x.BatchRecurrence).HasMaxLength(32);
         builder.Property(x => x.BatchRecurrenceDays).HasMaxLength(32);
+        builder.Property(x => x.PdfDownloadMailRecipient).HasMaxLength(320);
+        builder.Property(x => x.PdfDownloadMailSubject).HasMaxLength(256);
+        builder.Property(x => x.PdfDownloadMailTimeUtc).HasMaxLength(5);
         builder.Property(x => x.RowVersion).IsRowVersion();
     }
 }

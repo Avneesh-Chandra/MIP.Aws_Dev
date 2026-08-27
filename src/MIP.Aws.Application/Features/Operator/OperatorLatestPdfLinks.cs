@@ -7,6 +7,7 @@ namespace MIP.Aws.Application.Features.Operator;
 public static partial class OperatorLatestPdfLinks
 {
     public const string PortalRoutePrefix = "/operator/sources";
+    public const string PublicPdfDownloadPath = "/api/v1/operator/public-pdf-download";
 
     public static string BuildPortalPath(
         Guid sourceId,
@@ -76,6 +77,12 @@ public static partial class OperatorLatestPdfLinks
             : $"/api/v1/operator/sources/{sourceId:D}/latest-pdf";
         return path + BuildQuery(inline, editionDate);
     }
+
+    public static string BuildPublicPdfDownloadUrl(
+        string portalBaseUrl,
+        string token,
+        bool inline) =>
+        $"{NormalizePortalBaseUrl(portalBaseUrl)}{PublicPdfDownloadPath}?token={Uri.EscapeDataString(token)}&inline={inline.ToString().ToLowerInvariant()}";
 
     public static bool TryMapApiPathToPortal(string? path, string? queryString, out string portalPath)
     {

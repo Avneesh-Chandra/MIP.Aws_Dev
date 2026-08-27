@@ -18,6 +18,19 @@ public sealed class OperatorLatestPdfLinksTests
         Assert.DoesNotContain("/api/", url);
     }
 
+    [Fact]
+    public void BuildPublicPdfDownloadUrl_escapes_token_and_supports_inline_mode()
+    {
+        var url = OperatorLatestPdfLinks.BuildPublicPdfDownloadUrl(
+            "https://files.example.com",
+            "token+/with?characters",
+            inline: true);
+
+        Assert.Equal(
+            "https://files.example.com/api/v1/operator/public-pdf-download?token=token%2B%2Fwith%3Fcharacters&inline=true",
+            url);
+    }
+
     [Theory]
     [InlineData(
         "http://internal-ir-gfh-dev-mip-ecs-int-lb-01-1702425070.eu-west-1.elb.amazonaws.com",

@@ -22,6 +22,7 @@ public sealed class HangfireScheduledJobRegistry(
         recurringJobs.RemoveIfExists("market-import-daily");
         recurringJobs.RemoveIfExists("daily-executive-brief-generate");
         recurringJobs.RemoveIfExists("daily-intelligence-brief-email");
+        recurringJobs.RemoveIfExists("pdf-download-mail-daily");
 
         recurringJobs.AddOrUpdate<NewsIngestionJobs>(
             "cleanup-downloads",
@@ -55,6 +56,10 @@ public sealed class HangfireScheduledJobRegistry(
         {
             recurringJobs.RemoveIfExists("download-monitor-daily-status-email");
         }
+
+        ApplyPdfDownloadMailSchedule(
+            pdfEdition.PdfDownloadMailEnabled,
+            pdfEdition.PdfDownloadMailTimeUtc);
     }
 
     public void ApplyDownloadBatchSchedule(
@@ -67,6 +72,21 @@ public sealed class HangfireScheduledJobRegistry(
             DownloadBatchSchedule.RecurringJobId,
             job => job.ScheduleStaggeredDailyDownloadsAsync(null),
             cron,
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+    }
+
+    public void ApplyPdfDownloadMailSchedule(bool enabled, string timeUtc)
+    {
+        if (!enabled)
+        {
+            recurringJobs.RemoveIfExists("pdf-download-mail-daily");
+            return;
+        }
+
+        recurringJobs.AddOrUpdate<DownloadMonitorScheduledJobs>(
+            "pdf-download-mail-daily",
+            job => job.SendPdfDownloadMailAsync(),
+            ToUtcCronDirect(timeUtc, fallbackUtcHour: 6),
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 

@@ -880,6 +880,9 @@ namespace MIP.Aws.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTimeOffset?>("AbortedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -900,6 +903,12 @@ namespace MIP.Aws.Persistence.Migrations
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTimeOffset?>("PdfDownloadMailSentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("RecoveryFollowUpEmailSentAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -910,12 +919,6 @@ namespace MIP.Aws.Persistence.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<DateTimeOffset?>("StatusEmailSentAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset?>("RecoveryFollowUpEmailSentAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset?>("AbortedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid?>("TenantId")
@@ -1842,6 +1845,21 @@ namespace MIP.Aws.Persistence.Migrations
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("PdfDownloadMailEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PdfDownloadMailRecipient")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("PdfDownloadMailSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("PdfDownloadMailTimeUtc")
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
 
                     b.Property<string>("RedirectAllTo")
                         .HasMaxLength(320)

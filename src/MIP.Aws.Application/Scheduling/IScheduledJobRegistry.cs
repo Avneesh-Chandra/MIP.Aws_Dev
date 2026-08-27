@@ -11,4 +11,6 @@ public interface IScheduledJobRegistry
         string timeUtc,
         DownloadBatchRecurrence recurrence,
         string? customDays);
+
+    void ApplyPdfDownloadMailSchedule(bool enabled, string timeUtc);
 }

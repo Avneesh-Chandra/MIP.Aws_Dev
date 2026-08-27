@@ -46,4 +46,16 @@ public sealed class PdfEditionSchedulerOptions
 
     /// <summary>Public portal base URL for email links (e.g. https://api.your-domain.example).</summary>
     public string? AdminPortalUrl { get; set; }
+
+    /// <summary>Enable the separate PDF Download mail. Super Admin settings override this value when present.</summary>
+    public bool PdfDownloadMailEnabled { get; set; }
+
+    /// <summary>Recipients for the separate PDF Download mail.</summary>
+    public string PdfDownloadMailRecipient { get; set; } = string.Empty;
+
+    /// <summary>Subject for the separate PDF Download mail.</summary>
+    public string PdfDownloadMailSubject { get; set; } = "GFH PDF Download";
+
+    /// <summary>UTC time for the separate PDF Download mail (24-hour HH:mm).</summary>
+    public string PdfDownloadMailTimeUtc { get; set; } = "06:00";
 }

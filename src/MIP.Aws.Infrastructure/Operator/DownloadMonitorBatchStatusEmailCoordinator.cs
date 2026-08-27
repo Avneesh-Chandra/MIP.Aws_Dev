@@ -293,4 +293,19 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
 
     public static string BuildRecoveryFollowUpSubject(DateOnly monitorDate) =>
         $"GFH MIP AWS — Download Monitor recovery update ({monitorDate:yyyy-MM-dd})";
+
+    public static void EnqueuePdfDownloadMail(ILogger logger)
+    {
+        try
+        {
+            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                job => job.SendPdfDownloadMailAsync());
+            logger.LogInformation("Enqueued PDF Download mail eligibility check after batch activity.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not enqueue PDF Download mail eligibility check.");
+        }
+    }
 }

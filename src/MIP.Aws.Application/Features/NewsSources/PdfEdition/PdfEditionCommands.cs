@@ -43,6 +43,8 @@ public sealed record PdfEditionHistoryItemDto(
 
 public sealed record StreamPdfEditionQuery(Guid NewsSourceId, Guid FileId, bool Inline) : IRequest<PdfEditionStreamResult?>;
 
+public sealed record StreamPublicPdfDownloadQuery(string Token) : IRequest<PdfEditionStreamResult?>;
+
 public sealed record PdfEditionStreamResult(
     byte[] Content,
     string ContentType,

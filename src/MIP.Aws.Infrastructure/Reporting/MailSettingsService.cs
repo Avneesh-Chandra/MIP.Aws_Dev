@@ -60,6 +60,14 @@ public sealed class MailSettingsService(
             ? DownloadBatchSchedule.FormatDays(DownloadBatchSchedule.ParseDays(row?.BatchRecurrenceDays))
             : recurrence == DownloadBatchRecurrence.Weekdays ? "1,2,3,4,5" : null;
 
+        var pdfMailTime = !string.IsNullOrWhiteSpace(row?.PdfDownloadMailTimeUtc)
+            ? row!.PdfDownloadMailTimeUtc!.Trim()
+            : scheduler.PdfDownloadMailTimeUtc;
+        if (!DownloadBatchSchedule.TryNormalizeTimeUtc(pdfMailTime, out var normalizedPdfMailTime, out _))
+        {
+            normalizedPdfMailTime = scheduler.PdfDownloadMailTimeUtc;
+        }
+
         return new EffectiveSchedulerMailSettings(
             row?.StatusEmailEnabled ?? scheduler.StatusEmailEnabled,
             !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient) ? row!.StatusEmailRecipient!.Trim() : scheduler.StatusEmailRecipient,
@@ -71,7 +79,15 @@ public sealed class MailSettingsService(
                 : scheduler.AdminRecipientEmail,
             normalizedTime,
             recurrence.ToString(),
-            days);
+            days,
+            row?.PdfDownloadMailEnabled ?? scheduler.PdfDownloadMailEnabled,
+            !string.IsNullOrWhiteSpace(row?.PdfDownloadMailRecipient)
+                ? row!.PdfDownloadMailRecipient!.Trim()
+                : scheduler.PdfDownloadMailRecipient,
+            !string.IsNullOrWhiteSpace(row?.PdfDownloadMailSubject)
+                ? row!.PdfDownloadMailSubject!.Trim()
+                : scheduler.PdfDownloadMailSubject,
+            normalizedPdfMailTime);
     }
 
     public async Task UpdateAsync(
@@ -98,11 +114,24 @@ public sealed class MailSettingsService(
         string? batchScheduleTimeUtc,
         string? batchRecurrence,
         string? batchRecurrenceDays,
+        bool? pdfDownloadMailEnabled,
+        string? pdfDownloadMailRecipient,
+        string? pdfDownloadMailSubject,
+        string? pdfDownloadMailTimeUtc,
         CancellationToken cancellationToken)
     {
         if (!DownloadBatchSchedule.TryNormalizeTimeUtc(batchScheduleTimeUtc, out var timeUtc, out var timeError))
         {
             throw new InvalidOperationException(timeError);
+        }
+
+        var row = await GetOrCreateRowAsync(cancellationToken).ConfigureAwait(false);
+        var requestedPdfMailTime = string.IsNullOrWhiteSpace(pdfDownloadMailTimeUtc)
+            ? row.PdfDownloadMailTimeUtc ?? schedulerOptions.Value.PdfDownloadMailTimeUtc
+            : pdfDownloadMailTimeUtc;
+        if (!DownloadBatchSchedule.TryNormalizeTimeUtc(requestedPdfMailTime, out var pdfMailTimeUtc, out var pdfMailTimeError))
+        {
+            throw new InvalidOperationException(pdfMailTimeError);
         }
 
         var recurrence = DownloadBatchSchedule.ParseRecurrence(batchRecurrence);
@@ -122,7 +151,6 @@ public sealed class MailSettingsService(
             days = "1,2,3,4,5";
         }
 
-        var row = await GetOrCreateRowAsync(cancellationToken).ConfigureAwait(false);
         row.StatusEmailEnabled = statusEmailEnabled;
         row.StatusEmailRecipient = statusEmailRecipient?.Trim();
         row.MailAutomationEnabled = mailAutomationEnabled;
@@ -130,6 +158,27 @@ public sealed class MailSettingsService(
         row.BatchScheduleTimeUtc = timeUtc;
         row.BatchRecurrence = recurrence.ToString();
         row.BatchRecurrenceDays = days;
+        if (pdfDownloadMailEnabled is bool enabled)
+        {
+            row.PdfDownloadMailEnabled = enabled;
+        }
+
+        if (pdfDownloadMailRecipient is not null)
+        {
+            row.PdfDownloadMailRecipient = pdfDownloadMailRecipient.Trim();
+        }
+
+        if (pdfDownloadMailSubject is not null)
+        {
+            row.PdfDownloadMailSubject = string.IsNullOrWhiteSpace(pdfDownloadMailSubject)
+                ? schedulerOptions.Value.PdfDownloadMailSubject
+                : pdfDownloadMailSubject.Trim();
+        }
+
+        if (pdfDownloadMailTimeUtc is not null)
+        {
+            row.PdfDownloadMailTimeUtc = pdfMailTimeUtc;
+        }
         row.ModifiedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -186,6 +235,7 @@ public sealed class MailSettingsService(
             if (current.Message.Contains("AdminRecipientEmail", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("BatchScheduleTimeUtc", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("BatchRecurrence", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("PdfDownloadMail", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("Invalid column name", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

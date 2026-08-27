@@ -149,6 +149,31 @@ public sealed class OperatorDownloadMonitorController(IMediator mediator) : Cont
         return await StreamOperatorPdfAsync(id, link.FileId.Value, inline, cancellationToken).ConfigureAwait(false);
     }
 
+    [AllowAnonymous]
+    [HttpGet("public-pdf-download")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPublicPdfDownloadAsync(
+        [FromQuery] string token,
+        [FromQuery] bool inline = true,
+        CancellationToken cancellationToken = default)
+    {
+        var stream = await mediator.Send(
+                new StreamPublicPdfDownloadQuery(token),
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (stream is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers["Cache-Control"] = "no-store";
+        Response.Headers.ContentDisposition = inline
+            ? $"inline; filename=\"{stream.FileName}\""
+            : $"attachment; filename=\"{stream.FileName}\"";
+        return File(stream.Content, stream.ContentType);
+    }
+
     private async Task<IActionResult> StreamOperatorPdfAsync(
         Guid sourceId,
         Guid fileId,

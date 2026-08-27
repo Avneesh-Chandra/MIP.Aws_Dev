@@ -39,11 +39,16 @@ public sealed class HangfireRecurringJobsHostedService(
                     scheduler.BatchScheduleTimeUtc,
                     DownloadBatchSchedule.ParseRecurrence(scheduler.BatchRecurrence),
                     scheduler.BatchRecurrenceDays);
+                registry.ApplyPdfDownloadMailSchedule(
+                    scheduler.PdfDownloadMailEnabled,
+                    scheduler.PdfDownloadMailTimeUtc);
                 logger.LogInformation(
-                    "Hangfire download batch schedule applied: {TimeUtc} {Recurrence} {Days}.",
+                    "Hangfire download schedules applied: batch {TimeUtc} {Recurrence} {Days}; PDF mail {PdfMailTimeUtc} enabled={PdfMailEnabled}.",
                     scheduler.BatchScheduleTimeUtc,
                     scheduler.BatchRecurrence,
-                    scheduler.BatchRecurrenceDays ?? "*");
+                    scheduler.BatchRecurrenceDays ?? "*",
+                    scheduler.PdfDownloadMailTimeUtc,
+                    scheduler.PdfDownloadMailEnabled);
             }
             catch (Exception ex)
             {

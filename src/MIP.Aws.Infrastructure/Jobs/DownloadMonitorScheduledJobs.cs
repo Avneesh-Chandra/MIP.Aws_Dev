@@ -114,30 +114,33 @@ public sealed class DownloadMonitorScheduledJobs(
             successCount,
             downloadsComplete);
 
-        if (!opt.StatusEmailEnabled)
-        {
-            return;
-        }
-
-        if (downloadsComplete
+        var batchReady = downloadsComplete
             && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForInitialStatusEmailAsync(
                     db,
                     sourceIds,
                     batchStartedAt,
                     cancellationToken)
-                .ConfigureAwait(false))
+                .ConfigureAwait(false);
+
+        if (opt.StatusEmailEnabled && batchReady)
         {
             await SendInitialBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
-            return;
+        }
+        else if (opt.StatusEmailEnabled)
+        {
+            logger.LogWarning(
+                "Download monitor batch started at {BatchStartedAt:u} timed out before all downloads finished; deferring initial status email.",
+                batchStartedAt);
+            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendInitialBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
+                DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
         }
 
-        logger.LogWarning(
-            "Download monitor batch started at {BatchStartedAt:u} timed out before all downloads finished; deferring initial status email.",
-            batchStartedAt);
-        BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-            HangfireQueueOptions.Names.Email,
-            j => j.SendInitialBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
-            DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+        if (batchReady)
+        {
+            DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
+        }
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
@@ -171,6 +174,15 @@ public sealed class DownloadMonitorScheduledJobs(
         using var scope = scopeFactory.CreateScope();
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
         await email.SendDailyStatusEmailAsync(null, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task SendPdfDownloadMailAsync()
+    {
+        using var scope = scopeFactory.CreateScope();
+        var email = scope.ServiceProvider.GetRequiredService<IPdfDownloadMailService>();
+        await email.SendForLatestBatchAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

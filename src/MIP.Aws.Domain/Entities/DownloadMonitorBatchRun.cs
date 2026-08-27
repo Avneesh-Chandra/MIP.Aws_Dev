@@ -19,6 +19,9 @@ public sealed class DownloadMonitorBatchRun : AuditableEntity
     /// <summary>When the auto-recovery follow-up status email was sent for this batch (null = not yet sent).</summary>
     public DateTimeOffset? RecoveryFollowUpEmailSentAt { get; set; }
 
+    /// <summary>When the all-success PDF Download mail was sent for this batch (null = not yet sent).</summary>
+    public DateTimeOffset? PdfDownloadMailSentAt { get; set; }
+
     /// <summary>When the operator aborts a batch, progress UI stops immediately instead of waiting for the stagger window.</summary>
     public DateTimeOffset? AbortedAt { get; set; }
 }

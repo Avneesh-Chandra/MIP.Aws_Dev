@@ -53,12 +53,18 @@ public sealed record UpdateMailSchedulerSettingsCommand(
     string? AdminRecipientEmail,
     string? BatchScheduleTimeUtc = null,
     string? BatchRecurrence = null,
-    string? BatchRecurrenceDays = null) : IRequest;
+    string? BatchRecurrenceDays = null,
+    bool? PdfDownloadMailEnabled = null,
+    string? PdfDownloadMailRecipient = null,
+    string? PdfDownloadMailSubject = null,
+    string? PdfDownloadMailTimeUtc = null) : IRequest;
 
 public sealed record SendDownloadMonitorStatusEmailCommand(
     DateOnly? MonitorDate,
     string? RecipientOverride = null,
     bool BypassThrottle = false) : IRequest<bool>;
+
+public sealed record SendPdfDownloadMailCommand(bool BypassSchedule = true) : IRequest<bool>;
 
 public sealed record GetMailSettingsQuery : IRequest<MailSettingsDto>;
 
@@ -75,7 +81,11 @@ public sealed record MailSettingsDto(
     string BatchScheduleTimeUtc,
     string BatchRecurrence,
     string? BatchRecurrenceDays,
-    string BatchScheduleSummary);
+    string BatchScheduleSummary,
+    bool PdfDownloadMailEnabled,
+    string PdfDownloadMailRecipient,
+    string PdfDownloadMailSubject,
+    string PdfDownloadMailTimeUtc);
 
 public sealed record EmailLogListItemDto(
     Guid Id,
@@ -129,7 +139,11 @@ public sealed class GetMailSettingsQueryHandler(IMailSettingsService mailSetting
             DownloadBatchSchedule.Describe(
                 scheduler.BatchScheduleTimeUtc,
                 recurrence,
-                scheduler.BatchRecurrenceDays));
+                scheduler.BatchRecurrenceDays),
+            scheduler.PdfDownloadMailEnabled,
+            scheduler.PdfDownloadMailRecipient,
+            scheduler.PdfDownloadMailSubject,
+            scheduler.PdfDownloadMailTimeUtc);
     }
 }
 
@@ -160,6 +174,10 @@ public sealed class UpdateMailSchedulerSettingsCommandHandler(
             request.BatchScheduleTimeUtc,
             request.BatchRecurrence,
             request.BatchRecurrenceDays,
+            request.PdfDownloadMailEnabled,
+            request.PdfDownloadMailRecipient,
+            request.PdfDownloadMailSubject,
+            request.PdfDownloadMailTimeUtc,
             cancellationToken).ConfigureAwait(false);
 
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
@@ -167,6 +185,9 @@ public sealed class UpdateMailSchedulerSettingsCommandHandler(
             scheduler.BatchScheduleTimeUtc,
             DownloadBatchSchedule.ParseRecurrence(scheduler.BatchRecurrence),
             scheduler.BatchRecurrenceDays);
+        scheduledJobs.ApplyPdfDownloadMailSchedule(
+            scheduler.PdfDownloadMailEnabled,
+            scheduler.PdfDownloadMailTimeUtc);
     }
 }
 
@@ -239,6 +260,15 @@ public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonito
 
         return recipients.Count == 0 ? null : recipients;
     }
+}
+
+public sealed class SendPdfDownloadMailCommandHandler(IPdfDownloadMailService pdfDownloadMail)
+    : IRequestHandler<SendPdfDownloadMailCommand, bool>
+{
+    public Task<bool> Handle(
+        SendPdfDownloadMailCommand request,
+        CancellationToken cancellationToken) =>
+        pdfDownloadMail.SendForLatestBatchAsync(cancellationToken, request.BypassSchedule);
 }
 
 public sealed class GetRecentEmailLogsQueryHandler(

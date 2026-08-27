@@ -72,6 +72,22 @@
                 <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveSchedulerAsync">
                     Save scheduler settings
                 </MudButton>
+                <MudDivider Class="my-4" />
+                <MudText Typo="Typo.h6" Class="mb-3">PDF Download mail</MudText>
+                <MudSwitch T="bool" @bind-Value="_pdfDownloadMailEnabled"
+                           Label="Send after every fully successful batch" Color="Color.Primary" />
+                <MudTextField T="string" Label="Send time (UTC)" @bind-Value="_pdfDownloadMailTimeUtc"
+                              Variant="Variant.Outlined" Class="mt-2"
+                              HelperText="24-hour UTC, e.g. 06:00. The mail is sent only when the final batch has every PDF." />
+                <MudTextField T="string" Label="PDF mail recipients" @bind-Value="_pdfDownloadMailRecipient"
+                              Variant="Variant.Outlined" Class="mt-2"
+                              HelperText="Semicolon-separated recipients" />
+                <MudTextField T="string" Label="PDF mail subject" @bind-Value="_pdfDownloadMailSubject"
+                              Variant="Variant.Outlined" Class="mt-2" />
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                    Each row opens its PDF in the browser; its Download button downloads the PDF.
+                    Links work without login and expire after 24 hours.
+                </MudAlert>
             </MudPaper>
         </MudItem>
 
@@ -120,6 +136,9 @@
                        Disabled="_busy || _status?.IsReady != true" OnClick="SendTestEmailAsync">Send test email</MudButton>
             <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MonitorHeart"
                        Disabled="_busy || _status?.IsReady != true" OnClick="SendStatusEmailAsync">Send status email now</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                       Disabled="_busy || _status?.IsReady != true || !_pdfDownloadMailEnabled"
+                       OnClick="SendPdfDownloadMailAsync">Send PDF Download mail now</MudButton>
         </MudStack>
         @if (_lastTest is not null)
         {
@@ -200,6 +219,10 @@
     private string _batchScheduleTimeUtc = "04:30";
     private string _batchRecurrence = nameof(DownloadBatchRecurrence.Daily);
     private readonly HashSet<int> _batchDays = [];
+    private bool _pdfDownloadMailEnabled;
+    private string _pdfDownloadMailRecipient = string.Empty;
+    private string _pdfDownloadMailSubject = "GFH PDF Download";
+    private string _pdfDownloadMailTimeUtc = "06:00";
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
     private DateTime? _logDate = DateTime.Today;
@@ -271,6 +294,10 @@
             {
                 _batchDays.Add(day);
             }
+            _pdfDownloadMailEnabled = settings.PdfDownloadMailEnabled;
+            _pdfDownloadMailRecipient = settings.PdfDownloadMailRecipient;
+            _pdfDownloadMailSubject = settings.PdfDownloadMailSubject;
+            _pdfDownloadMailTimeUtc = settings.PdfDownloadMailTimeUtc;
             await ReloadLogsAsync();
         }
         catch (Exception ex)
@@ -314,7 +341,11 @@
                 _adminRecipientEmail,
                 _batchScheduleTimeUtc,
                 _batchRecurrence,
-                string.Join(',', _batchDays)));
+                string.Join(',', _batchDays),
+                _pdfDownloadMailEnabled,
+                _pdfDownloadMailRecipient,
+                _pdfDownloadMailSubject,
+                _pdfDownloadMailTimeUtc));
             Snackbar.Add("Scheduler settings saved. The download batch Hangfire job was updated.", Severity.Success);
             await ReloadAsync();
         }
@@ -369,6 +400,25 @@
                 BypassThrottle: true));
             Snackbar.Add(
                 sent ? "Status email sent." : "Status email was not sent (check settings and logs).",
+                sent ? Severity.Success : Severity.Warning);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SendPdfDownloadMailAsync()
+    {
+        _busy = true;
+        try
+        {
+            var sent = await Mediator.Send(new SendPdfDownloadMailCommand());
+            Snackbar.Add(
+                sent
+                    ? "PDF Download mail sent."
+                    : "PDF Download mail was not sent. Confirm today's batch has succeeded for every source.",
                 sent ? Severity.Success : Severity.Warning);
             await ReloadAsync();
         }

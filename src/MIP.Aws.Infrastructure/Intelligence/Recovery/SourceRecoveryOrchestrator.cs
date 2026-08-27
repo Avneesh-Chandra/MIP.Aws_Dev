@@ -793,6 +793,7 @@ public sealed class SourceRecoveryOrchestrator(
         if (attempt.IsAutomatic)
         {
             await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
+            DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
             return;
         }
 

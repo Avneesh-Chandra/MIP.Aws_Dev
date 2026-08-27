@@ -57,7 +57,11 @@ public sealed class MailController(IMediator mediator) : ControllerBase
             body.AdminRecipientEmail,
             body.BatchScheduleTimeUtc,
             body.BatchRecurrence,
-            body.BatchRecurrenceDays), cancellationToken).ConfigureAwait(false);
+            body.BatchRecurrenceDays,
+            body.PdfDownloadMailEnabled,
+            body.PdfDownloadMailRecipient,
+            body.PdfDownloadMailSubject,
+            body.PdfDownloadMailTimeUtc), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse.Ok("Scheduler mail settings updated"));
     }
 
@@ -72,6 +76,20 @@ public sealed class MailController(IMediator mediator) : ControllerBase
             body.Subject,
             body.HtmlBody), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse<TestEmailResponseDto>.Ok(result, result.Success ? "Test email sent" : "Test email failed"));
+    }
+
+    [HttpPost("pdf-download-mail")]
+    [Authorize(Policy = AuthPolicies.SuperAdminOnly)]
+    public async Task<ActionResult<ApiResponse<bool>>> SendPdfDownloadMailAsync(
+        CancellationToken cancellationToken)
+    {
+        var sent = await mediator.Send(
+                new SendPdfDownloadMailCommand(BypassSchedule: true),
+                cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(ApiResponse<bool>.Ok(
+            sent,
+            sent ? "PDF Download mail sent." : "PDF Download mail was not sent."));
     }
 
     [HttpPost("status-email")]
@@ -115,5 +133,9 @@ public sealed class MailController(IMediator mediator) : ControllerBase
         string? AdminRecipientEmail,
         string? BatchScheduleTimeUtc = null,
         string? BatchRecurrence = null,
-        string? BatchRecurrenceDays = null);
+        string? BatchRecurrenceDays = null,
+        bool? PdfDownloadMailEnabled = null,
+        string? PdfDownloadMailRecipient = null,
+        string? PdfDownloadMailSubject = null,
+        string? PdfDownloadMailTimeUtc = null);
 }

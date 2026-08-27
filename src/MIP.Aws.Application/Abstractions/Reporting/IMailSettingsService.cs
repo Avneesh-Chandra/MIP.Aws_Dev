@@ -18,7 +18,11 @@ public sealed record EffectiveSchedulerMailSettings(
     string AdminRecipientEmail,
     string BatchScheduleTimeUtc,
     string BatchRecurrence,
-    string? BatchRecurrenceDays);
+    string? BatchRecurrenceDays,
+    bool PdfDownloadMailEnabled,
+    string PdfDownloadMailRecipient,
+    string PdfDownloadMailSubject,
+    string PdfDownloadMailTimeUtc);
 
 public interface IMailSettingsService
 {
@@ -41,5 +45,9 @@ public interface IMailSettingsService
         string? batchScheduleTimeUtc,
         string? batchRecurrence,
         string? batchRecurrenceDays,
+        bool? pdfDownloadMailEnabled,
+        string? pdfDownloadMailRecipient,
+        string? pdfDownloadMailSubject,
+        string? pdfDownloadMailTimeUtc,
         CancellationToken cancellationToken);
 }
