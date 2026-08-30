@@ -9,6 +9,7 @@ using MIP.Aws.Application.Abstractions.News;
 using MIP.Aws.Application.Abstractions.Storage;
 using MIP.Aws.Application.Compliance;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Application.Features.NewsSources.PdfEdition;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
@@ -16,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MIP.Aws.Infrastructure.Operator;
 
 namespace MIP.Aws.Infrastructure.News.PdfEdition;
 
@@ -665,6 +667,7 @@ public sealed class PdfEditionDownloadService(
                 stored.SizeBytes,
                 hash,
                 editionDate,
+                null,
                 cancellationToken).ConfigureAwait(false);
 
             if (enqueueOcr && outcome.DownloadJobId is Guid jobId)
@@ -709,6 +712,126 @@ public sealed class PdfEditionDownloadService(
                 best.Url.ToString(),
                 cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public async Task<PdfEditionDownloadOutcome> UploadTodayAsync(
+        Guid newsSourceId,
+        string fileName,
+        byte[] content,
+        bool enqueueOcr,
+        CancellationToken cancellationToken)
+    {
+        if (content is null)
+        {
+            throw new InvalidOperationException("The uploaded file is empty.");
+        }
+
+        var source = await LoadSourceAsync(newsSourceId, cancellationToken).ConfigureAwait(false)
+                     ?? throw new InvalidOperationException("News source not found.");
+        if (!source.IsEnabled)
+        {
+            throw new InvalidOperationException("This source is inactive.");
+        }
+
+        if (!PdfManagementSourceRules.IsPdfDownloadMonitoredSource(source))
+        {
+            throw new InvalidOperationException("This source is not included in the PDF download monitor.");
+        }
+
+        var validationError = PdfManualUploadRules.Validate(fileName, content, source.MinimumPdfSizeKb);
+        if (validationError is not null)
+        {
+            throw new InvalidOperationException(validationError);
+        }
+
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var existing = await FindExistingDownloadAsync(source.Id, editionDate, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            await TouchLastPdfDownloadedFromRowAsync(source.Id, existing, cancellationToken).ConfigureAwait(false);
+            var duplicateOutcome = MapOutcome(existing, []);
+            await EnqueueManualUploadCompletionAsync(cancellationToken).ConfigureAwait(false);
+            return duplicateOutcome;
+        }
+
+        var safeFileName = PdfManualUploadRules.NormalizeFileName(fileName);
+        var sourceUri = Uri.TryCreate(source.BaseUrl, UriKind.Absolute, out var parsedSourceUri)
+            ? parsedSourceUri
+            : new Uri("https://manual-upload.invalid/");
+        var candidate = new PdfEditionCandidate(
+            sourceUri,
+            1,
+            PdfDiscoveryMethod.ManualOverride,
+            $"Manual upload: {safeFileName}",
+            true);
+        var candidateDtos = new[]
+        {
+            new PdfEditionCandidateDto(
+                candidate.Url.ToString(),
+                candidate.Confidence,
+                candidate.Method.ToString(),
+                candidate.Label,
+                candidate.IsTodayEdition)
+        };
+        var hash = Convert.ToHexString(SHA256.HashData(content));
+        var relativePath = BuildStoragePath(source.Name, editionDate);
+
+        await audit.RecordAdminActionAsync(
+            PdfEditionAuditEvents.ManualOverrideUsed,
+            "NewsSource",
+            source.Id.ToString(),
+            new { source.Name, safeFileName, sizeBytes = content.Length, hash },
+            cancellationToken).ConfigureAwait(false);
+
+        progress.Report(newsSourceId, 30, "Validating uploaded PDF…");
+        progress.Report(newsSourceId, 75, "Saving uploaded PDF…");
+        var stored = await fileStorage.WriteAsync(relativePath, content, cancellationToken).ConfigureAwait(false);
+
+        _downloadJobTrigger = DownloadJobTrigger.Manual;
+        try
+        {
+            var outcome = await PersistDownloadAsync(
+                source.Id,
+                candidate,
+                candidateDtos,
+                "application/pdf",
+                stored.RelativeKey,
+                stored.SizeBytes,
+                hash,
+                editionDate,
+                safeFileName,
+                cancellationToken).ConfigureAwait(false);
+
+            if (enqueueOcr && outcome.DownloadJobId is Guid jobId)
+            {
+                intelligenceScheduler.EnqueueProcessDownloadJob(jobId);
+            }
+
+            progress.Complete(newsSourceId);
+            await audit.RecordAdminActionAsync(
+                PdfEditionAuditEvents.DownloadCompleted,
+                "NewsSource",
+                source.Id.ToString(),
+                new { source.Name, safeFileName, sizeBytes = stored.SizeBytes, hash, manualUpload = true },
+                cancellationToken).ConfigureAwait(false);
+            await EnqueueManualUploadCompletionAsync(cancellationToken).ConfigureAwait(false);
+            return outcome;
+        }
+        finally
+        {
+            _downloadJobTrigger = null;
+        }
+    }
+
+    private async Task EnqueueManualUploadCompletionAsync(CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueAfterManualUploadAsync(
+                db,
+                logger,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<PdfEditionCandidate?> ResolveManualCandidateAsync(
@@ -940,6 +1063,7 @@ public sealed class PdfEditionDownloadService(
         long sizeBytes,
         string hash,
         DateOnly editionDate,
+        string? fileName,
         CancellationToken cancellationToken) =>
         WithDbContextAsync(async (db, ct) =>
         {
@@ -992,6 +1116,7 @@ public sealed class PdfEditionDownloadService(
             row.DownloadJobId = job.Id;
             row.DownloadedFileId = downloadedFile.Id;
             row.SavedPath = relativePath;
+            row.FileName = string.IsNullOrWhiteSpace(fileName) ? row.FileName : fileName;
             row.FileSizeBytes = sizeBytes;
             row.Sha256Hash = hash;
             row.DownloadedAt = DateTimeOffset.UtcNow;

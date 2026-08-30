@@ -897,6 +897,9 @@ namespace MIP.Aws.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTimeOffset?>("ManualCompletionStatusEmailSentAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset?>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
 

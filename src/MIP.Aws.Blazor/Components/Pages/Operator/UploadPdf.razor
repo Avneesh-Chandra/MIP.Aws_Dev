@@ -1,0 +1,225 @@
+@page "/operator/upload-pdf"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = AuthPolicies.OperatorManualPdfUpload)]
+
+@inject IMediator Mediator
+@inject ISnackbar Snackbar
+
+<PageTitle>Upload today's PDFs</PageTitle>
+
+<MudStack Spacing="4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h4" Style="font-weight:700;">Upload today's PDFs</MudText>
+        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined">
+            @DateTime.UtcNow.ToString("yyyy-MM-dd")
+        </MudChip>
+        <MudSpacer />
+        <MudButton Href="/operator/download-monitor"
+                   Variant="Variant.Outlined"
+                   StartIcon="@Icons.Material.Filled.Monitor">
+            Download monitor
+        </MudButton>
+    </MudStack>
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Info">
+        Upload only the missing newspaper editions. Uploaded files are validated, stored as today's successful manual downloads,
+        and included in the normal batch email process when every monitored source is available.
+    </MudAlert>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_sources.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning">No enabled PDF-monitor sources are configured.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Outlined="true">
+            <MudTable T="TodayPdfUploadSourceDto"
+                      Items="_sources"
+                      Hover="true"
+                      Striped="true"
+                      Dense="true"
+                      Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>Source</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Today's PDF</MudTh>
+                    <MudTh Style="text-align:right;">Manual upload</MudTh>
+                </HeaderContent>
+                <RowTemplate Context="source">
+                    <MudTd DataLabel="Source">
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@source.SourceName</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@source.SourceType</MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Status">
+                        @if (source.IsAvailable)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
+                                Available
+                            </MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">
+                                Missing
+                            </MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Today's PDF">
+                        @if (source.IsAvailable && source.FileId is Guid fileId)
+                        {
+                            <MudButton Href="@BuildPdfPath(source.SourceId, fileId)"
+                                       Target="_blank"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Visibility">
+                                View PDF
+                            </MudButton>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @source.FileName · @FormatSize(source.FileSizeBytes)
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Not stored</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Manual upload" Style="text-align:right;">
+                        @if (source.IsAvailable)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">No upload required</MudText>
+                        }
+                        else
+                        {
+                            <MudStack Row="true"
+                                      Spacing="1"
+                                      Justify="Justify.FlexEnd"
+                                      AlignItems="AlignItems.Center">
+                                <InputFile id="@($"pdf-upload-{source.SourceId:N}")"
+                                           accept=".pdf,application/pdf"
+                                           OnChange="@(args => SelectFile(source.SourceId, args))" />
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.CloudUpload"
+                                           Disabled="@(_uploadingSourceId is not null || !_selectedFiles.ContainsKey(source.SourceId))"
+                                           OnClick="@(() => UploadAsync(source))">
+                                    @(_uploadingSourceId == source.SourceId ? "Uploading…" : "Upload")
+                                </MudButton>
+                            </MudStack>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private const long MaxUploadBytes = PdfManualUploadRules.MaxUploadBytes;
+
+    private IReadOnlyList<TodayPdfUploadSourceDto> _sources = [];
+    private readonly Dictionary<Guid, IBrowserFile> _selectedFiles = [];
+    private Guid? _uploadingSourceId;
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _sources = await Mediator.Send(new GetTodayPdfUploadStatusQuery());
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not load today's PDF status: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SelectFile(Guid sourceId, InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        if (file is null)
+        {
+            _selectedFiles.Remove(sourceId);
+            return;
+        }
+
+        if (!file.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedFiles.Remove(sourceId);
+            Snackbar.Add("Only PDF files can be uploaded.", Severity.Warning);
+            return;
+        }
+
+        if (file.Size > MaxUploadBytes)
+        {
+            _selectedFiles.Remove(sourceId);
+            Snackbar.Add("The PDF exceeds the 150 MB upload limit.", Severity.Warning);
+            return;
+        }
+
+        _selectedFiles[sourceId] = file;
+    }
+
+    private async Task UploadAsync(TodayPdfUploadSourceDto source)
+    {
+        if (_uploadingSourceId is not null || !_selectedFiles.TryGetValue(source.SourceId, out var file))
+        {
+            return;
+        }
+
+        _uploadingSourceId = source.SourceId;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxUploadBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+
+            var outcome = await Mediator.Send(new UploadTodayPdfCommand(
+                source.SourceId,
+                file.Name,
+                memory.ToArray()));
+
+            _selectedFiles.Remove(source.SourceId);
+            Snackbar.Add(
+                outcome.Status == PdfEditionStatus.SkippedDuplicate
+                    ? $"{source.SourceName} already had today's PDF."
+                    : $"{source.SourceName} PDF uploaded successfully.",
+                outcome.Status == PdfEditionStatus.SkippedDuplicate ? Severity.Info : Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload failed for {source.SourceName}: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploadingSourceId = null;
+        }
+    }
+
+    private static string BuildPdfPath(Guid sourceId, Guid fileId) =>
+        OperatorLatestPdfLinks.BuildApiPath(sourceId, inline: true, fileId: fileId);
+
+    private static string FormatSize(long? sizeBytes)
+    {
+        if (sizeBytes is null)
+        {
+            return string.Empty;
+        }
+
+        var megabytes = sizeBytes.Value / (1024d * 1024d);
+        return $"{megabytes:0.##} MB";
+    }
+}

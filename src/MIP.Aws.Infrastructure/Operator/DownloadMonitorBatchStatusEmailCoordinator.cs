@@ -294,6 +294,9 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
     public static string BuildRecoveryFollowUpSubject(DateOnly monitorDate) =>
         $"GFH MIP AWS — Download Monitor recovery update ({monitorDate:yyyy-MM-dd})";
 
+    public static string BuildManualCompletionSubject(DateOnly monitorDate) =>
+        $"GFH MIP AWS — Download Monitor manual completion update ({monitorDate:yyyy-MM-dd})";
+
     public static void EnqueuePdfDownloadMail(ILogger logger)
     {
         try
@@ -308,4 +311,132 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             logger.LogWarning(ex, "Could not enqueue PDF Download mail eligibility check.");
         }
     }
+
+    public static async Task TryEnqueueAfterManualUploadAsync(
+        IApplicationDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dayStart = new DateTimeOffset(today.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+        var batchStartedAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(batch => !batch.IsDeleted && batch.StartedAt >= dayStart && batch.StartedAt < dayEnd)
+            .OrderByDescending(batch => batch.StartedAt)
+            .Select(batch => (DateTimeOffset?)batch.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (batchStartedAt is null)
+        {
+            logger.LogInformation("Manual PDF upload completed without a today's batch record; email triggers were skipped.");
+            return;
+        }
+
+        var sourceIds = await LoadMonitoredSourceIdsAsync(db, cancellationToken).ConfigureAwait(false);
+        if (sourceIds.Count == 0
+            || await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
+                db,
+                sourceIds,
+                batchStartedAt.Value,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        foreach (var sourceId in sourceIds)
+        {
+            if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
+                    db,
+                    sourceId,
+                    batchStartedAt.Value,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                logger.LogInformation(
+                    "Manual PDF upload completed, but source {SourceId} is still not successful for batch {BatchStartedAt:u}.",
+                    sourceId,
+                    batchStartedAt.Value);
+                return;
+            }
+        }
+
+        if (await TryClaimManualCompletionStatusEmailAsync(db, batchStartedAt.Value, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            try
+            {
+                BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                    HangfireQueueOptions.Names.Email,
+                    job => job.SendManualCompletionStatusEmailAsync(batchStartedAt.Value));
+                logger.LogInformation(
+                    "Enqueued manual-upload completion status email for batch {BatchStartedAt:u}.",
+                    batchStartedAt.Value);
+            }
+            catch
+            {
+                await ReleaseManualCompletionStatusEmailClaimAsync(db, batchStartedAt.Value, cancellationToken)
+                    .ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        EnqueuePdfDownloadMail(logger);
+    }
+
+    public static async Task<bool> TryClaimManualCompletionStatusEmailAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var subject = BuildManualCompletionSubject(DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+                db,
+                subject,
+                batchStartedAt,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        var updated = await db.DownloadMonitorBatchRuns
+            .Where(batch => !batch.IsDeleted
+                            && batch.StartedAt == batchStartedAt
+                            && batch.ManualCompletionStatusEmailSentAt == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    batch => batch.ManualCompletionStatusEmailSentAt,
+                    batchStartedAt),
+                cancellationToken)
+            .ConfigureAwait(false);
+        return updated > 0;
+    }
+
+    public static Task ReleaseManualCompletionStatusEmailClaimAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken) =>
+        db.DownloadMonitorBatchRuns
+            .Where(batch => !batch.IsDeleted
+                            && batch.StartedAt == batchStartedAt
+                            && batch.ManualCompletionStatusEmailSentAt == batchStartedAt)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    batch => batch.ManualCompletionStatusEmailSentAt,
+                    (DateTimeOffset?)null),
+                cancellationToken);
+
+    public static Task MarkManualCompletionStatusEmailSentAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken) =>
+        db.DownloadMonitorBatchRuns
+            .Where(batch => !batch.IsDeleted
+                            && batch.StartedAt == batchStartedAt
+                            && batch.ManualCompletionStatusEmailSentAt == batchStartedAt)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    batch => batch.ManualCompletionStatusEmailSentAt,
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+
 }

@@ -18,6 +18,18 @@ public sealed class DownloadTodayPdfCommandHandler(IPdfEditionDownloadService se
         service.DownloadTodayAsync(request.NewsSourceId, request.EnqueueOcr, cancellationToken);
 }
 
+public sealed class UploadTodayPdfCommandHandler(IPdfEditionDownloadService service)
+    : IRequestHandler<UploadTodayPdfCommand, PdfEditionDownloadOutcome>
+{
+    public Task<PdfEditionDownloadOutcome> Handle(UploadTodayPdfCommand request, CancellationToken cancellationToken) =>
+        service.UploadTodayAsync(
+            request.NewsSourceId,
+            request.FileName,
+            request.Content,
+            request.EnqueueOcr,
+            cancellationToken);
+}
+
 public sealed class DownloadManualPdfCommandHandler(IPdfEditionDownloadService service)
     : IRequestHandler<DownloadManualPdfCommand, PdfEditionDownloadOutcome>
 {

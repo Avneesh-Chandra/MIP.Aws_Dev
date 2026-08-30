@@ -144,6 +144,9 @@ public static class AuthorizationPolicyRegistry
         options.AddPolicy(AuthPolicies.NewsSourcePdfWrite, p =>
             PermAny(p, ApplicationPermissions.SourcesManage, ApplicationPermissions.SourcesTest));
 
+        options.AddPolicy(AuthPolicies.OperatorManualPdfUpload, p =>
+            Perm(p, ApplicationPermissions.ManualPdfUpload));
+
         options.AddPolicy(AuthPolicies.NewsSourcePdfRead, p =>
             PermAny(p, ApplicationPermissions.SourcesView, ApplicationPermissions.SourcesManage,
                 ApplicationPermissions.AuditView, ApplicationPermissions.LatestPdfView));

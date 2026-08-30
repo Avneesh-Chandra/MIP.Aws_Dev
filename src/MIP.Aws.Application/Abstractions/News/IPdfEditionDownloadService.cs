@@ -19,6 +19,13 @@ public interface IPdfEditionDownloadService
         bool enqueueOcr,
         CancellationToken cancellationToken);
 
+    Task<PdfEditionDownloadOutcome> UploadTodayAsync(
+        Guid newsSourceId,
+        string fileName,
+        byte[] content,
+        bool enqueueOcr,
+        CancellationToken cancellationToken);
+
     Task<PdfEditionDownloadOutcome?> GetLatestAsync(Guid newsSourceId, CancellationToken cancellationToken);
 
     /// <summary>

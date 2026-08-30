@@ -24,7 +24,8 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         CancellationToken cancellationToken,
         IReadOnlyList<string>? recipientOverride = null,
         string? executiveSummaryPrefix = null,
-        bool bypassThrottle = false)
+        bool bypassThrottle = false,
+        string? subjectOverride = null)
     {
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
         if (!scheduler.StatusEmailEnabled)
@@ -73,7 +74,9 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             pendingRecoveryNotices: null,
             adminRecipientEmail: ResolveAdminRecipientEmail(scheduler),
             failureContextsByJobId: failureContexts);
-        var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(date);
+        var subject = string.IsNullOrWhiteSpace(subjectOverride)
+            ? DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(date)
+            : subjectOverride.Trim();
 
         return await SendHtmlAsync(recipients, subject, html, date, cancellationToken).ConfigureAwait(false);
     }
@@ -116,6 +119,17 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
         return await SendHtmlAsync(recipients, subject, html, monitorDate, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task<bool> SendManualCompletionStatusEmailAsync(
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken) =>
+        SendDailyStatusEmailAsync(
+            DateOnly.FromDateTime(batchStartedAt.UtcDateTime),
+            cancellationToken,
+            executiveSummaryPrefix: "Manual PDF upload completed. All monitored newspaper editions are now available.",
+            bypassThrottle: true,
+            subjectOverride: DownloadMonitorBatchStatusEmailCoordinator.BuildManualCompletionSubject(
+                DateOnly.FromDateTime(batchStartedAt.UtcDateTime)));
 
     public async Task<bool> SendInitialBatchStatusEmailAsync(
         DateTimeOffset batchStartedAt,

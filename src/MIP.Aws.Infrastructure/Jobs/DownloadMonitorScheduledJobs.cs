@@ -185,6 +185,56 @@ public sealed class DownloadMonitorScheduledJobs(
         await email.SendForLatestBatchAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public async Task SendManualCompletionStatusEmailAsync(DateTimeOffset batchStartedAt)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+
+        try
+        {
+            var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildManualCompletionSubject(
+                DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+            if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+                    db,
+                    subject,
+                    batchStartedAt,
+                    CancellationToken.None).ConfigureAwait(false))
+            {
+                await DownloadMonitorBatchStatusEmailCoordinator.MarkManualCompletionStatusEmailSentAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (await email.SendManualCompletionStatusEmailAsync(batchStartedAt, CancellationToken.None)
+                    .ConfigureAwait(false))
+            {
+                await DownloadMonitorBatchStatusEmailCoordinator.MarkManualCompletionStatusEmailSentAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            throw new InvalidOperationException("Manual PDF upload completion status email was not delivered.");
+        }
+        catch
+        {
+            await DownloadMonitorBatchStatusEmailCoordinator.ReleaseManualCompletionStatusEmailClaimAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Operator "Execute PDF download task": stagger all monitored sources, wait for completion, send status email.
     /// </summary>

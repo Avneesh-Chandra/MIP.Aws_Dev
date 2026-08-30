@@ -67,7 +67,8 @@ public static class RolePermissionMatrix
             ApplicationPermissions.OperatorNotesCreate,
             ApplicationPermissions.OperatorNotesView,
             ApplicationPermissions.SourceRecoveryView,
-            ApplicationPermissions.SourceRecoveryApply);
+            ApplicationPermissions.SourceRecoveryApply,
+            ApplicationPermissions.ManualPdfUpload);
 
         map[ApplicationRoles.Analyst] = Set(
             ApplicationPermissions.ReviewView,

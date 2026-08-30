@@ -8,6 +8,24 @@ public sealed record DiscoverPdfEditionCommand(Guid NewsSourceId) : IRequest<Pdf
 
 public sealed record DownloadTodayPdfCommand(Guid NewsSourceId, bool EnqueueOcr = true) : IRequest<PdfEditionDownloadOutcome>;
 
+public sealed record UploadTodayPdfCommand(
+    Guid NewsSourceId,
+    string FileName,
+    byte[] Content,
+    bool EnqueueOcr = true) : IRequest<PdfEditionDownloadOutcome>;
+
+public sealed record GetTodayPdfUploadStatusQuery : IRequest<IReadOnlyList<TodayPdfUploadSourceDto>>;
+
+public sealed record TodayPdfUploadSourceDto(
+    Guid SourceId,
+    string SourceName,
+    string SourceType,
+    bool IsAvailable,
+    Guid? FileId,
+    string? FileName,
+    long? FileSizeBytes,
+    DateTimeOffset? DownloadedAt);
+
 /// <summary>
 /// Operator-provided PDF or issue-viewer URL when automatic discovery fails.
 /// </summary>

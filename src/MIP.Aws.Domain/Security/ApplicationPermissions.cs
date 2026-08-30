@@ -15,6 +15,7 @@ public static class ApplicationPermissions
     public const string SourcesManage = "Sources.Manage";
     public const string SourcesTest = "Sources.Test";
     public const string SourcesDownload = "Sources.Download";
+    public const string ManualPdfUpload = "Sources.ManualPdfUpload";
 
     public const string ReviewView = "Review.View";
     public const string ReviewEdit = "Review.Edit";
@@ -82,7 +83,7 @@ public static class ApplicationPermissions
     [
         UsersView, UsersCreate, UsersUpdate, UsersDelete,
         RolesView, RolesManage,
-        SourcesView, SourcesManage, SourcesTest, SourcesDownload,
+        SourcesView, SourcesManage, SourcesTest, SourcesDownload, ManualPdfUpload,
         ReviewView, ReviewEdit, ReviewApprove,
         BriefsBuild, BriefsApprove, BriefsPublish,
         DailyBriefView, DailyBriefGenerate, DailyBriefEdit, DailyBriefApprove, DailyBriefSend, DailyBriefSettings, DailyBriefAudit,
