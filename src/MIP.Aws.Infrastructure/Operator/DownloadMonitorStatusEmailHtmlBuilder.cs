@@ -229,7 +229,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
                 "Open today's Al Ayam e-paper");
             if (row.LatestPdfFileId is not Guid existingFileId)
             {
-                return $"{publisherLink} <span style=\"color:#6b7280;font-size:11px;\">(not saved in MIP today)</span>";
+                return $"{publisherLink} <span style=\"color:#6b7280;font-size:11px;\">(Not Available in MIP today)</span>";
             }
 
             var portalView = OperatorLatestPdfLinks.BuildPortalUrl(
@@ -250,7 +250,7 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         if (row.LatestPdfFileId is not Guid fileId)
         {
-            return "Not available";
+            return "Not Available";
         }
 
         var viewUrl = OperatorLatestPdfLinks.BuildPortalUrl(

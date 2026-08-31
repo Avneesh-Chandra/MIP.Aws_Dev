@@ -57,7 +57,11 @@ public sealed record UpdateMailSchedulerSettingsCommand(
     bool? PdfDownloadMailEnabled = null,
     string? PdfDownloadMailRecipient = null,
     string? PdfDownloadMailSubject = null,
-    string? PdfDownloadMailTimeUtc = null) : IRequest;
+    string? PdfDownloadMailTimeUtc = null,
+    IReadOnlyList<string>? SelectedStatusEmailRecipients = null,
+    IReadOnlyList<string>? SelectedPdfDownloadMailRecipients = null,
+    MailCompletionMode? StatusEmailCompletionMode = null,
+    MailCompletionMode? PdfDownloadMailCompletionMode = null) : IRequest;
 
 public sealed record SendDownloadMonitorStatusEmailCommand(
     DateOnly? MonitorDate,
@@ -85,7 +89,11 @@ public sealed record MailSettingsDto(
     bool PdfDownloadMailEnabled,
     string PdfDownloadMailRecipient,
     string PdfDownloadMailSubject,
-    string PdfDownloadMailTimeUtc);
+    string PdfDownloadMailTimeUtc,
+    IReadOnlyList<string> SelectedStatusEmailRecipients,
+    IReadOnlyList<string> SelectedPdfDownloadMailRecipients,
+    MailCompletionMode StatusEmailCompletionMode,
+    MailCompletionMode PdfDownloadMailCompletionMode);
 
 public sealed record EmailLogListItemDto(
     Guid Id,
@@ -143,7 +151,11 @@ public sealed class GetMailSettingsQueryHandler(IMailSettingsService mailSetting
             scheduler.PdfDownloadMailEnabled,
             scheduler.PdfDownloadMailRecipient,
             scheduler.PdfDownloadMailSubject,
-            scheduler.PdfDownloadMailTimeUtc);
+            scheduler.PdfDownloadMailTimeUtc,
+            scheduler.SelectedStatusEmailRecipients,
+            scheduler.SelectedPdfDownloadMailRecipients,
+            scheduler.StatusEmailCompletionMode,
+            scheduler.PdfDownloadMailCompletionMode);
     }
 }
 
@@ -178,6 +190,10 @@ public sealed class UpdateMailSchedulerSettingsCommandHandler(
             request.PdfDownloadMailRecipient,
             request.PdfDownloadMailSubject,
             request.PdfDownloadMailTimeUtc,
+            request.SelectedStatusEmailRecipients,
+            request.SelectedPdfDownloadMailRecipients,
+            request.StatusEmailCompletionMode,
+            request.PdfDownloadMailCompletionMode,
             cancellationToken).ConfigureAwait(false);
 
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
@@ -237,12 +253,11 @@ public sealed class SendDownloadMonitorStatusEmailCommandHandler(IDownloadMonito
 {
     public async Task<bool> Handle(SendDownloadMonitorStatusEmailCommand request, CancellationToken cancellationToken)
     {
-        return await statusEmail.SendDailyStatusEmailAsync(
+        return await statusEmail.SendManualStatusEmailAsync(
                 request.MonitorDate,
-                cancellationToken,
                 ParseRecipientOverride(request.RecipientOverride),
-                executiveSummaryPrefix: null,
-                bypassThrottle: request.BypassThrottle)
+                request.BypassThrottle,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 

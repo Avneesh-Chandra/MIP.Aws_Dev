@@ -36,7 +36,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
 
         var recipients = recipientOverride is { Count: > 0 }
             ? recipientOverride
-            : ParseRecipients(scheduler.StatusEmailRecipient);
+            : scheduler.SelectedStatusEmailRecipients;
         if (recipients.Count == 0)
         {
             logger.LogWarning("Download monitor status email skipped: StatusEmailRecipient is not configured.");
@@ -92,7 +92,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             return false;
         }
 
-        var recipients = ParseRecipients(scheduler.StatusEmailRecipient);
+        var recipients = scheduler.SelectedStatusEmailRecipients;
         if (recipients.Count == 0)
         {
             logger.LogWarning("Download monitor recovery follow-up email skipped: StatusEmailRecipient is not configured.");
@@ -131,6 +131,49 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             subjectOverride: DownloadMonitorBatchStatusEmailCoordinator.BuildManualCompletionSubject(
                 DateOnly.FromDateTime(batchStartedAt.UtcDateTime)));
 
+    public async Task<bool> SendManualStatusEmailAsync(
+        DateOnly? monitorDate,
+        IReadOnlyList<string>? recipientOverride,
+        bool bypassThrottle,
+        CancellationToken cancellationToken)
+    {
+        var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
+        var date = monitorDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var dayStart = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var batchStartedAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(batch => !batch.IsDeleted && batch.StartedAt >= dayStart && batch.StartedAt < dayStart.AddDays(1))
+            .OrderByDescending(batch => batch.StartedAt)
+            .Select(batch => (DateTimeOffset?)batch.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (batchStartedAt is null)
+        {
+            logger.LogInformation("Manual status email skipped for {Date}: no batch exists.", date);
+            return false;
+        }
+
+        var sourceIds = await LoadMonitoredSourceIdsAsync(cancellationToken).ConfigureAwait(false);
+        if (!await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
+                db,
+                sourceIds,
+                batchStartedAt.Value,
+                scheduler.StatusEmailCompletionMode,
+                cancellationToken).ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Manual status email skipped for {Date}: the configured completion condition is not met.",
+                date);
+            return false;
+        }
+
+        return await SendDailyStatusEmailAsync(
+                date,
+                cancellationToken,
+                recipientOverride,
+                bypassThrottle: bypassThrottle)
+            .ConfigureAwait(false);
+    }
+
     public async Task<bool> SendInitialBatchStatusEmailAsync(
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
@@ -141,7 +184,7 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             return false;
         }
 
-        var recipients = ParseRecipients(scheduler.StatusEmailRecipient);
+        var recipients = scheduler.SelectedStatusEmailRecipients;
         if (recipients.Count == 0)
         {
             return false;
@@ -311,10 +354,4 @@ public sealed class DownloadMonitorDailyStatusEmailService(
     private static string ResolvePortalBaseUrl(string? configured) =>
         OperatorLatestPdfLinks.NormalizePortalBaseUrl(configured);
 
-    private static IReadOnlyList<string> ParseRecipients(string value) =>
-        value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(x => x.Trim().ToLowerInvariant())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
 }

@@ -64,7 +64,7 @@ public sealed class DownloadMonitorStatusEmailAlAyamFallbackTests
             monitor,
             portalBaseUrl: "https://portal.example.com");
 
-        Assert.Contains("Not available", html, StringComparison.Ordinal);
+        Assert.Contains("Not Available", html, StringComparison.Ordinal);
         Assert.DoesNotContain(AlAyamPublicPdfBaseline.EpaperUrl, html, StringComparison.Ordinal);
     }
 

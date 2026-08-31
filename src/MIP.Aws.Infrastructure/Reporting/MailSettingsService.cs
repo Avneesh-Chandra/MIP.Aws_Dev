@@ -1,8 +1,10 @@
 using MIP.Aws.Application.Abstractions;
 using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Features.Reports;
 using MIP.Aws.Application.Scheduling;
 using MIP.Aws.Domain.Entities;
+using MIP.Aws.Domain.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -76,9 +78,22 @@ public sealed class MailSettingsService(
             pdfMailSubject = scheduler.PdfDownloadMailSubject;
         }
 
+        var statusRecipient = !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient)
+            ? row!.StatusEmailRecipient!.Trim()
+            : scheduler.StatusEmailRecipient;
+        var pdfRecipient = !string.IsNullOrWhiteSpace(row?.PdfDownloadMailRecipient)
+            ? row!.PdfDownloadMailRecipient!.Trim()
+            : scheduler.PdfDownloadMailRecipient;
+        var selectedStatusRecipients = MailRecipientRules.ResolveSelected(
+            statusRecipient,
+            row?.StatusEmailSelectedRecipients);
+        var selectedPdfRecipients = MailRecipientRules.ResolveSelected(
+            pdfRecipient,
+            row?.PdfDownloadMailSelectedRecipients);
+
         return new EffectiveSchedulerMailSettings(
             row?.StatusEmailEnabled ?? scheduler.StatusEmailEnabled,
-            !string.IsNullOrWhiteSpace(row?.StatusEmailRecipient) ? row!.StatusEmailRecipient!.Trim() : scheduler.StatusEmailRecipient,
+            statusRecipient,
             row?.MailAutomationEnabled ?? automation.Enabled,
             scheduler.StatusEmailTimeUtc,
             scheduler.AdminPortalUrl,
@@ -89,11 +104,13 @@ public sealed class MailSettingsService(
             recurrence.ToString(),
             days,
             row?.PdfDownloadMailEnabled ?? scheduler.PdfDownloadMailEnabled,
-            !string.IsNullOrWhiteSpace(row?.PdfDownloadMailRecipient)
-                ? row!.PdfDownloadMailRecipient!.Trim()
-                : scheduler.PdfDownloadMailRecipient,
+            pdfRecipient,
             pdfMailSubject,
-            normalizedPdfMailTime);
+            normalizedPdfMailTime,
+            selectedStatusRecipients,
+            selectedPdfRecipients,
+            row?.StatusEmailCompletionMode ?? scheduler.StatusEmailCompletionMode,
+            row?.PdfDownloadMailCompletionMode ?? scheduler.PdfDownloadMailCompletionMode);
     }
 
     public async Task UpdateAsync(
@@ -124,6 +141,10 @@ public sealed class MailSettingsService(
         string? pdfDownloadMailRecipient,
         string? pdfDownloadMailSubject,
         string? pdfDownloadMailTimeUtc,
+        IReadOnlyList<string>? selectedStatusEmailRecipients,
+        IReadOnlyList<string>? selectedPdfDownloadMailRecipients,
+        MailCompletionMode? statusEmailCompletionMode,
+        MailCompletionMode? pdfDownloadMailCompletionMode,
         CancellationToken cancellationToken)
     {
         if (!DownloadBatchSchedule.TryNormalizeTimeUtc(batchScheduleTimeUtc, out var timeUtc, out var timeError))
@@ -158,7 +179,13 @@ public sealed class MailSettingsService(
         }
 
         row.StatusEmailEnabled = statusEmailEnabled;
-        row.StatusEmailRecipient = statusEmailRecipient?.Trim();
+        if (statusEmailRecipient is not null)
+        {
+            row.StatusEmailRecipient = MailRecipientRules.Normalize(statusEmailRecipient);
+            row.StatusEmailSelectedRecipients = MailRecipientRules.SerializeSelected(
+                row.StatusEmailRecipient,
+                selectedStatusEmailRecipients);
+        }
         row.MailAutomationEnabled = mailAutomationEnabled;
         row.AdminRecipientEmail = adminRecipientEmail?.Trim();
         row.BatchScheduleTimeUtc = timeUtc;
@@ -171,7 +198,20 @@ public sealed class MailSettingsService(
 
         if (pdfDownloadMailRecipient is not null)
         {
-            row.PdfDownloadMailRecipient = pdfDownloadMailRecipient.Trim();
+            row.PdfDownloadMailRecipient = MailRecipientRules.Normalize(pdfDownloadMailRecipient);
+            row.PdfDownloadMailSelectedRecipients = MailRecipientRules.SerializeSelected(
+                row.PdfDownloadMailRecipient,
+                selectedPdfDownloadMailRecipients);
+        }
+
+        if (statusEmailCompletionMode is MailCompletionMode selectedStatusMode)
+        {
+            row.StatusEmailCompletionMode = selectedStatusMode;
+        }
+
+        if (pdfDownloadMailCompletionMode is MailCompletionMode selectedPdfMode)
+        {
+            row.PdfDownloadMailCompletionMode = selectedPdfMode;
         }
 
         if (pdfDownloadMailSubject is not null)
@@ -242,6 +282,8 @@ public sealed class MailSettingsService(
                 || current.Message.Contains("BatchScheduleTimeUtc", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("BatchRecurrence", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("PdfDownloadMail", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("SelectedRecipients", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("CompletionMode", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("Invalid column name", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

@@ -92,6 +92,47 @@ public static class DownloadMonitorBatchOutcomeHelper
         return sourceIds.Count > 0;
     }
 
+    public static async Task<bool> IsBatchReadyForConfiguredMailAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        MailCompletionMode completionMode,
+        CancellationToken cancellationToken)
+    {
+        if (completionMode == MailCompletionMode.AllSourcesSettled)
+        {
+            return await IsBatchReadyForStatusEmailAsync(
+                    db,
+                    sourceIds,
+                    batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (await HasPendingAutoRecoveryForBatchAsync(
+                db,
+                sourceIds,
+                batchStartedAt,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        foreach (var sourceId in sourceIds)
+        {
+            if (!await IsSourceSuccessfulAsync(
+                    db,
+                    sourceId,
+                    batchStartedAt,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return sourceIds.Count > 0;
+    }
+
     /// <summary>
     /// True when every source has finished its batch download attempt (success, failure, or entered auto-recovery).
     /// Does not wait for auto-recovery to complete.

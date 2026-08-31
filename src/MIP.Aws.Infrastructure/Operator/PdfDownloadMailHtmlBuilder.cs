@@ -9,7 +9,8 @@ public sealed record PdfDownloadMailItem(
     DateOnly EditionDate,
     long SizeBytes,
     string ViewUrl,
-    string DownloadUrl);
+    string DownloadUrl,
+    bool IsAvailable = true);
 
 public static class PdfDownloadMailHtmlBuilder
 {
@@ -24,7 +25,11 @@ public static class PdfDownloadMailHtmlBuilder
         var editionDate = items.Count == 0
             ? string.Empty
             : items[0].EditionDate.ToString("dd MMMM yyyy", CultureInfo.InvariantCulture);
-        var editionCount = items.Count.ToString(CultureInfo.InvariantCulture);
+        var availableCount = items.Count(item => item.IsAvailable);
+        var unavailableCount = items.Count - availableCount;
+        var editionSummary = unavailableCount == 0
+            ? $"{availableCount} monitored editions were downloaded successfully"
+            : $"{availableCount} monitored editions are available and {unavailableCount} are marked Not Available";
 
         return $$"""
             <!doctype html>
@@ -52,7 +57,7 @@ public static class PdfDownloadMailHtmlBuilder
                                 </table>
                               </td>
                               <td align="right" valign="middle" style="padding:22px 24px;">
-                                <a href="{{Encode(downloadAllUrl)}}" style="display:inline-block;background:#e31e4d;color:#fff;text-decoration:none;border-radius:4px;padding:12px 16px;font-size:12px;font-weight:700;letter-spacing:.3px;">DOWNLOAD ALL &nbsp;&#x2192;</a>
+                                {{DownloadAllButton(downloadAllUrl)}}
                               </td>
                             </tr>
                           </table>
@@ -62,7 +67,8 @@ public static class PdfDownloadMailHtmlBuilder
                         <td style="padding:30px 32px 18px;">
                           <div style="color:#e31e4d;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;">Daily media briefing</div>
                           <div style="padding-top:7px;color:#102a43;font-size:25px;line-height:31px;font-weight:700;">Your newspaper editions are ready</div>
-                          <div style="padding-top:8px;color:#657687;font-size:13px;line-height:20px;">{{editionCount}} monitored editions were downloaded successfully for {{Encode(editionDate)}}.</div>
+                          <div style="padding-top:8px;color:#657687;font-size:13px;line-height:20px;">{{Encode(editionSummary)}}
+                            for {{Encode(editionDate)}}.</div>
                         </td>
                       </tr>
                       <tr>
@@ -71,7 +77,7 @@ public static class PdfDownloadMailHtmlBuilder
                             <tr>
                               <td style="padding:12px 14px;color:#6b4a54;font-size:11px;line-height:17px;">
                                 <strong style="color:#e31e4d;">SECURE ACCESS</strong><br>
-                                Each link opens without a login and expires automatically after 24 hours.
+                                Available links open without a login and expire automatically after 24 hours.
                               </td>
                             </tr>
                           </table>
@@ -99,7 +105,8 @@ public static class PdfDownloadMailHtmlBuilder
     }
 
     private static string BuildRow(PdfDownloadMailItem item) =>
-        $$"""
+        item.IsAvailable
+            ? $$"""
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;border:1px solid #dce3ea;background:#fff;">
                     <tr>
                       <td width="5" style="width:5px;background:#e31e4d;font-size:1px;line-height:1px;">&nbsp;</td>
@@ -114,7 +121,24 @@ public static class PdfDownloadMailHtmlBuilder
                       </td>
                     </tr>
                   </table>
+            """
+            : $$"""
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;border:1px solid #dce3ea;background:#fff;">
+                    <tr>
+                      <td width="5" style="width:5px;background:#9aa8b5;font-size:1px;line-height:1px;">&nbsp;</td>
+                      <td style="padding:16px 14px;">
+                        <div style="color:#718293;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">{{Encode(item.SourceName)}}</div>
+                        <div style="padding-top:5px;color:#526273;font-size:15px;line-height:20px;font-weight:700;">Not Available</div>
+                        <div style="padding-top:6px;color:#718293;font-size:11px;line-height:16px;">No PDF was stored for this source on the edition date.</div>
+                      </td>
+                    </tr>
+                  </table>
             """;
+
+    private static string DownloadAllButton(string? downloadAllUrl) =>
+        string.IsNullOrWhiteSpace(downloadAllUrl)
+            ? string.Empty
+            : $"<a href=\"{Encode(downloadAllUrl)}\" style=\"display:inline-block;background:#e31e4d;color:#fff;text-decoration:none;border-radius:4px;padding:12px 16px;font-size:12px;font-weight:700;letter-spacing:.3px;\">DOWNLOAD ALL &nbsp;&#x2192;</a>";
 
     private static string Encode(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
 

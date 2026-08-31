@@ -21,6 +21,7 @@ namespace MIP.Aws.Infrastructure.Jobs;
 public sealed class DownloadMonitorScheduledJobs(
     IServiceScopeFactory scopeFactory,
     IOptions<PdfEditionSchedulerOptions> schedulerOptions,
+    IMailSettingsService mailSettings,
     ILogger<DownloadMonitorScheduledJobs> logger)
 {
     [Queue(HangfireQueueOptions.Names.Critical)]
@@ -84,6 +85,7 @@ public sealed class DownloadMonitorScheduledJobs(
         CancellationToken cancellationToken)
     {
         var opt = schedulerOptions.Value;
+        var effectiveMailSettings = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
         var waitTimeout = DownloadMonitorBatchTiming.ResolveOrchestratorWaitTimeout(opt, sources.Count);
         var sourceIds = sources.Select(s => s.Id).ToList();
         var downloadsComplete = await DownloadMonitorBatchOutcomeHelper.WaitForBatchDownloadPhaseCompleteAsync(
@@ -114,19 +116,20 @@ public sealed class DownloadMonitorScheduledJobs(
             successCount,
             downloadsComplete);
 
-        var batchReady = downloadsComplete
-            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForInitialStatusEmailAsync(
+        var statusBatchReady = downloadsComplete
+            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
                     db,
                     sourceIds,
                     batchStartedAt,
+                    effectiveMailSettings.StatusEmailCompletionMode,
                     cancellationToken)
                 .ConfigureAwait(false);
 
-        if (opt.StatusEmailEnabled && batchReady)
+        if (effectiveMailSettings.StatusEmailEnabled && statusBatchReady)
         {
             await SendInitialBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
         }
-        else if (opt.StatusEmailEnabled)
+        else if (effectiveMailSettings.StatusEmailEnabled)
         {
             logger.LogWarning(
                 "Download monitor batch started at {BatchStartedAt:u} timed out before all downloads finished; deferring initial status email.",
@@ -137,7 +140,15 @@ public sealed class DownloadMonitorScheduledJobs(
                 DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
         }
 
-        if (batchReady)
+        var pdfBatchReady = downloadsComplete
+            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
+                    db,
+                    sourceIds,
+                    batchStartedAt,
+                    effectiveMailSettings.PdfDownloadMailCompletionMode,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        if (pdfBatchReady)
         {
             DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
         }
@@ -288,10 +299,13 @@ public sealed class DownloadMonitorScheduledJobs(
         if (sources.Count > 0)
         {
             var sourceIds = sources.Select(s => s.Id).ToList();
-            if (!await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForInitialStatusEmailAsync(
+            var effectiveMailSettings = await mailSettings.GetEffectiveSchedulerAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
                     db,
                     sourceIds,
                     batchStartedAt,
+                    effectiveMailSettings.StatusEmailCompletionMode,
                     CancellationToken.None)
                 .ConfigureAwait(false))
             {
@@ -417,11 +431,14 @@ public sealed class DownloadMonitorScheduledJobs(
                 CancellationToken.None)
             .ConfigureAwait(false);
 
+        var effectiveMailSettings = await mailSettings.GetEffectiveSchedulerAsync(CancellationToken.None)
+            .ConfigureAwait(false);
         if (downloadsComplete
-            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForInitialStatusEmailAsync(
+            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
                     db,
                     sourceIds,
                     batchStartedAt,
+                    effectiveMailSettings.StatusEmailCompletionMode,
                     CancellationToken.None)
                 .ConfigureAwait(false))
         {

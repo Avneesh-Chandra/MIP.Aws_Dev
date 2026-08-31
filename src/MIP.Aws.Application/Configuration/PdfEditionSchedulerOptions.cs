@@ -1,3 +1,5 @@
+using MIP.Aws.Domain.Enums;
+
 namespace MIP.Aws.Application.Configuration;
 
 /// <summary>Daily download-monitor schedule, staggered per-source downloads, and status email settings.</summary>
@@ -32,6 +34,9 @@ public sealed class PdfEditionSchedulerOptions
     /// <summary>Recipient for the daily download-monitor status email.</summary>
     public string StatusEmailRecipient { get; set; } = "Avneesh.c@almoayyedcomputers.com";
 
+    /// <summary>Whether status mail requires every source to succeed or only to settle.</summary>
+    public MailCompletionMode StatusEmailCompletionMode { get; set; } = MailCompletionMode.AllSourcesSettled;
+
     /// <summary>Legacy local schedule (unused when <see cref="FirstSourceScheduleTimeUtc"/> is set).</summary>
     public string ScheduleTime { get; set; } = "07:30";
 
@@ -52,6 +57,9 @@ public sealed class PdfEditionSchedulerOptions
 
     /// <summary>Recipients for the separate PDF Download mail.</summary>
     public string PdfDownloadMailRecipient { get; set; } = string.Empty;
+
+    /// <summary>Whether PDF Download mail requires every source to succeed or only to settle.</summary>
+    public MailCompletionMode PdfDownloadMailCompletionMode { get; set; } = MailCompletionMode.AllSourcesSuccessful;
 
     /// <summary>Subject for the separate PDF Download mail.</summary>
     public string PdfDownloadMailSubject { get; set; } = "GFH Media Intelligence | Daily Newspaper Editions | {date}";

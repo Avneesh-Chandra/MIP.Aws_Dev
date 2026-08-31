@@ -31,4 +31,26 @@ public sealed class PdfDownloadMailHtmlBuilderTests
         Assert.Contains("SECURE ACCESS", html);
         Assert.Contains("Your newspaper editions are ready", html);
     }
+
+    [Fact]
+    public void Build_renders_unavailable_source_without_download_all_link()
+    {
+        var html = PdfDownloadMailHtmlBuilder.Build(
+            [
+                new PdfDownloadMailItem(
+                    "Al-Ayam",
+                    "Not Available",
+                    new DateOnly(2026, 8, 27),
+                    0,
+                    string.Empty,
+                    string.Empty,
+                    IsAvailable: false)
+            ],
+            string.Empty,
+            string.Empty);
+
+        Assert.Contains("Not Available", html);
+        Assert.Contains("0 monitored editions are available and 1 are marked Not Available", html);
+        Assert.DoesNotContain("DOWNLOAD ALL", html);
+    }
 }

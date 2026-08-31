@@ -1849,12 +1849,20 @@ namespace MIP.Aws.Persistence.Migrations
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PdfDownloadMailCompletionMode")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<bool?>("PdfDownloadMailEnabled")
                         .HasColumnType("bit");
 
                     b.Property<string>("PdfDownloadMailRecipient")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("PdfDownloadMailSelectedRecipients")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<string>("PdfDownloadMailSubject")
                         .HasMaxLength(256)
@@ -1874,12 +1882,20 @@ namespace MIP.Aws.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("StatusEmailCompletionMode")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<bool?>("StatusEmailEnabled")
                         .HasColumnType("bit");
 
                     b.Property<string>("StatusEmailRecipient")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("StatusEmailSelectedRecipients")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<string>("SubjectPrefix")
                         .IsRequired()

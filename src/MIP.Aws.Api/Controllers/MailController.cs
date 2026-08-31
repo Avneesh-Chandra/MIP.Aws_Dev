@@ -1,5 +1,6 @@
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.Reports;
+using MIP.Aws.Domain.Enums;
 using MIP.Aws.Domain.Security;
 using MIP.Aws.Shared.Responses;
 using MediatR;
@@ -61,7 +62,11 @@ public sealed class MailController(IMediator mediator) : ControllerBase
             body.PdfDownloadMailEnabled,
             body.PdfDownloadMailRecipient,
             body.PdfDownloadMailSubject,
-            body.PdfDownloadMailTimeUtc), cancellationToken).ConfigureAwait(false);
+            body.PdfDownloadMailTimeUtc,
+            body.SelectedStatusEmailRecipients,
+            body.SelectedPdfDownloadMailRecipients,
+            body.StatusEmailCompletionMode,
+            body.PdfDownloadMailCompletionMode), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse.Ok("Scheduler mail settings updated"));
     }
 
@@ -137,5 +142,9 @@ public sealed class MailController(IMediator mediator) : ControllerBase
         bool? PdfDownloadMailEnabled = null,
         string? PdfDownloadMailRecipient = null,
         string? PdfDownloadMailSubject = null,
-        string? PdfDownloadMailTimeUtc = null);
+        string? PdfDownloadMailTimeUtc = null,
+        IReadOnlyList<string>? SelectedStatusEmailRecipients = null,
+        IReadOnlyList<string>? SelectedPdfDownloadMailRecipients = null,
+        MailCompletionMode? StatusEmailCompletionMode = null,
+        MailCompletionMode? PdfDownloadMailCompletionMode = null);
 }

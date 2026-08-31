@@ -6,6 +6,7 @@ using MIP.Aws.Application.Abstractions.Downloading;
 using MIP.Aws.Application.Abstractions.Intelligence;
 using MIP.Aws.Application.Abstractions.Jobs;
 using MIP.Aws.Application.Abstractions.News;
+using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Abstractions.Storage;
 using MIP.Aws.Application.Compliance;
 using MIP.Aws.Application.Configuration;
@@ -827,8 +828,10 @@ public sealed class PdfEditionDownloadService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var mailSettings = scope.ServiceProvider.GetRequiredService<IMailSettingsService>();
         await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueAfterManualUploadAsync(
                 db,
+                mailSettings,
                 logger,
                 cancellationToken)
             .ConfigureAwait(false);

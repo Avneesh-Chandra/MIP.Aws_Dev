@@ -62,9 +62,36 @@
                 <MudDivider Class="my-3" />
                 <MudText Typo="Typo.h6" Class="mb-3">Download monitor status email</MudText>
                 <MudSwitch T="bool" @bind-Value="_statusEmailEnabled" Label="Send daily status email" Color="Color.Primary" />
-                <MudTextField T="string" Label="Status email recipient" @bind-Value="_statusEmailRecipient"
+                <MudTextField T="string" Label="Status email recipient options" Value="_statusEmailRecipient"
+                              ValueChanged="OnStatusRecipientTextChanged"
                               Variant="Variant.Outlined" Class="mt-2"
-                              HelperText="Semicolon-separated recipients for download monitor status email" />
+                              HelperText="Add addresses separated by semicolons; choose which addresses receive this mail below." />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudText Typo="Typo.subtitle2">Send to</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectAllStatusRecipients">Select all</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="DeselectAllStatusRecipients">Deselect all</MudButton>
+                </MudStack>
+                @foreach (var recipient in StatusRecipientOptions)
+                {
+                    <MudCheckBox T="bool"
+                                 Value="_selectedStatusRecipients.Contains(recipient)"
+                                 ValueChanged="@(selected => ToggleStatusRecipient(recipient, selected))"
+                                 Label="@recipient"
+                                 Dense="true" />
+                }
+                @if (_statusEmailEnabled && _selectedStatusRecipients.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">Select at least one status email recipient.</MudText>
+                }
+                <MudSelect T="MailCompletionMode" Label="Send status email when" @bind-Value="_statusEmailCompletionMode"
+                           Variant="Variant.Outlined" Class="mt-2">
+                    <MudSelectItem T="MailCompletionMode" Value="@MailCompletionMode.AllSourcesSuccessful">
+                        All source PDFs download successfully
+                    </MudSelectItem>
+                    <MudSelectItem T="MailCompletionMode" Value="@MailCompletionMode.AllSourcesSettled">
+                        Batch settles; include missing PDFs as Not Available
+                    </MudSelectItem>
+                </MudSelect>
                 <MudTextField T="string" Label="Admin intervention recipient" @bind-Value="_adminRecipientEmail"
                               Variant="Variant.Outlined" Class="mt-2"
                               HelperText="Inform Admin mailto links in status emails open a draft to this address (e.g. admin_mip@gfh.com)" />
@@ -75,13 +102,40 @@
                 <MudDivider Class="my-4" />
                 <MudText Typo="Typo.h6" Class="mb-3">PDF Download mail</MudText>
                 <MudSwitch T="bool" @bind-Value="_pdfDownloadMailEnabled"
-                           Label="Send after every fully successful batch" Color="Color.Primary" />
+                           Label="Enable PDF Download mail" Color="Color.Primary" />
                 <MudTextField T="string" Label="Send time (UTC)" @bind-Value="_pdfDownloadMailTimeUtc"
                               Variant="Variant.Outlined" Class="mt-2"
-                              HelperText="24-hour UTC, e.g. 06:00. The mail is sent only when the final batch has every PDF." />
-                <MudTextField T="string" Label="PDF mail recipients" @bind-Value="_pdfDownloadMailRecipient"
+                              HelperText="24-hour UTC, e.g. 06:00." />
+                <MudTextField T="string" Label="PDF mail recipient options" Value="_pdfDownloadMailRecipient"
+                              ValueChanged="OnPdfRecipientTextChanged"
                               Variant="Variant.Outlined" Class="mt-2"
-                              HelperText="Semicolon-separated recipients" />
+                              HelperText="Add addresses separated by semicolons; choose which addresses receive this mail below." />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudText Typo="Typo.subtitle2">Send to</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectAllPdfRecipients">Select all</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="DeselectAllPdfRecipients">Deselect all</MudButton>
+                </MudStack>
+                @foreach (var recipient in PdfRecipientOptions)
+                {
+                    <MudCheckBox T="bool"
+                                 Value="_selectedPdfRecipients.Contains(recipient)"
+                                 ValueChanged="@(selected => TogglePdfRecipient(recipient, selected))"
+                                 Label="@recipient"
+                                 Dense="true" />
+                }
+                @if (_pdfDownloadMailEnabled && _selectedPdfRecipients.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">Select at least one PDF mail recipient.</MudText>
+                }
+                <MudSelect T="MailCompletionMode" Label="Send PDF Download mail when" @bind-Value="_pdfDownloadMailCompletionMode"
+                           Variant="Variant.Outlined" Class="mt-2">
+                    <MudSelectItem T="MailCompletionMode" Value="@MailCompletionMode.AllSourcesSuccessful">
+                        All source PDFs download successfully
+                    </MudSelectItem>
+                    <MudSelectItem T="MailCompletionMode" Value="@MailCompletionMode.AllSourcesSettled">
+                        Batch settles; include missing PDFs as Not Available
+                    </MudSelectItem>
+                </MudSelect>
                 <MudTextField T="string" Label="PDF mail subject" @bind-Value="_pdfDownloadMailSubject"
                               Variant="Variant.Outlined" Class="mt-2" />
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
@@ -212,6 +266,8 @@
     private string _subjectPrefix = "[GFH-MIP-TEST]";
     private bool _statusEmailEnabled = true;
     private string _statusEmailRecipient = "Avneesh.c@almoayyedcomputers.com;cavneesh18@gmail.com";
+    private readonly HashSet<string> _selectedStatusRecipients = new(StringComparer.OrdinalIgnoreCase);
+    private MailCompletionMode _statusEmailCompletionMode = MailCompletionMode.AllSourcesSettled;
     private bool _mailAutomationEnabled = true;
     private string _adminRecipientEmail = "admin_mip@gfh.com";
     private string _statusEmailTimeUtc = "05:00";
@@ -221,12 +277,17 @@
     private readonly HashSet<int> _batchDays = [];
     private bool _pdfDownloadMailEnabled;
     private string _pdfDownloadMailRecipient = string.Empty;
+    private readonly HashSet<string> _selectedPdfRecipients = new(StringComparer.OrdinalIgnoreCase);
+    private MailCompletionMode _pdfDownloadMailCompletionMode = MailCompletionMode.AllSourcesSuccessful;
     private string _pdfDownloadMailSubject = "GFH Media Intelligence | Daily Newspaper Editions | {date}";
     private string _pdfDownloadMailTimeUtc = "06:00";
     private TestEmailResponseDto? _lastTest;
     private IReadOnlyList<EmailLogListItemDto> _logs = [];
     private DateTime? _logDate = DateTime.Today;
     private MailActiveProvider _activeProvider = MailActiveProvider.MicrosoftGraph;
+
+    private IReadOnlyList<string> StatusRecipientOptions => MailRecipientRules.Parse(_statusEmailRecipient);
+    private IReadOnlyList<string> PdfRecipientOptions => MailRecipientRules.Parse(_pdfDownloadMailRecipient);
 
     private string _batchLocalTime => MipDisplayTimeZone.FormatUtcTimeOfDay(_batchScheduleTimeUtc);
 
@@ -283,6 +344,12 @@
             _subjectPrefix = settings.SubjectPrefix ?? _subjectPrefix;
             _statusEmailEnabled = settings.StatusEmailEnabled;
             _statusEmailRecipient = settings.StatusEmailRecipient;
+            _selectedStatusRecipients.Clear();
+            foreach (var recipient in settings.SelectedStatusEmailRecipients)
+            {
+                _selectedStatusRecipients.Add(recipient);
+            }
+            _statusEmailCompletionMode = settings.StatusEmailCompletionMode;
             _mailAutomationEnabled = settings.MailAutomationEnabled;
             _adminRecipientEmail = settings.AdminRecipientEmail;
             _statusEmailTimeUtc = settings.StatusEmailTimeUtc;
@@ -296,6 +363,12 @@
             }
             _pdfDownloadMailEnabled = settings.PdfDownloadMailEnabled;
             _pdfDownloadMailRecipient = settings.PdfDownloadMailRecipient;
+            _selectedPdfRecipients.Clear();
+            foreach (var recipient in settings.SelectedPdfDownloadMailRecipients)
+            {
+                _selectedPdfRecipients.Add(recipient);
+            }
+            _pdfDownloadMailCompletionMode = settings.PdfDownloadMailCompletionMode;
             _pdfDownloadMailSubject = settings.PdfDownloadMailSubject;
             _pdfDownloadMailTimeUtc = settings.PdfDownloadMailTimeUtc;
             await ReloadLogsAsync();
@@ -334,18 +407,34 @@
         _busy = true;
         try
         {
+            if (_statusEmailEnabled && _selectedStatusRecipients.Count == 0)
+            {
+                Snackbar.Add("Select at least one status email recipient.", Severity.Warning);
+                return;
+            }
+
+            if (_pdfDownloadMailEnabled && _selectedPdfRecipients.Count == 0)
+            {
+                Snackbar.Add("Select at least one PDF mail recipient.", Severity.Warning);
+                return;
+            }
+
             await Mediator.Send(new UpdateMailSchedulerSettingsCommand(
-                _statusEmailEnabled,
-                _statusEmailRecipient,
-                _mailAutomationEnabled,
-                _adminRecipientEmail,
-                _batchScheduleTimeUtc,
-                _batchRecurrence,
-                string.Join(',', _batchDays),
-                _pdfDownloadMailEnabled,
-                _pdfDownloadMailRecipient,
-                _pdfDownloadMailSubject,
-                _pdfDownloadMailTimeUtc));
+                StatusEmailEnabled: _statusEmailEnabled,
+                StatusEmailRecipient: _statusEmailRecipient,
+                MailAutomationEnabled: _mailAutomationEnabled,
+                AdminRecipientEmail: _adminRecipientEmail,
+                BatchScheduleTimeUtc: _batchScheduleTimeUtc,
+                BatchRecurrence: _batchRecurrence,
+                BatchRecurrenceDays: string.Join(',', _batchDays),
+                PdfDownloadMailEnabled: _pdfDownloadMailEnabled,
+                PdfDownloadMailRecipient: _pdfDownloadMailRecipient,
+                PdfDownloadMailSubject: _pdfDownloadMailSubject,
+                PdfDownloadMailTimeUtc: _pdfDownloadMailTimeUtc,
+                SelectedStatusEmailRecipients: _selectedStatusRecipients.ToList(),
+                SelectedPdfDownloadMailRecipients: _selectedPdfRecipients.ToList(),
+                StatusEmailCompletionMode: _statusEmailCompletionMode,
+                PdfDownloadMailCompletionMode: _pdfDownloadMailCompletionMode));
             Snackbar.Add("Scheduler settings saved. The download batch Hangfire job was updated.", Severity.Success);
             await ReloadAsync();
         }
@@ -371,13 +460,72 @@
         }
     }
 
+    private void OnStatusRecipientTextChanged(string value)
+    {
+        _statusEmailRecipient = value;
+        SyncSelectedRecipients(StatusRecipientOptions, _selectedStatusRecipients);
+    }
+
+    private void OnPdfRecipientTextChanged(string value)
+    {
+        _pdfDownloadMailRecipient = value;
+        SyncSelectedRecipients(PdfRecipientOptions, _selectedPdfRecipients);
+    }
+
+    private void SelectAllStatusRecipients() =>
+        SelectAllRecipients(StatusRecipientOptions, _selectedStatusRecipients);
+
+    private void DeselectAllStatusRecipients() => _selectedStatusRecipients.Clear();
+
+    private void SelectAllPdfRecipients() =>
+        SelectAllRecipients(PdfRecipientOptions, _selectedPdfRecipients);
+
+    private void DeselectAllPdfRecipients() => _selectedPdfRecipients.Clear();
+
+    private void ToggleStatusRecipient(string recipient, bool selected) =>
+        ToggleRecipient(recipient, selected, _selectedStatusRecipients);
+
+    private void TogglePdfRecipient(string recipient, bool selected) =>
+        ToggleRecipient(recipient, selected, _selectedPdfRecipients);
+
+    private static void SyncSelectedRecipients(
+        IReadOnlyList<string> options,
+        HashSet<string> selected)
+    {
+        selected.RemoveWhere(recipient => !options.Contains(recipient, StringComparer.OrdinalIgnoreCase));
+        foreach (var option in options)
+        {
+            selected.Add(option);
+        }
+    }
+
+    private static void SelectAllRecipients(
+        IReadOnlyList<string> options,
+        HashSet<string> selected)
+    {
+        selected.Clear();
+        selected.UnionWith(options);
+    }
+
+    private static void ToggleRecipient(string recipient, bool selected, HashSet<string> recipients)
+    {
+        if (selected)
+        {
+            recipients.Add(recipient);
+        }
+        else
+        {
+            recipients.Remove(recipient);
+        }
+    }
+
     private async Task SendTestEmailAsync()
     {
         _busy = true;
         try
         {
             _lastTest = await Mediator.Send(new SendTestReportEmailCommand(
-                _statusEmailRecipient,
+                string.Join(';', _selectedStatusRecipients),
                 "GFH MIP AWS — test email",
                 "<p>This is a test email from <strong>GFH MIP AWS</strong>.</p>"));
             Snackbar.Add(_lastTest.Success ? "Test email sent." : "Test email failed.", _lastTest.Success ? Severity.Success : Severity.Error);
@@ -396,7 +544,7 @@
         {
             var sent = await Mediator.Send(new SendDownloadMonitorStatusEmailCommand(
                 null,
-                _statusEmailRecipient,
+                string.Join(';', _selectedStatusRecipients),
                 BypassThrottle: true));
             Snackbar.Add(
                 sent ? "Status email sent." : "Status email was not sent (check settings and logs).",
@@ -418,7 +566,9 @@
             Snackbar.Add(
                 sent
                     ? "PDF Download mail sent."
-                    : "PDF Download mail was not sent. Confirm today's batch has succeeded for every source.",
+                    : _pdfDownloadMailCompletionMode == MailCompletionMode.AllSourcesSuccessful
+                        ? "PDF Download mail was not sent. Confirm today's batch has succeeded for every source."
+                        : "PDF Download mail was not sent. Confirm today's batch has settled for every source.",
                 sent ? Severity.Success : Severity.Warning);
             await ReloadAsync();
         }

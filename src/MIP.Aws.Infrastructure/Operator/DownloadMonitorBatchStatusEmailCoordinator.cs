@@ -1,5 +1,6 @@
 using Hangfire;
 using MIP.Aws.Application.Abstractions;
+using MIP.Aws.Application.Abstractions.Reporting;
 using MIP.Aws.Application.Configuration;
 using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Domain.Enums;
@@ -314,6 +315,7 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
 
     public static async Task TryEnqueueAfterManualUploadAsync(
         IApplicationDbContext db,
+        IMailSettingsService mailSettings,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -323,7 +325,10 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         var batchStartedAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
             .Where(batch => !batch.IsDeleted && batch.StartedAt >= dayStart && batch.StartedAt < dayEnd)
             .OrderByDescending(batch => batch.StartedAt)
-            .Select(batch => (DateTimeOffset?)batch.StartedAt)
+            .Select(batch => new
+            {
+                batch.StartedAt
+            })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -334,53 +339,61 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         }
 
         var sourceIds = await LoadMonitoredSourceIdsAsync(db, cancellationToken).ConfigureAwait(false);
-        if (sourceIds.Count == 0
-            || await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
-                db,
-                sourceIds,
-                batchStartedAt.Value,
-                cancellationToken).ConfigureAwait(false))
+        if (sourceIds.Count == 0)
         {
             return;
         }
 
-        foreach (var sourceId in sourceIds)
+        var effective = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
+        var initialStatusSent = await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+                db,
+                BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.StartedAt.UtcDateTime)),
+                batchStartedAt.StartedAt,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var statusReady = effective.StatusEmailEnabled
+            && initialStatusSent
+            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
+                db,
+                sourceIds,
+                batchStartedAt.StartedAt,
+                effective.StatusEmailCompletionMode,
+                cancellationToken).ConfigureAwait(false);
+        var pdfReady = effective.PdfDownloadMailEnabled
+            && await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
+                db,
+                sourceIds,
+                batchStartedAt.StartedAt,
+                effective.PdfDownloadMailCompletionMode,
+                cancellationToken).ConfigureAwait(false);
+
+        if (statusReady)
         {
-            if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
-                    db,
-                    sourceId,
-                    batchStartedAt.Value,
-                    cancellationToken).ConfigureAwait(false))
+            if (await TryClaimManualCompletionStatusEmailAsync(db, batchStartedAt.StartedAt, cancellationToken)
+                    .ConfigureAwait(false))
             {
-                logger.LogInformation(
-                    "Manual PDF upload completed, but source {SourceId} is still not successful for batch {BatchStartedAt:u}.",
-                    sourceId,
-                    batchStartedAt.Value);
-                return;
+                try
+                {
+                    BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                        HangfireQueueOptions.Names.Email,
+                        job => job.SendManualCompletionStatusEmailAsync(batchStartedAt.StartedAt));
+                    logger.LogInformation(
+                        "Enqueued manual-upload completion status email for batch {BatchStartedAt:u}.",
+                        batchStartedAt.StartedAt);
+                }
+                catch
+                {
+                    await ReleaseManualCompletionStatusEmailClaimAsync(db, batchStartedAt.StartedAt, cancellationToken)
+                        .ConfigureAwait(false);
+                    throw;
+                }
             }
         }
 
-        if (await TryClaimManualCompletionStatusEmailAsync(db, batchStartedAt.Value, cancellationToken)
-                .ConfigureAwait(false))
+        if (pdfReady)
         {
-            try
-            {
-                BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
-                    HangfireQueueOptions.Names.Email,
-                    job => job.SendManualCompletionStatusEmailAsync(batchStartedAt.Value));
-                logger.LogInformation(
-                    "Enqueued manual-upload completion status email for batch {BatchStartedAt:u}.",
-                    batchStartedAt.Value);
-            }
-            catch
-            {
-                await ReleaseManualCompletionStatusEmailClaimAsync(db, batchStartedAt.Value, cancellationToken)
-                    .ConfigureAwait(false);
-                throw;
-            }
+            EnqueuePdfDownloadMail(logger);
         }
-
-        EnqueuePdfDownloadMail(logger);
     }
 
     public static async Task<bool> TryClaimManualCompletionStatusEmailAsync(

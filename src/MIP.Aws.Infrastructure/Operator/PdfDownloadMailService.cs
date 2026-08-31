@@ -57,7 +57,7 @@ public sealed class PdfDownloadMailService(
             return false;
         }
 
-        var recipients = ParseRecipients(scheduler.PdfDownloadMailRecipient);
+        var recipients = scheduler.SelectedPdfDownloadMailRecipients;
         if (recipients.Count == 0)
         {
             logger.LogWarning("PDF Download mail skipped: no recipients are configured.");
@@ -78,33 +78,18 @@ public sealed class PdfDownloadMailService(
             return false;
         }
 
-        if (await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
+        if (!await DownloadMonitorBatchOutcomeHelper.IsBatchReadyForConfiguredMailAsync(
                 db,
                 sourceIds,
                 batchStartedAt,
+                scheduler.PdfDownloadMailCompletionMode,
                 cancellationToken)
             .ConfigureAwait(false))
         {
             logger.LogInformation(
-                "PDF Download mail deferred for {BatchStartedAt:u}: auto-recovery is still in progress.",
+                "PDF Download mail skipped for {BatchStartedAt:u}: the configured completion condition is not met.",
                 batchStartedAt);
             return false;
-        }
-
-        foreach (var sourceId in sourceIds)
-        {
-            if (!await DownloadMonitorBatchOutcomeHelper.IsSourceSuccessfulAsync(
-                    db,
-                    sourceId,
-                    batchStartedAt,
-                    cancellationToken).ConfigureAwait(false))
-            {
-                logger.LogInformation(
-                    "PDF Download mail skipped for {BatchStartedAt:u}: source {SourceId} is not successful.",
-                    batchStartedAt,
-                    sourceId);
-                return false;
-            }
         }
 
         // Keep file selection consistent with IsSourceSuccessfulAsync: a PDF downloaded today
@@ -201,13 +186,6 @@ public sealed class PdfDownloadMailService(
             .GroupBy(candidate => candidate.SourceId)
             .Select(group => group.First())
             .ToDictionary(candidate => candidate.SourceId);
-        if (selected.Count != sourceIds.Count)
-        {
-            logger.LogInformation(
-                "PDF Download mail skipped for {BatchStartedAt:u}: not every successful source has a stored PDF edition.",
-                batchStartedAt);
-            return false;
-        }
 
         var fileIds = selected.Values.Select(candidate => candidate.FileId).ToList();
         var storedFileIds = await db.DownloadedFiles.AsNoTracking()
@@ -215,10 +193,23 @@ public sealed class PdfDownloadMailService(
             .Select(file => file.Id)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (storedFileIds.Count != fileIds.Count)
+        if (storedFileIds.Count != fileIds.Count
+            && scheduler.PdfDownloadMailCompletionMode == MailCompletionMode.AllSourcesSuccessful)
         {
             logger.LogInformation(
                 "PDF Download mail skipped for {BatchStartedAt:u}: one or more PDF files are unavailable.",
+                batchStartedAt);
+            return false;
+        }
+        var storedFileIdSet = storedFileIds.ToHashSet();
+        selected = selected
+            .Where(pair => storedFileIdSet.Contains(pair.Value.FileId))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        if (scheduler.PdfDownloadMailCompletionMode == MailCompletionMode.AllSourcesSuccessful
+            && selected.Count != sourceIds.Count)
+        {
+            logger.LogInformation(
+                "PDF Download mail skipped for {BatchStartedAt:u}: not every successful source has a stored PDF edition.",
                 batchStartedAt);
             return false;
         }
@@ -253,7 +244,6 @@ public sealed class PdfDownloadMailService(
                 candidate.FileId,
                 candidate.FileName))
             .ToList();
-        var allToken = linkService.CreateToken(tokenFiles, expiresAt);
         var items = new List<PdfDownloadMailItem>(tokenFiles.Count);
         foreach (var file in tokenFiles)
         {
@@ -270,7 +260,24 @@ public sealed class PdfDownloadMailService(
                 downloadUrl));
         }
 
-        var allUrl = OperatorLatestPdfLinks.BuildPublicPdfDownloadUrl(portalBase, allToken, inline: false);
+        foreach (var sourceId in sourceIds.Where(sourceId => !selected.ContainsKey(sourceId)))
+        {
+            items.Add(new PdfDownloadMailItem(
+                sourceNames[sourceId],
+                "Not Available",
+                editionDate,
+                0,
+                string.Empty,
+                string.Empty,
+                IsAvailable: false));
+        }
+
+        var allUrl = tokenFiles.Count == 0
+            ? string.Empty
+            : OperatorLatestPdfLinks.BuildPublicPdfDownloadUrl(
+                portalBase,
+                linkService.CreateToken(tokenFiles, expiresAt),
+                inline: false);
         var logoUrl = $"{portalBase}/_content/MIP.Aws.Blazor/images/gfh-logo.svg";
         var html = PdfDownloadMailHtmlBuilder.Build(items, allUrl, logoUrl);
 
@@ -319,14 +326,6 @@ public sealed class PdfDownloadMailService(
             .Select(source => source.Id)
             .ToList();
     }
-
-    private static IReadOnlyList<string> ParseRecipients(string? value) =>
-        string.IsNullOrWhiteSpace(value)
-            ? []
-            : value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(recipient => !string.IsNullOrWhiteSpace(recipient))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
 
     private static bool IsScheduleDue(string timeUtc) =>
         TimeOnly.TryParse(timeUtc, out var configuredTime)

@@ -23,4 +23,10 @@ public interface IDownloadMonitorDailyStatusEmailService
     Task<bool> SendManualCompletionStatusEmailAsync(
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken);
+
+    Task<bool> SendManualStatusEmailAsync(
+        DateOnly? monitorDate,
+        IReadOnlyList<string>? recipientOverride,
+        bool bypassThrottle,
+        CancellationToken cancellationToken);
 }

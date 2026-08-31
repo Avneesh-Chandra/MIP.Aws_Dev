@@ -1,4 +1,5 @@
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Domain.Enums;
 
 namespace MIP.Aws.Application.Abstractions.Reporting;
 
@@ -22,7 +23,11 @@ public sealed record EffectiveSchedulerMailSettings(
     bool PdfDownloadMailEnabled,
     string PdfDownloadMailRecipient,
     string PdfDownloadMailSubject,
-    string PdfDownloadMailTimeUtc);
+    string PdfDownloadMailTimeUtc,
+    IReadOnlyList<string> SelectedStatusEmailRecipients,
+    IReadOnlyList<string> SelectedPdfDownloadMailRecipients,
+    MailCompletionMode StatusEmailCompletionMode,
+    MailCompletionMode PdfDownloadMailCompletionMode);
 
 public interface IMailSettingsService
 {
@@ -49,5 +54,9 @@ public interface IMailSettingsService
         string? pdfDownloadMailRecipient,
         string? pdfDownloadMailSubject,
         string? pdfDownloadMailTimeUtc,
+        IReadOnlyList<string>? selectedStatusEmailRecipients,
+        IReadOnlyList<string>? selectedPdfDownloadMailRecipients,
+        MailCompletionMode? statusEmailCompletionMode,
+        MailCompletionMode? pdfDownloadMailCompletionMode,
         CancellationToken cancellationToken);
 }

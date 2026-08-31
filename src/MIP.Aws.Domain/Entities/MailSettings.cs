@@ -1,4 +1,5 @@
 using MIP.Aws.Domain.Common;
+using MIP.Aws.Domain.Enums;
 
 namespace MIP.Aws.Domain.Entities;
 
@@ -15,7 +16,13 @@ public sealed class MailSettings : AuditableEntity
 
     public string? StatusEmailRecipient { get; set; }
 
+    /// <summary>Selected recipients for status email; null preserves all configured recipients for legacy rows.</summary>
+    public string? StatusEmailSelectedRecipients { get; set; }
+
     public bool? StatusEmailEnabled { get; set; }
+
+    /// <summary>Whether status email waits for every source to succeed or only to settle.</summary>
+    public MailCompletionMode? StatusEmailCompletionMode { get; set; }
 
     public bool? MailAutomationEnabled { get; set; }
 
@@ -36,6 +43,12 @@ public sealed class MailSettings : AuditableEntity
 
     /// <summary>Recipients for the separate PDF Download mail.</summary>
     public string? PdfDownloadMailRecipient { get; set; }
+
+    /// <summary>Selected recipients for PDF Download mail; null preserves all configured recipients for legacy rows.</summary>
+    public string? PdfDownloadMailSelectedRecipients { get; set; }
+
+    /// <summary>Whether PDF Download mail requires every source to succeed or only to settle.</summary>
+    public MailCompletionMode? PdfDownloadMailCompletionMode { get; set; }
 
     /// <summary>Subject for the separate PDF Download mail.</summary>
     public string? PdfDownloadMailSubject { get; set; }
