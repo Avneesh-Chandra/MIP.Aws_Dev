@@ -43,13 +43,12 @@ public sealed class DownloadMonitorBatchEmailTests
     }
 
     [Fact]
-    public void Initial_and_recovery_follow_up_subjects_use_distinct_suffixes()
+    public void Initial_status_send_in_progress_claim_distinguishes_enqueue_from_active_send()
     {
-        var date = new DateOnly(2026, 6, 29);
-        var initial = $"GFH MIP AWS — Download Monitor status ({date:yyyy-MM-dd})";
-        var followUp = $"GFH MIP AWS — Download Monitor recovery update ({date:yyyy-MM-dd})";
-        Assert.NotEqual(initial, followUp);
-        Assert.Contains("recovery update", followUp, StringComparison.OrdinalIgnoreCase);
+        var batchStartedAt = new DateTimeOffset(2026, 9, 1, 13, 30, 0, TimeSpan.Zero);
+        var sendClaim = DateTimeOffset.UtcNow.AddSeconds(-30);
+        Assert.False(DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaim(sendClaim, batchStartedAt));
+        Assert.True(DownloadMonitorStatusEmailGuard.IsInitialStatusSendInProgressClaim(sendClaim, batchStartedAt));
     }
 
     [Fact]

@@ -157,32 +157,17 @@ public sealed class DownloadMonitorScheduledJobs(
                 .ConfigureAwait(false);
         if (effectiveMailSettings.PdfDownloadMailEnabled && pdfBatchReady)
         {
-            DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
+            DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger, batchStartedAt);
         }
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
-    [AutomaticRetry(Attempts = 2, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
-    public async Task SendDebouncedManualRecoveryStatusEmailAsync()
+    [AutomaticRetry(Attempts = 0, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public Task SendDebouncedManualRecoveryStatusEmailAsync()
     {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
-        var date = DateOnly.FromDateTime(DateTime.UtcNow);
-
-        if (await DownloadMonitorStatusEmailGuard.ShouldThrottleAdHocDailyStatusEmailAsync(
-                db,
-                date,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            logger.LogInformation(
-                "Skipped debounced manual-recovery status email for {Date}: a status email was sent recently.",
-                date);
-            return;
-        }
-
-        await email.SendDailyStatusEmailAsync(date, CancellationToken.None).ConfigureAwait(false);
+        logger.LogInformation(
+            "Skipped debounced manual-recovery status email; batch completion sends exactly one status email per batch.");
+        return Task.CompletedTask;
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
@@ -204,53 +189,23 @@ public sealed class DownloadMonitorScheduledJobs(
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
+    [DisableConcurrentExecution(timeoutInSeconds: 5 * 60)]
     [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
-    public async Task SendManualCompletionStatusEmailAsync(DateTimeOffset batchStartedAt)
+    public async Task SendPdfDownloadMailForBatchAsync(DateTimeOffset batchStartedAt)
     {
         using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+        var email = scope.ServiceProvider.GetRequiredService<IPdfDownloadMailService>();
+        await email.SendForBatchAsync(batchStartedAt, CancellationToken.None).ConfigureAwait(false);
+    }
 
-        try
-        {
-            var subject = DownloadMonitorBatchStatusEmailCoordinator.BuildManualCompletionSubject(
-                DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
-            if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
-                    db,
-                    subject,
-                    batchStartedAt,
-                    CancellationToken.None).ConfigureAwait(false))
-            {
-                await DownloadMonitorBatchStatusEmailCoordinator.MarkManualCompletionStatusEmailSentAsync(
-                        db,
-                        batchStartedAt,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                return;
-            }
-
-            if (await email.SendManualCompletionStatusEmailAsync(batchStartedAt, CancellationToken.None)
-                    .ConfigureAwait(false))
-            {
-                await DownloadMonitorBatchStatusEmailCoordinator.MarkManualCompletionStatusEmailSentAsync(
-                        db,
-                        batchStartedAt,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                return;
-            }
-
-            throw new InvalidOperationException("Manual PDF upload completion status email was not delivered.");
-        }
-        catch
-        {
-            await DownloadMonitorBatchStatusEmailCoordinator.ReleaseManualCompletionStatusEmailClaimAsync(
-                    db,
-                    batchStartedAt,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            throw;
-        }
+    [Queue(HangfireQueueOptions.Names.Email)]
+    [AutomaticRetry(Attempts = 0, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public Task SendManualCompletionStatusEmailAsync(DateTimeOffset batchStartedAt)
+    {
+        logger.LogInformation(
+            "Skipped manual-completion status email for batch {BatchStartedAt:u}; batch completion sends exactly one status email per batch.",
+            batchStartedAt);
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -298,14 +253,13 @@ public sealed class DownloadMonitorScheduledJobs(
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
 
         var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForBatchAsync(
                 db,
-                monitorDate,
+                batchStartedAt,
                 CancellationToken.None).ConfigureAwait(false))
         {
             logger.LogInformation(
-                "Download monitor initial status email already sent for {Date}; skipping batch {BatchStartedAt:u}.",
-                monitorDate,
+                "Download monitor initial status email already sent for batch {BatchStartedAt:u}; skipping.",
                 batchStartedAt);
             await DownloadMonitorBatchStatusEmailCoordinator.MarkInitialStatusEmailSentAsync(
                     db,
@@ -376,21 +330,15 @@ public sealed class DownloadMonitorScheduledJobs(
                         batchStartedAt,
                         CancellationToken.None)
                     .ConfigureAwait(false);
-                await DownloadMonitorBatchStatusEmailCoordinator.TryScheduleRecoveryFollowUpEmailAsync(
-                        db,
-                        batchStartedAt,
-                        logger,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
                 logger.LogInformation(
                     "Download monitor initial status email sent for batch started at {BatchStartedAt:u}.",
                     batchStartedAt);
             }
             else
             {
-                if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+                if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForBatchAsync(
                         db,
-                        monitorDate,
+                        batchStartedAt,
                         CancellationToken.None).ConfigureAwait(false))
                 {
                     await DownloadMonitorBatchStatusEmailCoordinator.MarkInitialStatusEmailSentAsync(
@@ -399,8 +347,7 @@ public sealed class DownloadMonitorScheduledJobs(
                             CancellationToken.None)
                         .ConfigureAwait(false);
                     logger.LogInformation(
-                        "Download monitor initial status email was already delivered for {Date}; treating batch {BatchStartedAt:u} as complete.",
-                        monitorDate,
+                        "Download monitor initial status email was already delivered for batch {BatchStartedAt:u}; treating as complete.",
                         batchStartedAt);
                     return;
                 }
@@ -443,21 +390,20 @@ public sealed class DownloadMonitorScheduledJobs(
             return;
         }
 
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
 
-        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForBatchAsync(
                 db,
-                monitorDate,
+                batchStartedAt,
                 CancellationToken.None).ConfigureAwait(false))
         {
             return;
         }
 
-        if (await DownloadMonitorStatusEmailGuard.HasActiveInitialStatusClaimForMonitorDateAsync(
+        if (await DownloadMonitorStatusEmailGuard.HasActiveInitialStatusClaimForBatchAsync(
                 db,
-                monitorDate,
+                batchStartedAt,
                 CancellationToken.None).ConfigureAwait(false)
             && !await DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaimOnBatchAsync(
                 db,
@@ -517,107 +463,13 @@ public sealed class DownloadMonitorScheduledJobs(
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
-    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
-    public async Task SendBatchRecoveryFollowUpStatusEmailAsync(DateTimeOffset batchStartedAt, int attempt)
+    [AutomaticRetry(Attempts = 0, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    public Task SendBatchRecoveryFollowUpStatusEmailAsync(DateTimeOffset batchStartedAt, int attempt)
     {
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
-
-        await DownloadMonitorStatusEmailGuard.ReleaseStaleRecoveryFollowUpClaimIfNeededAsync(
-                db,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false);
-
-        if (!await DownloadMonitorBatchStatusEmailCoordinator.ShouldSendRecoveryFollowUpEmailAsync(
-                db,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            return;
-        }
-
-        var sourceIds = (await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false))
-            .Select(s => s.Id)
-            .ToList();
-
-        if (await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
-                db,
-                sourceIds,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            if (attempt + 1 >= DownloadMonitorBatchTiming.MaxDeferredEmailAttempts)
-            {
-                logger.LogWarning(
-                    "Download monitor batch {BatchStartedAt:u} recovery follow-up attempt cap reached; continuing to wait.",
-                    batchStartedAt);
-            }
-
-            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, attempt + 1),
-                DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
-            return;
-        }
-
-        if (!await DownloadMonitorStatusEmailGuard.TryClaimRecoveryFollowUpEmailAsync(
-                db,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            logger.LogInformation(
-                "Download monitor recovery follow-up email already claimed for batch started at {BatchStartedAt:u}; scheduling retry.",
-                batchStartedAt);
-            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, attempt),
-                TimeSpan.FromMinutes(2));
-            return;
-        }
-
-        try
-        {
-            var sent = await email.SendRecoveryFollowUpEmailAsync(batchStartedAt, CancellationToken.None)
-                .ConfigureAwait(false);
-            if (sent)
-            {
-                await DownloadMonitorBatchStatusEmailCoordinator.MarkRecoveryFollowUpEmailSentAsync(
-                        db,
-                        batchStartedAt,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                logger.LogInformation(
-                    "Download monitor recovery follow-up email sent for batch started at {BatchStartedAt:u}.",
-                    batchStartedAt);
-            }
-            else
-            {
-                await DownloadMonitorStatusEmailGuard.ReleaseRecoveryFollowUpEmailClaimAsync(
-                        db,
-                        batchStartedAt,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                throw new InvalidOperationException("Download monitor recovery follow-up email was not delivered.");
-            }
-        }
-        catch (Exception ex)
-        {
-            await DownloadMonitorStatusEmailGuard.ReleaseRecoveryFollowUpEmailClaimAsync(
-                    db,
-                    batchStartedAt,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            logger.LogError(
-                ex,
-                "Download monitor recovery follow-up email failed for batch started at {BatchStartedAt:u}.",
-                batchStartedAt);
-            throw;
-        }
+        logger.LogInformation(
+            "Skipped recovery follow-up status email for batch {BatchStartedAt:u}; only one status email is sent per batch.",
+            batchStartedAt);
+        return Task.CompletedTask;
     }
 
     [Obsolete("Use SendInitialBatchStatusEmailAsync.")]

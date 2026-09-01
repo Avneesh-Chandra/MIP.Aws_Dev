@@ -197,23 +197,11 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         var portalBase = ResolvePortalBaseUrl(scheduler.AdminPortalUrl);
         var summary = await summaryService.BuildSummaryAsync(monitor, cancellationToken).ConfigureAwait(false);
 
-        var sourceIds = await LoadMonitoredSourceIdsAsync(cancellationToken).ConfigureAwait(false);
-        var pending = await DownloadMonitorBatchOutcomeHelper.GetPendingAutoRecoverySourcesForBatchAsync(
-                db,
-                sourceIds,
-                batchStartedAt,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        var pendingNotices = pending
-            .Select(p => $"{p.SourceName} auto-recovery is still in progress ({FormatRecoveryStatus(p.Status)}). A follow-up email will be sent when it finishes.")
-            .ToList();
-
         var html = DownloadMonitorStatusEmailHtmlBuilder.Build(
             monitor,
             portalBase,
             summary,
-            pendingNotices,
+            pendingRecoveryNotices: null,
             adminRecipientEmail: ResolveAdminRecipientEmail(scheduler),
             failureContextsByJobId: await LoadFailureContextsAsync(monitor, cancellationToken).ConfigureAwait(false));
 

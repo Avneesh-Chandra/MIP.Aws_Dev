@@ -52,6 +52,38 @@ public static class DownloadMonitorStatusEmailGuard
                 cancellationToken);
     }
 
+    public static async Task<bool> HasConfirmedInitialStatusForBatchAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+        var canonicalSubject = DownloadMonitorBatchStatusEmailCoordinator.BuildInitialSubject(monitorDate);
+        var legacySubject = canonicalSubject.Replace('—', '-');
+
+        if (await db.EmailLogs.AsNoTracking()
+                .AnyAsync(
+                    e => !e.IsDeleted
+                         && (e.Subject == canonicalSubject || e.Subject == legacySubject)
+                         && (e.Status == EmailDeliveryStatus.Sent
+                             || e.Status == EmailDeliveryStatus.RedirectedBySafety)
+                         && e.SentAt >= batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        var statusEmailSentAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
+            .Select(b => b.StatusEmailSentAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return statusEmailSentAt is not null
+               && !IsInitialStatusEnqueueClaim(statusEmailSentAt, batchStartedAt);
+    }
+
     public static Task<bool> ShouldThrottleAdHocDailyStatusEmailAsync(
         IApplicationDbContext db,
         DateOnly monitorDate,
@@ -86,14 +118,14 @@ public static class DownloadMonitorStatusEmailGuard
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        if (await HasConfirmedInitialStatusForMonitorDateAsync(db, monitorDate, cancellationToken)
+        if (await HasConfirmedInitialStatusForBatchAsync(db, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
             return false;
         }
 
-        if (await HasActiveInitialStatusSendInFlightAsync(db, cancellationToken).ConfigureAwait(false))
+        if (await HasActiveInitialStatusSendInFlightForBatchAsync(db, batchStartedAt, cancellationToken)
+                .ConfigureAwait(false))
         {
             return false;
         }
@@ -115,8 +147,7 @@ public static class DownloadMonitorStatusEmailGuard
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        if (await HasConfirmedInitialStatusForMonitorDateAsync(db, monitorDate, cancellationToken)
+        if (await HasConfirmedInitialStatusForBatchAsync(db, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
             return false;
@@ -124,19 +155,8 @@ public static class DownloadMonitorStatusEmailGuard
 
         await ReleaseStaleInitialClaimIfNeededAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
 
-        var batchClaim = await db.DownloadMonitorBatchRuns.AsNoTracking()
-            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
-            .Select(b => b.StatusEmailSentAt)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        if (batchClaim is not null
-            && IsInitialStatusSendInProgressClaim(batchClaim, batchStartedAt))
-        {
-            return false;
-        }
-
-        if (await HasActiveInitialStatusSendInFlightAsync(db, cancellationToken).ConfigureAwait(false))
+        if (await HasActiveInitialStatusSendInFlightForBatchAsync(db, batchStartedAt, cancellationToken)
+                .ConfigureAwait(false))
         {
             return false;
         }
@@ -154,23 +174,25 @@ public static class DownloadMonitorStatusEmailGuard
         return updated > 0;
     }
 
-    public static Task<bool> HasActiveInitialStatusClaimForMonitorDateAsync(
+    public static Task<bool> HasActiveInitialStatusClaimForBatchAsync(
         IApplicationDbContext db,
-        DateOnly monitorDate,
+        DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken) =>
-        HasActiveInitialStatusSendInFlightAsync(db, cancellationToken);
+        HasActiveInitialStatusSendInFlightForBatchAsync(db, batchStartedAt, cancellationToken);
 
-    private static async Task<bool> HasActiveInitialStatusSendInFlightAsync(
+    private static async Task<bool> HasActiveInitialStatusSendInFlightForBatchAsync(
         IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var claims = await db.DownloadMonitorBatchRuns.AsNoTracking()
-            .Where(b => !b.IsDeleted && b.StatusEmailSentAt != null)
-            .Select(b => new { b.StartedAt, b.StatusEmailSentAt })
-            .ToListAsync(cancellationToken)
+        var statusEmailSentAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(b => !b.IsDeleted && b.StartedAt == batchStartedAt)
+            .Select(b => b.StatusEmailSentAt)
+            .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return claims.Any(claim => IsInitialStatusSendInProgressClaim(claim.StatusEmailSentAt, claim.StartedAt));
+        return statusEmailSentAt is not null
+               && IsInitialStatusSendInProgressClaim(statusEmailSentAt, batchStartedAt);
     }
 
     public static async Task<bool> IsInitialStatusEnqueueClaimOnBatchAsync(
@@ -192,8 +214,7 @@ public static class DownloadMonitorStatusEmailGuard
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        if (await HasConfirmedInitialStatusForMonitorDateAsync(db, monitorDate, cancellationToken)
+        if (await HasConfirmedInitialStatusForBatchAsync(db, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
             return;
@@ -283,8 +304,7 @@ public static class DownloadMonitorStatusEmailGuard
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
-        if (await HasConfirmedInitialStatusForMonitorDateAsync(db, monitorDate, cancellationToken)
+        if (await HasConfirmedInitialStatusForBatchAsync(db, batchStartedAt, cancellationToken)
                 .ConfigureAwait(false))
         {
             return;

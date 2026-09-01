@@ -331,7 +331,6 @@ public sealed class SourceRecoveryOrchestrator(
                 new { job.Id, job.ErrorMessage, retainedConfig = true },
                 cancellationToken).ConfigureAwait(false);
 
-            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
             return ToApplyResult(attempt);
         }
 
@@ -348,7 +347,6 @@ public sealed class SourceRecoveryOrchestrator(
             new { job.Id, job.ErrorMessage },
             cancellationToken).ConfigureAwait(false);
 
-        await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
         return ToApplyResult(attempt);
     }
 
@@ -781,71 +779,12 @@ public sealed class SourceRecoveryOrchestrator(
                 source.ModifiedAt = DateTimeOffset.UtcNow;
             });
 
-    private async Task TryNotifyRecoveryOutcomeEmailAsync(
+    private Task TryNotifyRecoveryOutcomeEmailAsync(
         SourceRecoveryAttempt attempt,
         CancellationToken cancellationToken)
     {
-        if (attempt.Status != SourceRecoveryAttemptStatus.Succeeded)
-        {
-            return;
-        }
-
-        if (attempt.IsAutomatic)
-        {
-            await TryNotifyRecoveryFollowUpAsync(attempt, cancellationToken).ConfigureAwait(false);
-            DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
-            return;
-        }
-
-        TryEnqueueManualRecoveryStatusEmail(attempt);
-    }
-
-    private void TryEnqueueManualRecoveryStatusEmail(SourceRecoveryAttempt attempt)
-    {
-        try
-        {
-            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendDebouncedManualRecoveryStatusEmailAsync());
-
-            logger.LogInformation(
-                "Enqueued debounced download monitor status email after manual AI recovery success for attempt {AttemptId}.",
-                attempt.Id);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Could not enqueue download monitor status email for manual recovery attempt {AttemptId}.",
-                attempt.Id);
-        }
-    }
-
-    private async Task TryNotifyRecoveryFollowUpAsync(
-        SourceRecoveryAttempt attempt,
-        CancellationToken cancellationToken)
-    {
-        if (attempt.DownloadJobId is not Guid failedJobId)
-        {
-            return;
-        }
-
-        try
-        {
-            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueRecoveryFollowUpAfterRunAsync(
-                    db,
-                    failedJobId,
-                    logger,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Could not enqueue recovery follow-up status email for attempt {AttemptId}.",
-                attempt.Id);
-        }
+        // Batch completion sends exactly one status email and one PDF mail; recovery must not trigger more.
+        return Task.CompletedTask;
     }
 
     private async Task<bool> TryHealOrphanedApplyAsync(

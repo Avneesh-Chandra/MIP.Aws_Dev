@@ -442,23 +442,12 @@ public sealed class AutoAiDownloadRecoveryOrchestrator(
     private static bool ShouldStopAfterFailedRetry(NewsSource source, DownloadJob retryJob) =>
         PublisherRepeatedRecoveryGuard.IsNonRetriablePublisherFailure(null, retryJob.ErrorMessage);
 
-    private async Task NotifyBatchRecoveryFollowUpAsync(
+    private Task NotifyBatchRecoveryFollowUpAsync(
         Guid failedDownloadJobId,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueRecoveryFollowUpAfterRunAsync(
-                    db,
-                    failedDownloadJobId,
-                    logger,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not enqueue recovery follow-up status email for job {JobId}.", failedDownloadJobId);
-        }
+        // Batch completion sends exactly one status email per batch; no recovery follow-up mail.
+        return Task.CompletedTask;
     }
 
     private async Task<SourceRecoveryApplyResultDto> WaitForRecoveryFinalizationAsync(
