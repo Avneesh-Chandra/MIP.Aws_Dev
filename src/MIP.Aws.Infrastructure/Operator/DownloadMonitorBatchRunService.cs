@@ -420,28 +420,6 @@ public sealed class DownloadMonitorBatchRunService(
             isComplete,
             batchExpired);
 
-        var downloadInProgressCount = inProgressCount - autoRecoveryCount;
-        try
-        {
-            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueInitialBatchStatusEmailAsync(
-                    db,
-                    entry.StartedAt,
-                    isComplete,
-                    entry.HangfireJobId,
-                    downloadInProgressCount,
-                    waitingCount,
-                    logger,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Could not evaluate batch status email for batch started at {StartedAt:u}; download monitor progress will still load.",
-                entry.StartedAt);
-        }
-
         return new DownloadMonitorBatchProgressResult(
             entry.StartedAt,
             entry.HangfireJobId,

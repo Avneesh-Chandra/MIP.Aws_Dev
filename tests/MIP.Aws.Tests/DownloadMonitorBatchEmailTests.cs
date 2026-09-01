@@ -33,4 +33,12 @@ public sealed class DownloadMonitorBatchEmailTests
         Assert.NotEqual(initial, followUp);
         Assert.Contains("recovery update", followUp, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Settled_completion_mode_uses_download_phase_terminal_states()
+    {
+        Assert.True(DownloadMonitorBatchOutcomeHelper.IsTerminalDownloadStatus(DownloadJobStatus.Failed));
+        Assert.True(DownloadMonitorBatchOutcomeHelper.IsTerminalDownloadStatus(DownloadJobStatus.Succeeded));
+        Assert.False(DownloadMonitorBatchOutcomeHelper.IsTerminalDownloadStatus(DownloadJobStatus.Running));
+    }
 }

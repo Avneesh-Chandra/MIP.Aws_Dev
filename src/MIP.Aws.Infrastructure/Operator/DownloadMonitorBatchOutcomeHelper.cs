@@ -101,7 +101,9 @@ public static class DownloadMonitorBatchOutcomeHelper
     {
         if (completionMode == MailCompletionMode.AllSourcesSettled)
         {
-            return await IsBatchReadyForStatusEmailAsync(
+            // Settled mail means the download batch has finished trying (success, failure, or
+            // auto-recovery started), not that every auto-recovery run has completed.
+            return await IsBatchReadyForInitialStatusEmailAsync(
                     db,
                     sourceIds,
                     batchStartedAt,

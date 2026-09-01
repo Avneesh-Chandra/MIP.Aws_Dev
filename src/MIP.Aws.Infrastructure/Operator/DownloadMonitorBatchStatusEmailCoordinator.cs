@@ -180,12 +180,26 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var subjectPrefix = BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
-        return !await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
-            db,
-            subjectPrefix,
-            batchStartedAt,
-            cancellationToken).ConfigureAwait(false);
+        var subject = BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+                db,
+                subject,
+                batchStartedAt,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        var statusEmailSentAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
+            .Where(batch => !batch.IsDeleted && batch.StartedAt == batchStartedAt)
+            .Select(batch => batch.StatusEmailSentAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Another worker already claimed or completed the initial status email.
+        return statusEmailSentAt is null
+               || DateTimeOffset.UtcNow - statusEmailSentAt.Value
+               >= DownloadMonitorStatusEmailGuard.UnconfirmedClaimStaleAfter;
     }
 
     public static async Task<bool> ShouldSendRecoveryFollowUpEmailAsync(

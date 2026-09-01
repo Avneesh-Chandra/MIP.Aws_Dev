@@ -148,7 +148,7 @@ public sealed class DownloadMonitorScheduledJobs(
                     effectiveMailSettings.PdfDownloadMailCompletionMode,
                     cancellationToken)
                 .ConfigureAwait(false);
-        if (pdfBatchReady)
+        if (effectiveMailSettings.PdfDownloadMailEnabled && pdfBatchReady)
         {
             DownloadMonitorBatchStatusEmailCoordinator.EnqueuePdfDownloadMail(logger);
         }
