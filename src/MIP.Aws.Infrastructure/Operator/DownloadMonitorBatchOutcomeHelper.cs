@@ -225,6 +225,27 @@ public static class DownloadMonitorBatchOutcomeHelper
                 .ConfigureAwait(false);
     }
 
+    public static Task<bool> HasCompletedAutoRecoveryRunsForBatchAsync(
+        IApplicationDbContext db,
+        IReadOnlyList<Guid> sourceIds,
+        DateTimeOffset batchStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (sourceIds.Count == 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        var notBefore = batchStartedAt.AddMinutes(-1);
+        return db.AutoAiRecoveryRuns.AsNoTracking()
+            .AnyAsync(
+                r => !r.IsDeleted
+                     && sourceIds.Contains(r.NewsSourceId)
+                     && r.CreatedAt >= notBefore
+                     && r.CompletedAt != null,
+                cancellationToken);
+    }
+
     public static async Task<IReadOnlyList<PendingBatchRecoverySource>> GetPendingAutoRecoverySourcesForBatchAsync(
         IApplicationDbContext db,
         IReadOnlyList<Guid> sourceIds,

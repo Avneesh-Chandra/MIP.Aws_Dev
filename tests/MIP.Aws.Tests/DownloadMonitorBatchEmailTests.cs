@@ -33,6 +33,16 @@ public sealed class DownloadMonitorBatchEmailTests
     }
 
     [Fact]
+    public void Initial_status_enqueue_claim_matches_batch_start_timestamp()
+    {
+        var batchStartedAt = new DateTimeOffset(2026, 9, 1, 13, 30, 0, TimeSpan.Zero);
+        Assert.True(DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaim(batchStartedAt, batchStartedAt));
+        Assert.False(DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaim(
+            batchStartedAt.AddMinutes(5),
+            batchStartedAt));
+    }
+
+    [Fact]
     public void Initial_and_recovery_follow_up_subjects_use_distinct_suffixes()
     {
         var date = new DateOnly(2026, 6, 29);

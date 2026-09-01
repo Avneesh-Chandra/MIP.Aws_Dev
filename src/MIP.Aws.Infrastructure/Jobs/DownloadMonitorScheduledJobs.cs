@@ -127,19 +127,24 @@ public sealed class DownloadMonitorScheduledJobs(
 
         if (effectiveMailSettings.StatusEmailEnabled && statusBatchReady)
         {
-            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
+            await DownloadMonitorBatchStatusEmailCoordinator.TryEnqueueInitialStatusEmailForBatchAsync(
+                    db,
+                    batchStartedAt,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         else if (effectiveMailSettings.StatusEmailEnabled)
         {
             logger.LogWarning(
                 "Download monitor batch started at {BatchStartedAt:u} timed out before all downloads finished; deferring initial status email.",
                 batchStartedAt);
-            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendInitialBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
-                DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+            await DownloadMonitorBatchStatusEmailCoordinator.TryScheduleDeferredInitialStatusEmailAsync(
+                    db,
+                    batchStartedAt,
+                    logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var pdfBatchReady = downloadsComplete
@@ -284,6 +289,7 @@ public sealed class DownloadMonitorScheduledJobs(
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
+    [DisableConcurrentExecution(timeoutInSeconds: 5 * 60)]
     [AutomaticRetry(Attempts = 0, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task SendInitialBatchStatusEmailAsync(DateTimeOffset batchStartedAt)
     {
@@ -315,6 +321,18 @@ public sealed class DownloadMonitorScheduledJobs(
                 CancellationToken.None)
             .ConfigureAwait(false);
 
+        if (!await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor initial status email already claimed or sent for batch started at {BatchStartedAt:u}; skipping.",
+                batchStartedAt);
+            return;
+        }
+
         var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
         if (sources.Count > 0)
         {
@@ -330,38 +348,21 @@ public sealed class DownloadMonitorScheduledJobs(
                 .ConfigureAwait(false))
             {
                 logger.LogInformation(
-                    "Download monitor batch {BatchStartedAt:u} not ready for initial status email (downloads still in progress).",
+                    "Download monitor batch {BatchStartedAt:u} not ready for initial status email (downloads still in progress); deferring.",
                     batchStartedAt);
-                BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-                    HangfireQueueOptions.Names.Email,
-                    j => j.SendInitialBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
-                    DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+                await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
+                        db,
+                        batchStartedAt,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                await DownloadMonitorBatchStatusEmailCoordinator.TryScheduleDeferredInitialStatusEmailAsync(
+                        db,
+                        batchStartedAt,
+                        logger,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 return;
             }
-        }
-
-        if (!await DownloadMonitorBatchStatusEmailCoordinator.ShouldSendInitialStatusEmailAsync(
-                db,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            logger.LogInformation(
-                "Download monitor initial status email already sent for batch started at {BatchStartedAt:u}; skipping.",
-                batchStartedAt);
-            return;
-        }
-
-        if (!await DownloadMonitorStatusEmailGuard.TryClaimInitialStatusEmailAsync(
-                db,
-                batchStartedAt,
-                CancellationToken.None)
-            .ConfigureAwait(false))
-        {
-            logger.LogInformation(
-                "Download monitor initial status email already claimed or sent for batch started at {BatchStartedAt:u}; skipping.",
-                batchStartedAt);
-            return;
         }
 
         try
@@ -430,6 +431,7 @@ public sealed class DownloadMonitorScheduledJobs(
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
+    [DisableConcurrentExecution(timeoutInSeconds: 5 * 60)]
     [AutomaticRetry(Attempts = 3, DelaysInSeconds = [300, 600, 900], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task SendInitialBatchStatusEmailWhenReadyAsync(DateTimeOffset batchStartedAt, int attempt)
     {
@@ -441,8 +443,33 @@ public sealed class DownloadMonitorScheduledJobs(
             return;
         }
 
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+                db,
+                monitorDate,
+                CancellationToken.None).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (await DownloadMonitorStatusEmailGuard.HasActiveInitialStatusClaimForMonitorDateAsync(
+                db,
+                monitorDate,
+                CancellationToken.None).ConfigureAwait(false)
+            && !await DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaimOnBatchAsync(
+                db,
+                batchStartedAt,
+                CancellationToken.None).ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Deferred initial status email skipped for batch {BatchStartedAt:u}; another send is already in progress.",
+                batchStartedAt);
+            return;
+        }
+
         var sources = await LoadMonitoredSourcesAsync(db, CancellationToken.None).ConfigureAwait(false);
         if (sources.Count == 0)
         {

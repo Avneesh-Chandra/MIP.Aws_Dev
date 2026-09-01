@@ -16,6 +16,95 @@ namespace MIP.Aws.Infrastructure.Operator;
 /// </summary>
 internal static class DownloadMonitorBatchStatusEmailCoordinator
 {
+    public static async Task TryEnqueueInitialStatusEmailForBatchAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!await ShouldSendInitialStatusEmailAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await DownloadMonitorStatusEmailGuard.TryMarkInitialStatusEmailEnqueuedAsync(
+                db,
+                batchStartedAt,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Skipped enqueueing initial download monitor status email for batch {BatchStartedAt:u}; already enqueued or sent today.",
+                batchStartedAt);
+            return;
+        }
+
+        try
+        {
+            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
+
+            logger.LogInformation(
+                "Enqueued initial download monitor status email for batch started at {BatchStartedAt:u}.",
+                batchStartedAt);
+        }
+        catch
+        {
+            await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
+                    db,
+                    batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public static async Task TryScheduleDeferredInitialStatusEmailAsync(
+        IApplicationDbContext db,
+        DateTimeOffset batchStartedAt,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!await ShouldSendInitialStatusEmailAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await DownloadMonitorStatusEmailGuard.TryMarkInitialStatusEmailEnqueuedAsync(
+                db,
+                batchStartedAt,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Skipped scheduling deferred initial status email for batch {BatchStartedAt:u}; already enqueued or sent today.",
+                batchStartedAt);
+            return;
+        }
+
+        try
+        {
+            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendInitialBatchStatusEmailWhenReadyAsync(batchStartedAt, 0),
+                DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+
+            logger.LogInformation(
+                "Scheduled deferred initial download monitor status email for batch started at {BatchStartedAt:u}.",
+                batchStartedAt);
+        }
+        catch
+        {
+            await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
+                    db,
+                    batchStartedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public static async Task TryEnqueueInitialBatchStatusEmailAsync(
         IApplicationDbContext db,
         DateTimeOffset batchStartedAt,
@@ -63,13 +152,8 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
             return;
         }
 
-        BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
-            HangfireQueueOptions.Names.Email,
-            j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
-
-        logger.LogInformation(
-            "Enqueued initial download monitor status email for batch started at {BatchStartedAt:u}.",
-            batchStartedAt);
+        await TryEnqueueInitialStatusEmailForBatchAsync(db, batchStartedAt, logger, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task TryScheduleRecoveryFollowUpEmailAsync(
@@ -84,25 +168,42 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         }
 
         var sourceIds = await LoadMonitoredSourceIdsAsync(db, cancellationToken).ConfigureAwait(false);
-        if (!await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
+        if (await DownloadMonitorBatchOutcomeHelper.HasPendingAutoRecoveryForBatchAsync(
                 db,
                 sourceIds,
                 batchStartedAt,
                 cancellationToken)
             .ConfigureAwait(false))
         {
-            await MarkRecoveryFollowUpNotRequiredAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
+            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, 0),
+                DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+
+            logger.LogInformation(
+                "Scheduled auto-recovery follow-up status email for batch started at {BatchStartedAt:u}.",
+                batchStartedAt);
             return;
         }
 
-        BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-            HangfireQueueOptions.Names.Email,
-            j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, 0),
-            DownloadMonitorBatchTiming.DeferredEmailRetryInterval);
+        if (await DownloadMonitorBatchOutcomeHelper.HasCompletedAutoRecoveryRunsForBatchAsync(
+                db,
+                sourceIds,
+                batchStartedAt,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendBatchRecoveryFollowUpStatusEmailAsync(batchStartedAt, 0));
 
-        logger.LogInformation(
-            "Scheduled auto-recovery follow-up status email for batch started at {BatchStartedAt:u}.",
-            batchStartedAt);
+            logger.LogInformation(
+                "Enqueued auto-recovery follow-up status email for batch started at {BatchStartedAt:u} (recovery already completed).",
+                batchStartedAt);
+            return;
+        }
+
+        await MarkRecoveryFollowUpNotRequiredAsync(db, batchStartedAt, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task TryEnqueueRecoveryFollowUpAfterRunAsync(
