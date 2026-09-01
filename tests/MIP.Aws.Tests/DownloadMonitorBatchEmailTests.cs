@@ -33,12 +33,12 @@ public sealed class DownloadMonitorBatchEmailTests
     }
 
     [Fact]
-    public void Initial_status_enqueue_claim_matches_batch_start_timestamp()
+    public void Initial_status_enqueue_claim_requires_exact_batch_timestamp()
     {
         var batchStartedAt = new DateTimeOffset(2026, 9, 1, 13, 30, 0, TimeSpan.Zero);
         Assert.True(DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaim(batchStartedAt, batchStartedAt));
         Assert.False(DownloadMonitorStatusEmailGuard.IsInitialStatusEnqueueClaim(
-            batchStartedAt.AddMinutes(5),
+            batchStartedAt.AddMilliseconds(500),
             batchStartedAt));
     }
 
