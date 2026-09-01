@@ -180,26 +180,24 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
-        var subject = BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.UtcDateTime));
-        if (await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
                 db,
-                subject,
-                batchStartedAt,
+                monitorDate,
                 cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        var statusEmailSentAt = await db.DownloadMonitorBatchRuns.AsNoTracking()
-            .Where(batch => !batch.IsDeleted && batch.StartedAt == batchStartedAt)
-            .Select(batch => batch.StatusEmailSentAt)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
+        if (await DownloadMonitorStatusEmailGuard.HasActiveInitialStatusClaimForMonitorDateAsync(
+                db,
+                monitorDate,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
 
-        // Another worker already claimed or completed the initial status email.
-        return statusEmailSentAt is null
-               || DateTimeOffset.UtcNow - statusEmailSentAt.Value
-               >= DownloadMonitorStatusEmailGuard.UnconfirmedClaimStaleAfter;
+        return true;
     }
 
     public static async Task<bool> ShouldSendRecoveryFollowUpEmailAsync(
@@ -359,10 +357,9 @@ internal static class DownloadMonitorBatchStatusEmailCoordinator
         }
 
         var effective = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
-        var initialStatusSent = await DownloadMonitorStatusEmailGuard.HasConfirmedDeliveryAsync(
+        var initialStatusSent = await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
                 db,
-                BuildInitialSubject(DateOnly.FromDateTime(batchStartedAt.StartedAt.UtcDateTime)),
-                batchStartedAt.StartedAt,
+                DateOnly.FromDateTime(batchStartedAt.StartedAt.UtcDateTime),
                 cancellationToken)
             .ConfigureAwait(false);
         var statusReady = effective.StatusEmailEnabled

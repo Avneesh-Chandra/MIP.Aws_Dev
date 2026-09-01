@@ -25,6 +25,14 @@ public sealed class DownloadMonitorBatchEmailTests
     }
 
     [Fact]
+    public void Initial_status_subject_is_unique_per_monitor_date()
+    {
+        var date = new DateOnly(2026, 9, 1);
+        var subject = $"GFH MIP AWS — Download Monitor status ({date:yyyy-MM-dd})";
+        Assert.Equal("GFH MIP AWS — Download Monitor status (2026-09-01)", subject);
+    }
+
+    [Fact]
     public void Initial_and_recovery_follow_up_subjects_use_distinct_suffixes()
     {
         var date = new DateOnly(2026, 6, 29);

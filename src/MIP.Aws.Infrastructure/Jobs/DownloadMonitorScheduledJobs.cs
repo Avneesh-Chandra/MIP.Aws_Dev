@@ -127,7 +127,9 @@ public sealed class DownloadMonitorScheduledJobs(
 
         if (effectiveMailSettings.StatusEmailEnabled && statusBatchReady)
         {
-            await SendInitialBatchStatusEmailAsync(batchStartedAt).ConfigureAwait(false);
+            BackgroundJob.Enqueue<DownloadMonitorScheduledJobs>(
+                HangfireQueueOptions.Names.Email,
+                j => j.SendInitialBatchStatusEmailAsync(batchStartedAt));
         }
         else if (effectiveMailSettings.StatusEmailEnabled)
         {
@@ -282,12 +284,30 @@ public sealed class DownloadMonitorScheduledJobs(
     }
 
     [Queue(HangfireQueueOptions.Names.Email)]
-    [AutomaticRetry(Attempts = 2, DelaysInSeconds = [60, 180], OnAttemptsExceeded = AttemptsExceededAction.Delete)]
+    [AutomaticRetry(Attempts = 0, OnAttemptsExceeded = AttemptsExceededAction.Delete)]
     public async Task SendInitialBatchStatusEmailAsync(DateTimeOffset batchStartedAt)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var email = scope.ServiceProvider.GetRequiredService<IDownloadMonitorDailyStatusEmailService>();
+
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+                db,
+                monitorDate,
+                CancellationToken.None).ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor initial status email already sent for {Date}; skipping batch {BatchStartedAt:u}.",
+                monitorDate,
+                batchStartedAt);
+            await DownloadMonitorBatchStatusEmailCoordinator.MarkInitialStatusEmailSentAsync(
+                    db,
+                    batchStartedAt,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
 
         await DownloadMonitorStatusEmailGuard.ReleaseStaleInitialClaimIfNeededAsync(
                 db,
@@ -339,12 +359,8 @@ public sealed class DownloadMonitorScheduledJobs(
             .ConfigureAwait(false))
         {
             logger.LogInformation(
-                "Download monitor initial status email already claimed for batch started at {BatchStartedAt:u}; scheduling retry.",
+                "Download monitor initial status email already claimed or sent for batch started at {BatchStartedAt:u}; skipping.",
                 batchStartedAt);
-            BackgroundJob.Schedule<DownloadMonitorScheduledJobs>(
-                HangfireQueueOptions.Names.Email,
-                j => j.SendInitialBatchStatusEmailAsync(batchStartedAt),
-                TimeSpan.FromMinutes(2));
             return;
         }
 
@@ -371,15 +387,31 @@ public sealed class DownloadMonitorScheduledJobs(
             }
             else
             {
+                if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+                        db,
+                        monitorDate,
+                        CancellationToken.None).ConfigureAwait(false))
+                {
+                    await DownloadMonitorBatchStatusEmailCoordinator.MarkInitialStatusEmailSentAsync(
+                            db,
+                            batchStartedAt,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    logger.LogInformation(
+                        "Download monitor initial status email was already delivered for {Date}; treating batch {BatchStartedAt:u} as complete.",
+                        monitorDate,
+                        batchStartedAt);
+                    return;
+                }
+
                 await DownloadMonitorStatusEmailGuard.ReleaseInitialStatusEmailClaimAsync(
                         db,
                         batchStartedAt,
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 logger.LogWarning(
-                    "Download monitor initial status email was not delivered for batch started at {BatchStartedAt:u}; will retry.",
+                    "Download monitor initial status email was not delivered for batch started at {BatchStartedAt:u}.",
                     batchStartedAt);
-                throw new InvalidOperationException("Download monitor initial status email was not delivered.");
             }
         }
         catch (Exception ex)

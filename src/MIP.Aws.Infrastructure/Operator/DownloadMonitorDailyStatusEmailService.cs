@@ -178,6 +178,18 @@ public sealed class DownloadMonitorDailyStatusEmailService(
         DateTimeOffset batchStartedAt,
         CancellationToken cancellationToken)
     {
+        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
+        if (await DownloadMonitorStatusEmailGuard.HasConfirmedInitialStatusForMonitorDateAsync(
+                db,
+                monitorDate,
+                cancellationToken).ConfigureAwait(false))
+        {
+            logger.LogInformation(
+                "Download monitor initial status email already sent for {Date}; skipping.",
+                monitorDate);
+            return false;
+        }
+
         var scheduler = await mailSettings.GetEffectiveSchedulerAsync(cancellationToken).ConfigureAwait(false);
         if (!scheduler.StatusEmailEnabled)
         {
@@ -190,7 +202,6 @@ public sealed class DownloadMonitorDailyStatusEmailService(
             return false;
         }
 
-        var monitorDate = DateOnly.FromDateTime(batchStartedAt.UtcDateTime);
         var monitor = await monitorService
             .GetMonitorAsync(monitorDate, skipReconciliation: false, cancellationToken)
             .ConfigureAwait(false);
