@@ -1096,12 +1096,25 @@ public sealed class OperatorDownloadMonitorService(
         }
 
         var hasPdfForEditionCheck = latestFileId is not null && DownloadMonitorStatusLabels.IsSuccessful(status);
+        string? preferredBlobUri = null;
+        if (latestJobId is Guid resolvedJobId && blobUriByJobId.TryGetValue(resolvedJobId, out var resolvedBlobUri))
+        {
+            preferredBlobUri = resolvedBlobUri;
+        }
+        else if (latestFileId is Guid resolvedFileId)
+        {
+            preferredBlobUri = fileByJobId.Values
+                .FirstOrDefault(file => file.FileId == resolvedFileId)
+                ?.BlobUri;
+        }
+
         var latestPdfEditionDate = DownloadMonitorEditionDateHelper.ResolveLatestPdfEditionDate(
             downloadedForDay,
             sourcePdfs,
             latestFileId,
             latestJobId,
-            blobUriByJobId);
+            blobUriByJobId,
+            preferredBlobUri);
         var editionDateMatchesMonitor = DownloadMonitorEditionDateHelper.EditionDateMatchesMonitor(
             date,
             latestPdfEditionDate,

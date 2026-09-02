@@ -9,6 +9,7 @@ public sealed class ArabicGregorianDateParserTests
     [InlineData("الثلاثاء,  23 يونيو 2026 -  08 مُحرَّم 1448 هـ", "2026-06-23")]
     [InlineData("العدد 13590 الثلاثاء 23 يونيو 2026 الموافق 8 محرم 1448", "2026-06-23")]
     [InlineData("Al Khaleej | 23 Jun 2026", "2026-06-23")]
+    [InlineData("الأربعاء 20 ربيع الأول 1448هـ 2 سبتمبر 2026م - العدد 17272", "2026-09-02")]
     public void TryParseFirst_parses_gregorian_dates_from_source_headers(string text, string expected)
     {
         Assert.True(ArabicGregorianDateParser.TryParseFirst(text, out var date, out var snippet));

@@ -8,7 +8,7 @@ namespace MIP.Aws.Infrastructure.News.PdfEdition;
 public static partial class ArabicGregorianDateParser
 {
     [GeneratedRegex(
-        @"(?<day>\d{1,2})\s+(?<month>" + @"يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر" + @")\s+(?<year>\d{4})",
+        @"(?<day>\d{1,2})\s+(?<month>" + @"يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر" + @")\s+(?<year>\d{4})م?",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ArabicGregorianRegex();
 

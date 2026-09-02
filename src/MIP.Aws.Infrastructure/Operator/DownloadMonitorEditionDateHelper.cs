@@ -38,8 +38,22 @@ public static partial class DownloadMonitorEditionDateHelper
         IReadOnlyList<PdfEditionDownload> sourcePdfs,
         Guid? latestFileId,
         Guid? latestJobId,
-        IReadOnlyDictionary<Guid, string> blobUriByJobId)
+        IReadOnlyDictionary<Guid, string> blobUriByJobId,
+        string? preferredBlobUri = null)
     {
+        var blobUri = preferredBlobUri;
+        if (string.IsNullOrWhiteSpace(blobUri)
+            && latestJobId is Guid jobId
+            && blobUriByJobId.TryGetValue(jobId, out var jobBlobUri))
+        {
+            blobUri = jobBlobUri;
+        }
+
+        if (TryParseEditionDateFromStoragePath(blobUri) is DateOnly blobEditionDate)
+        {
+            return blobEditionDate;
+        }
+
         if (downloadedForDay is { Status: PdfEditionStatus.Downloaded or PdfEditionStatus.Validated or PdfEditionStatus.SkippedDuplicate })
         {
             return downloadedForDay.EditionDate;
@@ -54,11 +68,6 @@ public static partial class DownloadMonitorEditionDateHelper
             {
                 return pdfByFile.EditionDate;
             }
-        }
-
-        if (latestJobId is Guid jobId && blobUriByJobId.TryGetValue(jobId, out var blobUri))
-        {
-            return TryParseEditionDateFromStoragePath(blobUri);
         }
 
         var latestSuccessfulPdf = sourcePdfs.FirstOrDefault(p =>

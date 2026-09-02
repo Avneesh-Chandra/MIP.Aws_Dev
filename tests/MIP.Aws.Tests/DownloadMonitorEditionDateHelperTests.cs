@@ -44,6 +44,29 @@ public sealed class DownloadMonitorEditionDateHelperTests
     }
 
     [Fact]
+    public void ResolveLatestPdfEditionDate_prefers_blob_path_over_stale_pdf_row()
+    {
+        var monitorDate = new DateOnly(2026, 9, 2);
+        var downloadedForDay = new PdfEditionDownload
+        {
+            EditionDate = new DateOnly(2026, 9, 1),
+            Status = PdfEditionStatus.Downloaded,
+            DownloadedFileId = Guid.NewGuid()
+        };
+        var jobId = Guid.NewGuid();
+        var blobUri = "newspapers/UAE - Al Khaleej Economy/2026-09-02/pressreader-edition.pdf";
+
+        var result = DownloadMonitorEditionDateHelper.ResolveLatestPdfEditionDate(
+            downloadedForDay,
+            [downloadedForDay],
+            downloadedForDay.DownloadedFileId,
+            jobId,
+            new Dictionary<Guid, string> { [jobId] = blobUri });
+
+        Assert.Equal(monitorDate, result);
+    }
+
+    [Fact]
     public void ResolveLatestPdfEditionDate_parses_portal_blob_uri_when_no_pdf_row()
     {
         var jobId = Guid.NewGuid();
