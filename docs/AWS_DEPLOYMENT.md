@@ -124,6 +124,27 @@ ECS task role needs `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` on the bucke
 
 When S3 is disabled, PDFs are stored under `Storage:LocalRoot` (ephemeral container disk — not recommended for production).
 
+### Portal credential encryption keys (DataProtection)
+
+PressReader / portal passwords are encrypted at rest with ASP.NET Data Protection. On AWS the key ring is stored in S3 so credentials survive ECS restarts and redeploys:
+
+```
+s3://{BucketName}/{Prefix}platform/dataprotection/*.xml
+```
+
+Example: `s3://your-mip-bucket/mip/platform/dataprotection/`.
+
+**Requirements (API and Worker task roles):**
+
+- `s3:ListBucket` on the bucket (with prefix condition if used)
+- `s3:GetObject` / `s3:PutObject` on `{Prefix}platform/dataprotection/*`
+
+If this prefix is missing or the task role cannot read it, login probes fail with `CredentialsNeedReEntry` and you must re-enter passwords after fixing access. Startup logs include:
+
+`DataProtection key store: S3 at s3://...`
+
+Do **not** delete objects under `platform/dataprotection` — that permanently orphans stored passwords.
+
 ## 3. SES mail
 
 Verify domain or sender email in SES. Configure:
