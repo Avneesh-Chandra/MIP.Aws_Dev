@@ -182,24 +182,14 @@ public sealed class PdfDownloadMailHeroComposer(
 
     private static void DrawBrandCopy(SKCanvas canvas)
     {
-        using var titleTypeface = SKTypeface.FromFamilyName(
-            "Georgia",
-            SKFontStyleWeight.Bold,
-            SKFontStyleWidth.Normal,
-            SKFontStyleSlant.Upright)
-            ?? SKTypeface.Default;
-        using var tagTypeface = SKTypeface.FromFamilyName(
-            "Arial",
-            SKFontStyleWeight.Normal,
-            SKFontStyleWidth.Normal,
-            SKFontStyleSlant.Upright)
-            ?? SKTypeface.Default;
+        using var titleTypeface = ResolveTypeface(bold: true);
+        using var tagTypeface = ResolveTypeface(bold: false);
 
         using var titlePaint = new SKPaint { Color = TitleCopper, IsAntialias = true };
         using var tagPaint = new SKPaint { Color = TaglineLeather, IsAntialias = true };
 
         // Soft scrim behind text for readability over any cover overlap.
-        using (var scrim = new SKPaint { Color = new SKColor(0x33, 0x2E, 0x2D, 210), IsAntialias = true })
+        using (var scrim = new SKPaint { Color = new SKColor(0x33, 0x2E, 0x2D, 230), IsAntialias = true })
         {
             canvas.DrawRect(SKRect.Create(0, 0, CanvasWidth, 168), scrim);
         }
@@ -218,6 +208,93 @@ public sealed class PdfDownloadMailHeroComposer(
         using (var tagFont = new SKFont(tagTypeface, 16f))
         {
             canvas.DrawText("Stay ahead of the story!", left, 146f, SKTextAlign.Left, tagFont, tagPaint);
+        }
+    }
+
+    /// <summary>
+    /// Windows has Georgia/Arial; ECS Linux images often do not. Prefer installed Liberation/DejaVu files,
+    /// then family-name lookup, then Skia default.
+    /// </summary>
+    private static SKTypeface ResolveTypeface(bool bold)
+    {
+        foreach (var path in FontFileCandidates(bold))
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            var fromFile = SKTypeface.FromFile(path);
+            if (fromFile is not null)
+            {
+                return fromFile;
+            }
+        }
+
+        var weight = bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
+        string[] families = bold
+            ?
+            [
+                "Georgia",
+                "Liberation Serif",
+                "DejaVu Serif",
+                "Times New Roman",
+                "FreeSerif"
+            ]
+            :
+            [
+                "Arial",
+                "Liberation Sans",
+                "DejaVu Sans",
+                "Helvetica",
+                "FreeSans"
+            ];
+
+        foreach (var family in families)
+        {
+            var typeface = SKTypeface.FromFamilyName(
+                family,
+                weight,
+                SKFontStyleWidth.Normal,
+                SKFontStyleSlant.Upright);
+            if (typeface is null)
+            {
+                continue;
+            }
+
+            // Reject anonymous CSS generics that draw blank on some Linux images.
+            var name = typeface.FamilyName ?? string.Empty;
+            if (name.Contains("serif", StringComparison.OrdinalIgnoreCase)
+                && !name.Contains(' ', StringComparison.Ordinal)
+                && name.Length < 8)
+            {
+                typeface.Dispose();
+                continue;
+            }
+
+            return typeface;
+        }
+
+        return SKTypeface.Default;
+    }
+
+    private static IEnumerable<string> FontFileCandidates(bool bold)
+    {
+        if (bold)
+        {
+            yield return "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf";
+            yield return "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf";
+            yield return "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf";
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "georgia.ttf");
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "timesbd.ttf");
+        }
+        else
+        {
+            yield return "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf";
+            yield return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+            yield return "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "arial.ttf");
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "segoeui.ttf");
         }
     }
 
