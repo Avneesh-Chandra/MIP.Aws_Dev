@@ -131,13 +131,30 @@ public sealed class AwsSesEmailSender : IReportEmailTransport
 
         foreach (var attachment in message.Attachments)
         {
-            builder.Attachments.Add(attachment.FileName, attachment.Content, ContentType.Parse(attachment.ContentType));
+            AddMimeAttachment(builder, attachment);
         }
 
         mime.Body = builder.ToMessageBody();
         using var ms = new MemoryStream();
         mime.WriteTo(ms);
         return ms.ToArray();
+    }
+
+    private static void AddMimeAttachment(BodyBuilder builder, EmailAttachment attachment)
+    {
+        var contentType = ContentType.Parse(
+            string.IsNullOrWhiteSpace(attachment.ContentType)
+                ? "application/octet-stream"
+                : attachment.ContentType);
+        if (attachment.IsInline && !string.IsNullOrWhiteSpace(attachment.ContentId))
+        {
+            var linked = builder.LinkedResources.Add(attachment.FileName, attachment.Content, contentType);
+            linked.ContentId = attachment.ContentId;
+            linked.ContentDisposition = new ContentDisposition(ContentDisposition.Inline);
+            return;
+        }
+
+        builder.Attachments.Add(attachment.FileName, attachment.Content, contentType);
     }
 
     private static string StripHtml(string html) =>

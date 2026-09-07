@@ -110,7 +110,8 @@ public sealed class MailSettingsService(
             selectedStatusRecipients,
             selectedPdfRecipients,
             row?.StatusEmailCompletionMode ?? scheduler.StatusEmailCompletionMode,
-            row?.PdfDownloadMailCompletionMode ?? scheduler.PdfDownloadMailCompletionMode);
+            row?.PdfDownloadMailCompletionMode ?? scheduler.PdfDownloadMailCompletionMode,
+            row?.PdfDownloadMailDesign ?? scheduler.PdfDownloadMailDesign);
     }
 
     public async Task UpdateAsync(
@@ -145,6 +146,7 @@ public sealed class MailSettingsService(
         IReadOnlyList<string>? selectedPdfDownloadMailRecipients,
         MailCompletionMode? statusEmailCompletionMode,
         MailCompletionMode? pdfDownloadMailCompletionMode,
+        PdfDownloadMailDesign? pdfDownloadMailDesign,
         CancellationToken cancellationToken)
     {
         if (!DownloadBatchSchedule.TryNormalizeTimeUtc(batchScheduleTimeUtc, out var timeUtc, out var timeError))
@@ -212,6 +214,11 @@ public sealed class MailSettingsService(
         if (pdfDownloadMailCompletionMode is MailCompletionMode selectedPdfMode)
         {
             row.PdfDownloadMailCompletionMode = selectedPdfMode;
+        }
+
+        if (pdfDownloadMailDesign is PdfDownloadMailDesign selectedDesign)
+        {
+            row.PdfDownloadMailDesign = selectedDesign;
         }
 
         if (pdfDownloadMailSubject is not null)
@@ -284,6 +291,7 @@ public sealed class MailSettingsService(
                 || current.Message.Contains("PdfDownloadMail", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("SelectedRecipients", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("CompletionMode", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("PdfDownloadMailDesign", StringComparison.OrdinalIgnoreCase)
                 || current.Message.Contains("Invalid column name", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

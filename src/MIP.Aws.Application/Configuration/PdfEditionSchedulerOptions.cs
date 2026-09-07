@@ -66,4 +66,7 @@ public sealed class PdfEditionSchedulerOptions
 
     /// <summary>UTC time for the separate PDF Download mail (24-hour HH:mm).</summary>
     public string PdfDownloadMailTimeUtc { get; set; } = "06:00";
+
+    /// <summary>Visual template for PDF Download mail. Super Admin settings override when present.</summary>
+    public PdfDownloadMailDesign PdfDownloadMailDesign { get; set; } = PdfDownloadMailDesign.Classic;
 }

@@ -1853,6 +1853,10 @@ namespace MIP.Aws.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<string>("PdfDownloadMailDesign")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<bool?>("PdfDownloadMailEnabled")
                         .HasColumnType("bit");
 

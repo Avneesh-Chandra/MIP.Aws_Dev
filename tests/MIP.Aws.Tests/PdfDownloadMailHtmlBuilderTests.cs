@@ -1,3 +1,4 @@
+using MIP.Aws.Domain.Enums;
 using MIP.Aws.Infrastructure.Operator;
 
 namespace MIP.Aws.Tests;
@@ -18,7 +19,7 @@ public sealed class PdfDownloadMailHtmlBuilderTests
                     "https://files.example/download")
             ],
             "https://files.example/all",
-            "https://files.example/logo.svg");
+            "https://files.example/logo.png");
 
         Assert.Contains("href=\"https://files.example/view\"", html);
         Assert.Contains("href=\"https://files.example/download\"", html);
@@ -30,6 +31,7 @@ public sealed class PdfDownloadMailHtmlBuilderTests
         Assert.Contains("MEDIA INTELLIGENCE", html);
         Assert.Contains("SECURE ACCESS", html);
         Assert.Contains("Your newspaper editions are ready", html);
+        Assert.Contains("#e31e4d", html);
     }
 
     [Fact]
@@ -52,5 +54,32 @@ public sealed class PdfDownloadMailHtmlBuilderTests
         Assert.Contains("Not Available", html);
         Assert.Contains("0 monitored editions are available and 1 are marked Not Available", html);
         Assert.DoesNotContain("DOWNLOAD ALL", html);
+    }
+
+    [Fact]
+    public void Build_modern_uses_brand_palette_logo_and_hero()
+    {
+        var html = PdfDownloadMailHtmlBuilder.Build(
+            [
+                new PdfDownloadMailItem(
+                    "Al-Ayam",
+                    "edition.pdf",
+                    new DateOnly(2026, 9, 7),
+                    1_048_576,
+                    "https://files.example/view",
+                    "https://files.example/download")
+            ],
+            "https://files.example/all",
+            "cid:gfh-logo",
+            PdfDownloadMailDesign.ModernGfh,
+            "cid:newspaper-hero");
+
+        Assert.Contains("#af7846", html);
+        Assert.Contains("#332e2d", html);
+        Assert.Contains("src=\"cid:gfh-logo\"", html);
+        Assert.Contains("src=\"cid:newspaper-hero\"", html);
+        Assert.Contains("v:roundrect", html);
+        Assert.Contains("Today's editions are ready", html);
+        Assert.Contains("DOWNLOAD ALL", html);
     }
 }

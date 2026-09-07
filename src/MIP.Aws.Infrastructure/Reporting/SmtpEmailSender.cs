@@ -52,7 +52,7 @@ public sealed class SmtpEmailSender : IReportEmailSender
         var builder = new BodyBuilder { HtmlBody = message.HtmlBody };
         foreach (var attachment in message.Attachments)
         {
-            builder.Attachments.Add(attachment.FileName, attachment.Content, ContentType.Parse(attachment.ContentType));
+            AddMimeAttachment(builder, attachment);
         }
 
         mime.Body = builder.ToMessageBody();
@@ -87,4 +87,21 @@ public sealed class SmtpEmailSender : IReportEmailSender
     }
 
     public Task<int> RetryFailedAsync(CancellationToken cancellationToken) => Task.FromResult(0);
+
+    private static void AddMimeAttachment(BodyBuilder builder, EmailAttachment attachment)
+    {
+        var contentType = ContentType.Parse(
+            string.IsNullOrWhiteSpace(attachment.ContentType)
+                ? "application/octet-stream"
+                : attachment.ContentType);
+        if (attachment.IsInline && !string.IsNullOrWhiteSpace(attachment.ContentId))
+        {
+            var linked = builder.LinkedResources.Add(attachment.FileName, attachment.Content, contentType);
+            linked.ContentId = attachment.ContentId;
+            linked.ContentDisposition = new ContentDisposition(ContentDisposition.Inline);
+            return;
+        }
+
+        builder.Attachments.Add(attachment.FileName, attachment.Content, contentType);
+    }
 }

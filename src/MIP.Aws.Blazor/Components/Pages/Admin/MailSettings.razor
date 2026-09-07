@@ -3,6 +3,7 @@
 @using MIP.Aws.Application.Configuration
 @using MIP.Aws.Application.Features.Reports
 @using MIP.Aws.Application.Scheduling
+@using MIP.Aws.Domain.Enums
 @using MIP.Aws.Domain.Security
 @using MIP.Aws.Application.Time
 @using Microsoft.AspNetCore.WebUtilities
@@ -136,6 +137,18 @@
                         Batch settles; include missing PDFs as Not Available
                     </MudSelectItem>
                 </MudSelect>
+                <MudSelect T="PdfDownloadMailDesign" Label="PDF mail design" @bind-Value="_pdfDownloadMailDesign"
+                           Variant="Variant.Outlined" Class="mt-2">
+                    <MudSelectItem T="PdfDownloadMailDesign" Value="@PdfDownloadMailDesign.Classic">
+                        Classic (MIP navy / red)
+                    </MudSelectItem>
+                    <MudSelectItem T="PdfDownloadMailDesign" Value="@PdfDownloadMailDesign.ModernGfh">
+                        Modern GFH (logo + brand colours)
+                    </MudSelectItem>
+                </MudSelect>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                    Classic keeps the current MIP look. Modern GFH uses brand colours, logo, and newspaper hero.
+                </MudText>
                 <MudTextField T="string" Label="PDF mail subject" @bind-Value="_pdfDownloadMailSubject"
                               Variant="Variant.Outlined" Class="mt-2" />
                 <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
@@ -279,6 +292,7 @@
     private string _pdfDownloadMailRecipient = string.Empty;
     private readonly HashSet<string> _selectedPdfRecipients = new(StringComparer.OrdinalIgnoreCase);
     private MailCompletionMode _pdfDownloadMailCompletionMode = MailCompletionMode.AllSourcesSuccessful;
+    private PdfDownloadMailDesign _pdfDownloadMailDesign = PdfDownloadMailDesign.Classic;
     private string _pdfDownloadMailSubject = "GFH Media Intelligence | Daily Newspaper Editions | {date}";
     private string _pdfDownloadMailTimeUtc = "06:00";
     private TestEmailResponseDto? _lastTest;
@@ -369,6 +383,7 @@
                 _selectedPdfRecipients.Add(recipient);
             }
             _pdfDownloadMailCompletionMode = settings.PdfDownloadMailCompletionMode;
+            _pdfDownloadMailDesign = settings.PdfDownloadMailDesign;
             _pdfDownloadMailSubject = settings.PdfDownloadMailSubject;
             _pdfDownloadMailTimeUtc = settings.PdfDownloadMailTimeUtc;
             await ReloadLogsAsync();
@@ -434,7 +449,8 @@
                 SelectedStatusEmailRecipients: _selectedStatusRecipients.ToList(),
                 SelectedPdfDownloadMailRecipients: _selectedPdfRecipients.ToList(),
                 StatusEmailCompletionMode: _statusEmailCompletionMode,
-                PdfDownloadMailCompletionMode: _pdfDownloadMailCompletionMode));
+                PdfDownloadMailCompletionMode: _pdfDownloadMailCompletionMode,
+                PdfDownloadMailDesign: _pdfDownloadMailDesign));
             Snackbar.Add("Scheduler settings saved. The download batch Hangfire job was updated.", Severity.Success);
             await ReloadAsync();
         }

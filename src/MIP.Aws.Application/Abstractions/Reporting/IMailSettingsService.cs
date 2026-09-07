@@ -27,7 +27,8 @@ public sealed record EffectiveSchedulerMailSettings(
     IReadOnlyList<string> SelectedStatusEmailRecipients,
     IReadOnlyList<string> SelectedPdfDownloadMailRecipients,
     MailCompletionMode StatusEmailCompletionMode,
-    MailCompletionMode PdfDownloadMailCompletionMode);
+    MailCompletionMode PdfDownloadMailCompletionMode,
+    PdfDownloadMailDesign PdfDownloadMailDesign);
 
 public interface IMailSettingsService
 {
@@ -58,5 +59,6 @@ public interface IMailSettingsService
         IReadOnlyList<string>? selectedPdfDownloadMailRecipients,
         MailCompletionMode? statusEmailCompletionMode,
         MailCompletionMode? pdfDownloadMailCompletionMode,
+        PdfDownloadMailDesign? pdfDownloadMailDesign,
         CancellationToken cancellationToken);
 }

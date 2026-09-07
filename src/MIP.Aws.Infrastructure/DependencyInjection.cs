@@ -169,6 +169,7 @@ public static class DependencyInjection
         services.AddSingleton<IDownloadMonitorWorkloadService, DownloadMonitorWorkloadService>();
         services.AddScoped<IDownloadMonitorDailyStatusEmailService, DownloadMonitorDailyStatusEmailService>();
         services.AddSingleton<IPdfDownloadMailLinkService, PdfDownloadMailLinkService>();
+        services.AddScoped<IPdfDownloadMailHeroComposer, PdfDownloadMailHeroComposer>();
         services.AddScoped<IPdfDownloadMailService, PdfDownloadMailService>();
 
         services.AddMipAwsAi(configuration, environment);

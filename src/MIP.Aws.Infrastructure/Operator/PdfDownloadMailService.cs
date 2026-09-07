@@ -15,6 +15,7 @@ public sealed class PdfDownloadMailService(
     IReportEmailSender emailSender,
     IMailSettingsService mailSettings,
     IPdfDownloadMailLinkService linkService,
+    IPdfDownloadMailHeroComposer heroComposer,
     ILogger<PdfDownloadMailService> logger) : IPdfDownloadMailService
 {
     private static readonly TimeSpan LinkLifetime = TimeSpan.FromHours(24);
@@ -188,12 +189,12 @@ public sealed class PdfDownloadMailService(
             .ToDictionary(candidate => candidate.SourceId);
 
         var fileIds = selected.Values.Select(candidate => candidate.FileId).ToList();
-        var storedFileIds = await db.DownloadedFiles.AsNoTracking()
+        var storedFiles = await db.DownloadedFiles.AsNoTracking()
             .Where(file => !file.IsDeleted && fileIds.Contains(file.Id))
-            .Select(file => file.Id)
+            .Select(file => new { file.Id, file.BlobUri })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (storedFileIds.Count != fileIds.Count
+        if (storedFiles.Count != fileIds.Count
             && scheduler.PdfDownloadMailCompletionMode == MailCompletionMode.AllSourcesSuccessful)
         {
             logger.LogInformation(
@@ -201,7 +202,7 @@ public sealed class PdfDownloadMailService(
                 batchStartedAt);
             return false;
         }
-        var storedFileIdSet = storedFileIds.ToHashSet();
+        var storedFileIdSet = storedFiles.Select(file => file.Id).ToHashSet();
         selected = selected
             .Where(pair => storedFileIdSet.Contains(pair.Value.FileId))
             .ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -213,6 +214,8 @@ public sealed class PdfDownloadMailService(
                 batchStartedAt);
             return false;
         }
+
+        var blobUriByFileId = storedFiles.ToDictionary(file => file.Id, file => file.BlobUri);
 
         var configuredSubject = scheduler.PdfDownloadMailSubject?.Trim();
         var subject = string.IsNullOrWhiteSpace(configuredSubject)
@@ -278,13 +281,59 @@ public sealed class PdfDownloadMailService(
                 portalBase,
                 linkService.CreateToken(tokenFiles, expiresAt),
                 inline: false);
-        var logoUrl = $"{portalBase}/_content/MIP.Aws.Blazor/images/gfh-logo.svg";
-        var html = PdfDownloadMailHtmlBuilder.Build(items, allUrl, logoUrl);
+
+        var attachments = Array.Empty<EmailAttachment>();
+        var logoUrl = string.Empty;
+        string? heroUrl = null;
+        if (scheduler.PdfDownloadMailDesign == PdfDownloadMailDesign.ModernGfh)
+        {
+            byte[]? compositeHero = null;
+            var blobKeys = selected.Values
+                .OrderBy(candidate => candidate.SourceName, StringComparer.OrdinalIgnoreCase)
+                .Select(candidate => blobUriByFileId.GetValueOrDefault(candidate.FileId))
+                .Where(uri => !string.IsNullOrWhiteSpace(uri))
+                .Cast<string>()
+                .ToList();
+            if (blobKeys.Count > 0)
+            {
+                compositeHero = await heroComposer.TryComposeJpegAsync(blobKeys, cancellationToken)
+                    .ConfigureAwait(false);
+                if (compositeHero is { Length: > 0 })
+                {
+                    logger.LogInformation(
+                        "PDF Download mail hero composite built from {CoverCount} edition cover(s).",
+                        Math.Min(blobKeys.Count, 6));
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "PDF Download mail hero composite unavailable; falling back to static hero image.");
+                }
+            }
+
+            var inline = PdfDownloadMailAssets.BuildModernInlineImages(compositeHero);
+            logoUrl = inline.LogoCidUrl ?? string.Empty;
+            heroUrl = inline.HeroCidUrl;
+            attachments = inline.Attachments.ToArray();
+            if (attachments.Length == 0)
+            {
+                logger.LogWarning(
+                    "Modern GFH PDF mail assets were not found under {BaseDirectory}; sending without embedded images.",
+                    AppContext.BaseDirectory);
+            }
+        }
+
+        var html = PdfDownloadMailHtmlBuilder.Build(
+            items,
+            allUrl,
+            logoUrl,
+            scheduler.PdfDownloadMailDesign,
+            heroUrl);
 
         try
         {
             var result = await emailSender.SendAsync(
-                    new ReportEmailMessage(recipients, subject, html, []),
+                    new ReportEmailMessage(recipients, subject, html, attachments),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (result.Success)

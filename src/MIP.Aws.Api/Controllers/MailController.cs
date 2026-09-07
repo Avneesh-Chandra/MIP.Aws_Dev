@@ -66,7 +66,8 @@ public sealed class MailController(IMediator mediator) : ControllerBase
             body.SelectedStatusEmailRecipients,
             body.SelectedPdfDownloadMailRecipients,
             body.StatusEmailCompletionMode,
-            body.PdfDownloadMailCompletionMode), cancellationToken).ConfigureAwait(false);
+            body.PdfDownloadMailCompletionMode,
+            body.PdfDownloadMailDesign), cancellationToken).ConfigureAwait(false);
         return Ok(ApiResponse.Ok("Scheduler mail settings updated"));
     }
 
@@ -146,5 +147,6 @@ public sealed class MailController(IMediator mediator) : ControllerBase
         IReadOnlyList<string>? SelectedStatusEmailRecipients = null,
         IReadOnlyList<string>? SelectedPdfDownloadMailRecipients = null,
         MailCompletionMode? StatusEmailCompletionMode = null,
-        MailCompletionMode? PdfDownloadMailCompletionMode = null);
+        MailCompletionMode? PdfDownloadMailCompletionMode = null,
+        PdfDownloadMailDesign? PdfDownloadMailDesign = null);
 }

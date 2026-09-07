@@ -115,12 +115,22 @@ public sealed class MicrosoftGraphEmailSender : IReportEmailTransport
     {
         var attachments = message.Attachments.Count == 0
             ? null
-            : message.Attachments.Select(a => new Dictionary<string, object?>
+            : message.Attachments.Select(a =>
             {
-                ["@odata.type"] = "#microsoft.graph.fileAttachment",
-                ["name"] = a.FileName,
-                ["contentType"] = string.IsNullOrWhiteSpace(a.ContentType) ? "application/octet-stream" : a.ContentType,
-                ["contentBytes"] = Convert.ToBase64String(a.Content)
+                var item = new Dictionary<string, object?>
+                {
+                    ["@odata.type"] = "#microsoft.graph.fileAttachment",
+                    ["name"] = a.FileName,
+                    ["contentType"] = string.IsNullOrWhiteSpace(a.ContentType) ? "application/octet-stream" : a.ContentType,
+                    ["contentBytes"] = Convert.ToBase64String(a.Content)
+                };
+                if (a.IsInline && !string.IsNullOrWhiteSpace(a.ContentId))
+                {
+                    item["isInline"] = true;
+                    item["contentId"] = a.ContentId;
+                }
+
+                return item;
             }).ToList();
 
         return new

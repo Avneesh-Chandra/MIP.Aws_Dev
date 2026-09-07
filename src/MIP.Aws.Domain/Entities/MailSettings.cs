@@ -55,4 +55,7 @@ public sealed class MailSettings : AuditableEntity
 
     /// <summary>UTC HH:mm for the separate PDF Download mail.</summary>
     public string? PdfDownloadMailTimeUtc { get; set; }
+
+    /// <summary>Classic or Modern GFH visual template for PDF Download mail.</summary>
+    public PdfDownloadMailDesign? PdfDownloadMailDesign { get; set; }
 }
