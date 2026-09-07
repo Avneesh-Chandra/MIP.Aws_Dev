@@ -243,10 +243,17 @@ public sealed class DownloadMonitorBatchRunService(
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // Prefer latest success per source so a later recovery/manual download wins over a
+        // stale failure in the same batch window.
         var latestJobBySource = new Dictionary<Guid, DownloadJob>();
+        var latestSuccessfulJobBySource = new Dictionary<Guid, DownloadJob>();
         foreach (var job in jobs)
         {
             latestJobBySource.TryAdd(job.NewsSourceId, job);
+            if (job.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.SuccessWithAutoAiRecovery)
+            {
+                latestSuccessfulJobBySource.TryAdd(job.NewsSourceId, job);
+            }
         }
 
         var editionSatisfaction = await DownloadMonitorBatchOutcomeHelper
@@ -294,15 +301,22 @@ public sealed class DownloadMonitorBatchRunService(
             string state;
             string activity;
 
-            if (latestJobBySource.TryGetValue(source.Id, out var job))
+            if (latestSuccessfulJobBySource.TryGetValue(source.Id, out var successfulJob))
             {
-                (state, activity) = DescribeJob(job);
+                (state, activity) = DescribeJob(successfulJob);
             }
             else if (editionSatisfaction.HasTodaysEdition(source.Id)
                      || editionSatisfaction.HasEditionSinceBatch(source.Id))
             {
+                // Match day monitor: today's PDF counts even if the batch's latest job is Failed.
                 state = "Success";
-                activity = "Today's edition already downloaded";
+                activity = latestJobBySource.ContainsKey(source.Id)
+                    ? "Today's edition downloaded after earlier failure"
+                    : "Today's edition already downloaded";
+            }
+            else if (latestJobBySource.TryGetValue(source.Id, out var job))
+            {
+                (state, activity) = DescribeJob(job);
             }
             else if (batchExpired)
             {

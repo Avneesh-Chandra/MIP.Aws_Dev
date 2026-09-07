@@ -16,7 +16,7 @@ public static class AlAyamPublicPdfBaseline
     /// Matches <see cref="MIP.Aws.Infrastructure.News.PdfEdition.AlAyamFullEditionPdf.AllPagesLinkSelector"/>.
     /// </summary>
     public const string InafDirectPdfLinkSelector =
-        "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']";
+        "a#aPDFdownloadAllPages, a#aPDFdownloadAllPages span.allpages, a#aPDFdownloadAllPages span, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']";
 
     public const int ExtendedWaitTimeoutSeconds = 300;
 
@@ -73,7 +73,11 @@ public static class AlAyamPublicPdfBaseline
 
     public static bool IsAcceptedPdfLinkSelector(string? selector) =>
         string.Equals(selector, PdfLinkSelector, StringComparison.Ordinal)
-        || string.Equals(selector, InafDirectPdfLinkSelector, StringComparison.Ordinal);
+        || string.Equals(selector, InafDirectPdfLinkSelector, StringComparison.Ordinal)
+        || string.Equals(
+            selector,
+            "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']",
+            StringComparison.Ordinal);
 
     /// <summary>True when the source already matches a known-good Al Ayam recovery baseline.</summary>
     public static bool HasKnownGoodConfiguration(NewsSource source) =>

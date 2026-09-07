@@ -30,6 +30,18 @@ public static class PlaywrightBrowserLaunch
     public static Task<IBrowser> LaunchChromiumAsync(IPlaywright playwright, bool headless = true) =>
         playwright.Chromium.LaunchAsync(ChromiumLaunchOptions(headless));
 
+    /// <summary>
+    /// Launches Chromium headed when a display is available (existing DISPLAY or Xvfb),
+    /// otherwise falls back to headless. Used for Al Ayam RPA-parity downloads.
+    /// </summary>
+    public static async Task<(IBrowser Browser, bool Headed)> LaunchChromiumPreferHeadedAsync(
+        IPlaywright playwright)
+    {
+        var headed = PlaywrightVirtualDisplay.TryEnsureDisplay();
+        var browser = await LaunchChromiumAsync(playwright, headless: !headed).ConfigureAwait(false);
+        return (browser, headed);
+    }
+
     internal static void EnsureDriverExecutables()
     {
         if (!OperatingSystem.IsLinux())

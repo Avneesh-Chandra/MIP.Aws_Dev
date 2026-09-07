@@ -22,7 +22,7 @@ public static class AlAyamFullEditionPdf
     public const string EpaperUrl = "https://www.alayam.com/epaper";
 
     public const string AllPagesLinkSelector =
-        "a#aPDFdownloadAllPages, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']";
+        "a#aPDFdownloadAllPages, a#aPDFdownloadAllPages span.allpages, a#aPDFdownloadAllPages span, a[href*='i.alayam.com'][href*='INAF_'][href$='.pdf']";
 
     private static readonly Regex AllPagesPdfHrefRegex = new(
         @"id=""aPDFdownloadAllPages""[^>]*href=""(?<url>https://i\.alayam\.com/[^""]+\.pdf)""",
@@ -124,6 +124,20 @@ public static class AlAyamFullEditionPdf
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        // RPA parity: browser click path first; HTTP only as fallback.
+        var fromClick = await RunClickPathAsync(
+                startPageUrl,
+                source,
+                logger,
+                downloadBytes: false,
+                cancellationToken,
+                processEvent: null)
+            .ConfigureAwait(false);
+        if (fromClick?.PdfUrl is not null || fromClick?.AccessBlocked == true)
+        {
+            return fromClick;
+        }
+
         if (httpClientFactory is not null)
         {
             var knownPdf = IsDirectPdfUrl(startPageUrl) ? startPageUrl : null;
@@ -141,14 +155,7 @@ public static class AlAyamFullEditionPdf
             }
         }
 
-        return await RunClickPathAsync(
-                startPageUrl,
-                source,
-                logger,
-                downloadBytes: false,
-                cancellationToken,
-                processEvent: null)
-            .ConfigureAwait(false);
+        return fromClick;
     }
 
     public static Task<byte[]?> TryDownloadBytesAsync(
@@ -315,7 +322,19 @@ public static class AlAyamFullEditionPdf
         try
         {
             using var playwright = await PlaywrightBrowserLaunch.CreatePlaywrightAsync().ConfigureAwait(false);
-            await using var browser = await PlaywrightBrowserLaunch.LaunchChromiumAsync(playwright).ConfigureAwait(false);
+            var launched = await PlaywrightBrowserLaunch
+                .LaunchChromiumPreferHeadedAsync(playwright)
+                .ConfigureAwait(false);
+            await using var browser = launched.Browser;
+            EmitProcessEvent(
+                processEvent,
+                launched.Headed
+                    ? "Al Ayam Playwright launched headed (RPA-parity / Xvfb or DISPLAY)."
+                    : "Al Ayam Playwright launched headless (no DISPLAY/Xvfb available).");
+            logger.LogInformation(
+                "Al Ayam click path browser mode: {Mode}.",
+                launched.Headed ? "headed" : "headless");
+
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 AcceptDownloads = true,
@@ -354,15 +373,16 @@ public static class AlAyamFullEditionPdf
             var accessBlocked = false;
             for (var attempt = 0; attempt <= HumanLikeRetryCount; attempt++)
             {
-                if (attempt > 0
-                    && !await RefreshAfterBlockedAttemptAsync(
+                // RPA-parity: mouse move + refresh before every attempt, including the first.
+                if (!await PerformHumanLikeMouseMoveAndRefreshAsync(
                         page,
                         timeoutMs,
                         attempt,
+                        afterBlock: attempt > 0,
                         logger,
                         cancellationToken,
                         processEvent)
-                        .ConfigureAwait(false))
+                    .ConfigureAwait(false))
                 {
                     break;
                 }
@@ -481,10 +501,11 @@ public static class AlAyamFullEditionPdf
         }
     }
 
-    private static async Task<bool> RefreshAfterBlockedAttemptAsync(
+    private static async Task<bool> PerformHumanLikeMouseMoveAndRefreshAsync(
         IPage page,
         int timeoutMs,
-        int retryAttempt,
+        int attempt,
+        bool afterBlock,
         ILogger logger,
         CancellationToken cancellationToken,
         Action<string>? processEvent)
@@ -493,12 +514,26 @@ public static class AlAyamFullEditionPdf
 
         try
         {
-            logger.LogInformation(
-                "Al Ayam block detected; performing human-like retry {RetryAttempt} with immediate mouse movement and refresh.",
-                retryAttempt);
-            EmitProcessEvent(
-                processEvent,
-                $"Block detected; moved mouse and immediately refreshed page (retry {retryAttempt} of {HumanLikeRetryCount}).");
+            var attemptNumber = attempt + 1;
+            if (afterBlock)
+            {
+                logger.LogInformation(
+                    "Al Ayam block detected; performing human-like retry {RetryAttempt} with immediate mouse movement and refresh.",
+                    attempt);
+                EmitProcessEvent(
+                    processEvent,
+                    $"Block detected; moved mouse and immediately refreshed page (retry {attempt} of {HumanLikeRetryCount}).");
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Al Ayam performing human-like mouse movement and refresh before attempt {Attempt}.",
+                    attemptNumber);
+                EmitProcessEvent(
+                    processEvent,
+                    $"Moved mouse and refreshed page before attempt {attemptNumber}.");
+            }
+
             await page.Mouse.MoveAsync(220, 180).ConfigureAwait(false);
             await page.ReloadAsync(
                 new PageReloadOptions { WaitUntil = WaitUntilState.Load, Timeout = timeoutMs })
@@ -520,7 +555,7 @@ public static class AlAyamFullEditionPdf
         }
         catch (PlaywrightException ex)
         {
-            logger.LogWarning(ex, "Al Ayam human-like refresh retry failed.");
+            logger.LogWarning(ex, "Al Ayam human-like mouse move and refresh failed.");
             return false;
         }
     }
@@ -874,9 +909,14 @@ public static class AlAyamFullEditionPdf
     private static async Task<bool> TryClickAllPagesLinkAsync(IPage page, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        // Match UiPath Alayam.xaml: click SPAN كل الصفحات under #aPDFdownloadAllPages (60s timeout).
+        const int clickTimeoutMs = 60_000;
         ILocator[] locators =
         [
+            page.Locator("a#aPDFdownloadAllPages span.allpages"),
+            page.Locator("a#aPDFdownloadAllPages span"),
             page.Locator("a#aPDFdownloadAllPages"),
+            page.Locator("#aPDFdownloadAllPages"),
             page.GetByRole(AriaRole.Link, new() { Name = "كل الصفحات" }),
             page.Locator("a").Filter(new LocatorFilterOptions { HasText = "كل الصفحات" }),
             page.GetByText("كل الصفحات", new PageGetByTextOptions { Exact = true })
@@ -893,7 +933,7 @@ public static class AlAyamFullEditionPdf
 
                 var target = locator.First;
                 await target.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
-                await target.ClickAsync(new LocatorClickOptions { Timeout = 15_000 }).ConfigureAwait(false);
+                await target.ClickAsync(new LocatorClickOptions { Timeout = clickTimeoutMs }).ConfigureAwait(false);
                 return true;
             }
             catch (PlaywrightException)
