@@ -44,7 +44,8 @@ internal static class AlAyamPublisherTiming
                || errorMessage.Contains("AccessBlocked", StringComparison.OrdinalIgnoreCase)
                || errorMessage.Contains("Response appears to be HTML", StringComparison.OrdinalIgnoreCase)
                || errorMessage.Contains("not a valid PDF", StringComparison.OrdinalIgnoreCase)
-               || errorMessage.Contains("Missing PDF magic", StringComparison.OrdinalIgnoreCase);
+               || errorMessage.Contains("Missing PDF magic", StringComparison.OrdinalIgnoreCase)
+               || AlAyamExternalRpaRules.IsWaitingForUpload(errorMessage);
     }
 
     internal static TimeSpan? ResolveDeferredDelay(int deferredAttemptsToday)

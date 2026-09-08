@@ -208,6 +208,10 @@ public sealed class AutoAiRecoveryTests
         eligible.Trigger = DownloadJobTrigger.Scheduled;
         eligible.CorrelationId = "recovery:abc";
         Assert.False(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
+
+        eligible.CorrelationId = Guid.NewGuid().ToString("N");
+        eligible.ErrorMessage = AlAyamExternalRpaRules.WaitingForUploadMessage;
+        Assert.False(AutoAiRecoveryEligibility.IsJobEligibleForAutoRecovery(eligible));
     }
 
     [Fact]

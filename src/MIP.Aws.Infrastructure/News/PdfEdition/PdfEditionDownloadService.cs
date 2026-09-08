@@ -37,6 +37,7 @@ public sealed class PdfEditionDownloadService(
     IAuditService audit,
     IIntelligenceJobScheduler intelligenceScheduler,
     IOptions<StorageOptions> storageOptions,
+    IOptions<PublisherOutboundOptions> publisherOutbound,
     ILogger<PdfEditionDownloadService> logger) : IPdfEditionDownloadService
 {
     private readonly StorageOptions _storage = storageOptions.Value;
@@ -297,6 +298,12 @@ public sealed class PdfEditionDownloadService(
 
                 source = await LoadSourceAsync(newsSourceId, cancellationToken).ConfigureAwait(false)
                          ?? throw new InvalidOperationException("News source not found.");
+            }
+
+            if (download
+                && AlAyamExternalRpaRules.ShouldSkipPublisherFetch(publisherOutbound.Value.AlAyam, source))
+            {
+                return await CompleteAlAyamExternalRpaAsync(source, cancellationToken).ConfigureAwait(false);
             }
 
             var processEvents = download && AlAyamFullEditionPdf.UsesClickPath(source)
@@ -1212,6 +1219,77 @@ public sealed class PdfEditionDownloadService(
         string EventKind,
         string Message,
         DateTimeOffset OccurredAt);
+
+    private async Task<PdfEditionDownloadOutcome> CompleteAlAyamExternalRpaAsync(
+        NewsSource source,
+        CancellationToken cancellationToken)
+    {
+        var editionDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var existing = await FindExistingDownloadAsync(source.Id, editionDate, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            await TouchLastPdfDownloadedFromRowAsync(source.Id, existing, cancellationToken).ConfigureAwait(false);
+            if (_boundDownloadJobId is Guid boundJobId)
+            {
+                await SucceedBoundDownloadJobAsync(boundJobId, cancellationToken).ConfigureAwait(false);
+            }
+
+            logger.LogInformation(
+                "Al Ayam RPA mode: today's edition for {Source} is already uploaded.",
+                source.Name);
+            return MapOutcome(existing, []);
+        }
+
+        progress.Report(source.Id, 20, "Waiting for RPA upload…");
+        var epaperUri = AlAyamFullEditionPdf.ResolveEpaperUri(source);
+        var candidate = new PdfEditionCandidate(
+            epaperUri,
+            0,
+            PdfDiscoveryMethod.ManualOverride,
+            "External RPA",
+            true);
+
+        logger.LogInformation(
+            "Al Ayam RPA mode: skipping Playwright for {Source}; {Message}",
+            source.Name,
+            AlAyamExternalRpaRules.WaitingForUploadMessage);
+
+        return await PersistRowAsync(
+            source.Id,
+            candidate,
+            PdfEditionStatus.Failed,
+            AlAyamExternalRpaRules.WaitingForUploadMessage,
+            [
+                new PdfEditionCandidateDto(
+                    candidate.Url.ToString(),
+                    candidate.Confidence,
+                    candidate.Method.ToString(),
+                    candidate.Label,
+                    candidate.IsTodayEdition)
+            ],
+            updateLastPdfUrl: false,
+            epaperUri.ToString(),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task SucceedBoundDownloadJobAsync(Guid downloadJobId, CancellationToken cancellationToken) =>
+        WithDbContextAsync(async (db, ct) =>
+        {
+            var job = await db.DownloadJobs
+                .FirstOrDefaultAsync(j => j.Id == downloadJobId && !j.IsDeleted, ct)
+                .ConfigureAwait(false);
+            if (job is null || job.Status is DownloadJobStatus.Succeeded or DownloadJobStatus.Failed)
+            {
+                return false;
+            }
+
+            job.Status = DownloadJobStatus.Succeeded;
+            job.ErrorMessage = null;
+            job.StartedAt ??= DateTimeOffset.UtcNow;
+            job.CompletedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
 
     private Task FailBoundDownloadJobAsync(Guid downloadJobId, string errorMessage, CancellationToken cancellationToken) =>
         WithDbContextAsync(async (db, ct) =>

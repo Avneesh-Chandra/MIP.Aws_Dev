@@ -1,4 +1,5 @@
 using MIP.Aws.Application.Configuration;
+using MIP.Aws.Application.Features.NewsSources;
 using MIP.Aws.Domain.Entities;
 using MIP.Aws.Domain.Enums;
 using MIP.Aws.Domain.Security;
@@ -18,7 +19,8 @@ public static class AutoAiRecoveryEligibility
         job.Status == DownloadJobStatus.Failed
         && job.Trigger is not DownloadJobTrigger.Recovery
         && job.Trigger is not DownloadJobTrigger.AutoAiRecovery
-        && !IsRecoveryCorrelation(job.CorrelationId);
+        && !IsRecoveryCorrelation(job.CorrelationId)
+        && !AlAyamExternalRpaRules.IsWaitingForUpload(job.ErrorMessage);
 
     public static bool ShouldRunForTrigger(DownloadJobTrigger trigger, AutoAiDownloadRecoveryOptions options) =>
         trigger switch

@@ -12,4 +12,7 @@ public static class AuthenticationSchemes
     /// upgrades), and to the Identity application cookie otherwise.
     /// </summary>
     public const string SmartAuth = "SmartAuth";
+
+    /// <summary>Machine ingest for Al Ayam RPA (<c>X-Rpa-Api-Key</c>).</summary>
+    public const string RpaApiKey = "RpaApiKey";
 }

@@ -79,6 +79,8 @@ public static class AuthPolicies
 
     public const string OperatorManualPdfUpload = "OperatorManualPdfUpload";
 
+    public const string RpaPdfIngest = "RpaPdfIngest";
+
     public const string NewsSourcePdfRead = "NewsSourcePdfRead";
 
     public const string NewsSourcePdfAudit = "NewsSourcePdfAudit";

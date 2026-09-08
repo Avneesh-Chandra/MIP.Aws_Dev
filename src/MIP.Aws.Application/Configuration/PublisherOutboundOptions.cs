@@ -17,4 +17,19 @@ public sealed class AlAyamOutboundClientOptions
     /// (commercial proxy, NAT gateway with allowlisted IP, etc.).
     /// </summary>
     public string? HttpProxyUri { get; set; }
+
+    /// <summary>
+    /// When true, ECS/Hangfire does not launch Playwright for Al Ayam and waits for an RPA upload.
+    /// </summary>
+    public bool UseExternalRpa { get; set; }
+
+    /// <summary>
+    /// Shared secret for <c>X-Rpa-Api-Key</c> on the today-PDF ingest endpoint. Empty disables the key.
+    /// </summary>
+    public string? IngestApiKey { get; set; }
+
+    /// <summary>
+    /// When set, RPA ingest is limited to this news source id (Al Ayam in each environment).
+    /// </summary>
+    public Guid? IngestAllowedSourceId { get; set; }
 }

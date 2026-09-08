@@ -220,6 +220,10 @@ public static class AuthorizationPolicyRegistry
         options.AddPolicy(AuthPolicies.SourceRecoveryAdmin, p =>
             Perm(p, ApplicationPermissions.SourceRecoveryAdmin));
 
+        options.AddPolicy(AuthPolicies.RpaPdfIngest, p =>
+            p.AddAuthenticationSchemes(AuthenticationSchemes.RpaApiKey)
+                .RequireAuthenticatedUser());
+
         return options;
     }
 

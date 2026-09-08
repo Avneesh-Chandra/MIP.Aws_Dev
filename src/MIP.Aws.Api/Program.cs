@@ -28,6 +28,8 @@ using Hangfire;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
+using Microsoft.AspNetCore.Authentication;
+
 using Microsoft.AspNetCore.HttpOverrides;
 
 using Microsoft.AspNetCore.Identity;
@@ -135,6 +137,16 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 
 });
 
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = MIP.Aws.Application.Features.NewsSources.PdfEdition.PdfManualUploadRules.MaxUploadBytes;
+});
+
+builder.Services.Configure<IISServerOptions>(o =>
+{
+    o.MaxRequestBodySize = MIP.Aws.Application.Features.NewsSources.PdfEdition.PdfManualUploadRules.MaxUploadBytes;
+});
+
 
 
 builder.Services.Configure<ApiBehaviorOptions>(options =>
@@ -187,6 +199,14 @@ builder.Services.AddSwaggerGen(options =>
 
         BearerFormat = "JWT"
 
+    });
+
+    options.AddSecurityDefinition("RpaApiKey", new OpenApiSecurityScheme
+    {
+        Description = "Al Ayam RPA ingest key header",
+        Name = "X-Rpa-Api-Key",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey
     });
 
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -293,7 +313,11 @@ builder.Services.AddAuthentication(options =>
 
     };
 
-});
+})
+
+.AddScheme<AuthenticationSchemeOptions, RpaApiKeyAuthenticationHandler>(
+    AuthenticationSchemes.RpaApiKey,
+    _ => { });
 
 
 
