@@ -24,7 +24,8 @@ public interface IPdfEditionDownloadService
         string fileName,
         byte[] content,
         bool enqueueOcr,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool fromExternalRpa = false);
 
     Task<PdfEditionDownloadOutcome?> GetLatestAsync(Guid newsSourceId, CancellationToken cancellationToken);
 

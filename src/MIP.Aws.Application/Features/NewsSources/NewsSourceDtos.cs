@@ -24,7 +24,9 @@ public sealed record NewsSourceListItemDto(
     bool PublicHtmlExtractionEnabled,
     bool GenerateInternalReportAllowed,
     SourcePdfDiscoveryOutcome LastPdfDiscoveryOutcome,
-    DateTimeOffset? LastPublicHtmlExtractedAt);
+    DateTimeOffset? LastPublicHtmlExtractedAt,
+    /// <summary>How the latest stored PDF was obtained (e.g. MIP batch, PAD on …).</summary>
+    string? LastDownloadedThrough);
 
 public sealed record PdfDiscoveryFieldsDto(
     bool PdfDiscoveryEnabled,

@@ -727,7 +727,8 @@ public sealed class PdfEditionDownloadService(
         string fileName,
         byte[] content,
         bool enqueueOcr,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool fromExternalRpa = false)
     {
         if (content is null)
         {
@@ -788,14 +789,14 @@ public sealed class PdfEditionDownloadService(
             PdfEditionAuditEvents.ManualOverrideUsed,
             "NewsSource",
             source.Id.ToString(),
-            new { source.Name, safeFileName, sizeBytes = content.Length, hash },
+            new { source.Name, safeFileName, sizeBytes = content.Length, hash, fromExternalRpa },
             cancellationToken).ConfigureAwait(false);
 
         progress.Report(newsSourceId, 30, "Validating uploaded PDF…");
         progress.Report(newsSourceId, 75, "Saving uploaded PDF…");
         var stored = await fileStorage.WriteAsync(relativePath, content, cancellationToken).ConfigureAwait(false);
 
-        _downloadJobTrigger = DownloadJobTrigger.Manual;
+        _downloadJobTrigger = fromExternalRpa ? DownloadJobTrigger.ExternalRpa : DownloadJobTrigger.Manual;
         try
         {
             var outcome = await PersistDownloadAsync(
@@ -820,7 +821,7 @@ public sealed class PdfEditionDownloadService(
                 PdfEditionAuditEvents.DownloadCompleted,
                 "NewsSource",
                 source.Id.ToString(),
-                new { source.Name, safeFileName, sizeBytes = stored.SizeBytes, hash, manualUpload = true },
+                new { source.Name, safeFileName, sizeBytes = stored.SizeBytes, hash, manualUpload = true, fromExternalRpa },
                 cancellationToken).ConfigureAwait(false);
             await EnqueueManualUploadCompletionAsync(cancellationToken).ConfigureAwait(false);
             return outcome;

@@ -55,7 +55,7 @@ public sealed class NewsSourceRpaIngestController(
             await stream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
 
             var result = await mediator.Send(
-                    new UploadTodayPdfCommand(id, file.FileName, memory.ToArray(), enqueueOcr),
+                    new UploadTodayPdfCommand(id, file.FileName, memory.ToArray(), enqueueOcr, FromExternalRpa: true),
                     cancellationToken)
                 .ConfigureAwait(false);
 

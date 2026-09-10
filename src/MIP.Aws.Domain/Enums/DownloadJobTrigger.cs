@@ -7,5 +7,7 @@ public enum DownloadJobTrigger
     Scheduled = 1,
     Retry = 2,
     Recovery = 3,
-    AutoAiRecovery = 4
+    AutoAiRecovery = 4,
+    /// <summary>External Power Automate Desktop / RPA ingest API upload.</summary>
+    ExternalRpa = 5
 }

@@ -27,7 +27,8 @@ public sealed class UploadTodayPdfCommandHandler(IPdfEditionDownloadService serv
             request.FileName,
             request.Content,
             request.EnqueueOcr,
-            cancellationToken);
+            cancellationToken,
+            request.FromExternalRpa);
 }
 
 public sealed class DownloadManualPdfCommandHandler(IPdfEditionDownloadService service)

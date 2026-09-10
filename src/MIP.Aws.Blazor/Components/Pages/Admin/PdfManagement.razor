@@ -213,6 +213,7 @@
                 <MudTh>PDF</MudTh>
                 <MudTh>Last discovered</MudTh>
                 <MudTh>Last downloaded</MudTh>
+                <MudTh>Last downloaded Through</MudTh>
                 <MudTh Style="text-align:right;">Actions</MudTh>
             </HeaderContent>
             <RowTemplate Context="source">
@@ -245,6 +246,16 @@
                 </MudTd>
                 <MudTd DataLabel="Last downloaded">
                     @FormatWhen(source.LastPdfDownloadedAt)
+                </MudTd>
+                <MudTd DataLabel="Last downloaded Through">
+                    @if (string.IsNullOrWhiteSpace(source.LastDownloadedThrough))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Tertiary">—</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption">@source.LastDownloadedThrough</MudText>
+                    }
                 </MudTd>
                 <MudTd Style="text-align:right;">
                     <MudStack Row="true" Spacing="1" Justify="Justify.FlexEnd" AlignItems="AlignItems.Center">

@@ -12,7 +12,8 @@ public sealed record UploadTodayPdfCommand(
     Guid NewsSourceId,
     string FileName,
     byte[] Content,
-    bool EnqueueOcr = true) : IRequest<PdfEditionDownloadOutcome>;
+    bool EnqueueOcr = true,
+    bool FromExternalRpa = false) : IRequest<PdfEditionDownloadOutcome>;
 
 public sealed record GetTodayPdfUploadStatusQuery : IRequest<IReadOnlyList<TodayPdfUploadSourceDto>>;
 
