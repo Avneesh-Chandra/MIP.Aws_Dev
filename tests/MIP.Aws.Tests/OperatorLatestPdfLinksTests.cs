@@ -39,6 +39,12 @@ public sealed class OperatorLatestPdfLinksTests
         "https://internal-ir-gfh-dev-mip-ecs-int-lb-01-1702425070.eu-west-1.elb.amazonaws.com",
         "https://internal-ir-gfh-dev-mip-ecs-int-lb-01-1702425070.eu-west-1.elb.amazonaws.com")]
     [InlineData("http://localhost:5196", "http://localhost:5196")]
+    [InlineData(
+        "https://gfnnewsintelligence.gfh.com",
+        "https://gfnnewsintelligence.gfh.com")]
+    [InlineData(
+        "https://gfnnewsintelligence.gfh.com/",
+        "https://gfnnewsintelligence.gfh.com")]
     public void NormalizePortalBaseUrl_upgrades_http_alb_to_https(string input, string expected)
     {
         Assert.Equal(expected, OperatorLatestPdfLinks.NormalizePortalBaseUrl(input));

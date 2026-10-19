@@ -64,7 +64,7 @@ Security groups:
 1. Request ACM certificate for your domain
 2. Add HTTPS listener on ALB (port 443)
 3. Redirect HTTP → HTTPS
-4. Set `PdfEditionScheduler:AdminPortalUrl` to `https://...`
+4. Set `PdfEditionScheduler:AdminPortalUrl` to `https://gfnnewsintelligence.gfh.com` (used by status mail View/Download/Details and PDF download mail OPEN/DOWNLOAD links)
 
 ## Compliance checklist
 

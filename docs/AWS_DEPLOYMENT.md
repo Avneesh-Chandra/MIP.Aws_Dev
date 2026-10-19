@@ -163,7 +163,7 @@ Verify domain or sender email in SES. Configure:
 "PdfEditionScheduler": {
   "StatusEmailEnabled": true,
   "StatusEmailRecipient": "ops@your-domain.example",
-  "AdminPortalUrl": "https://api.your-domain.example"
+  "AdminPortalUrl": "https://gfnnewsintelligence.gfh.com"
 }
 ```
 

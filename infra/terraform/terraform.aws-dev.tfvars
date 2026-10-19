@@ -13,6 +13,7 @@ db_backup_retention_period = 1
 
 ses_sender_email       = "avneesh.c@almoayyedcomputers.com"
 status_email_recipient = "ops@your-domain.example"
+admin_portal_url       = "https://gfnnewsintelligence.gfh.com"
 
 enable_nat_gateway        = false
 enable_cloudfront         = true

@@ -51,7 +51,8 @@ public static class DownloadMonitorStatusEmailHtmlBuilder
 
         sb.Append("<p style=\"font-size:12px;color:#6b7280;margin-top:24px;\">")
             .Append("Automated daily status from GFH Media Intelligence. Replies are not monitored.")
-            .Append(" PDF links require VPN or corporate network access to the internal portal, sign-in, and Latest PDF view permission.")
+            .Append(" PDF View/Download and Details links open the public portal")
+            .Append(" (https://gfnnewsintelligence.gfh.com); sign-in and Latest PDF view permission are required.")
             .Append(" When Bahrain - Al Ayam was not saved in MIP today, the status email includes a direct publisher e-paper link")
             .Append(" that opens in the recipient's browser (office network), matching the GFH newspaper site workaround.")
             .Append($" All times are {MipDisplayTimeZone.ZoneSuffix()} ({MipDisplayTimeZone.DefaultIanaId}, UTC+3).")
