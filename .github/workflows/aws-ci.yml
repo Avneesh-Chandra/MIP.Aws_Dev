@@ -35,7 +35,7 @@ jobs:
         with:
           name: mip-aws-publish
           path: artifacts/
-          retention-days: 7
+          retention-days: 1
 
   validate-terraform:
     runs-on: ubuntu-latest
