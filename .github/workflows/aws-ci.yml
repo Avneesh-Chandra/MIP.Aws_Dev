@@ -31,11 +31,8 @@ jobs:
       - name: Publish Worker artifact
         run: dotnet publish src/MIP.Aws.Worker/MIP.Aws.Worker.csproj -c Release -o ./artifacts/worker
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: mip-aws-publish
-          path: artifacts/
-          retention-days: 1
+      # Skip upload-artifact: AWS Deploy builds from source, and account Actions
+      # storage quota was failing CI even when build/test succeeded.
 
   validate-terraform:
     runs-on: ubuntu-latest
